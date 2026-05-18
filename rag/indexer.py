@@ -34,6 +34,7 @@ def run_indexer(
     source_db_path: Path,
     rag_db_path: Path,
     extractor: Callable[[sqlite3.Connection], Iterable[Doc]],
+    chunk_fn: Callable[..., list[dict]] = chunk_doc,
     reset: bool = False,
     batch: int = 32,
     ollama_url: str = embedder.OLLAMA_URL,
@@ -161,7 +162,7 @@ def run_indexer(
         if existing == doc.version:
             n_skipped += 1
             continue
-        chunks = chunk_doc(doc, chunk_size=chunk_size, overlap=chunk_overlap)
+        chunks = chunk_fn(doc, chunk_size=chunk_size, overlap=chunk_overlap)
         if not chunks:
             # Empty doc — don't count toward n_new/n_updated or it'd re-count
             # on every subsequent run (since no docs_meta row gets written).

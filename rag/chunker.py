@@ -1,10 +1,22 @@
 """Paragraph-aware text chunker for the RAG pipeline.
 
-Pure text in, list of chunk dicts out. No format-specific logic
-(markdown, wikitext, HTML, etc.) — extractors do that work before calling here.
+Two chunkers ship here:
+- `chunk_doc`: pure text → chunks, all tagged with `doc.section`. Default for
+  sources whose content is naturally one block (arxiv title+abstract, openalex
+  abstracts).
+- `chunk_markdown`: split on `##` … `######` headings first, then chunk each
+  section. Each output chunk carries its section heading; lead text before
+  the first heading inherits `doc.section`. Default for sources whose content
+  is structured (factbook, future arxiv full HTML).
+
+Both yield the same dict shape — `run_indexer` accepts either via `chunk_fn`.
 """
 
+import re
+
 from rag import Doc
+
+_HEADING_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.MULTILINE)
 
 
 def split_text(text: str, chunk_size: int, overlap: int = 0) -> list[str]:
@@ -61,12 +73,12 @@ def split_text(text: str, chunk_size: int, overlap: int = 0) -> list[str]:
 
 
 def chunk_doc(doc: Doc, *, chunk_size: int = 1600, overlap: int = 0) -> list[dict]:
-    """Split a Doc's text into chunks.
+    """Split a Doc's text into chunks, all tagged with `doc.section`.
 
     Args:
         doc: Source Doc. `doc.section` (when set) is applied to every output
-            chunk. Extractors that want per-chunk sections should call
-            `split_text` directly and build their own chunk dicts.
+            chunk. Extractors that want per-chunk sections should use
+            `chunk_markdown` instead.
         chunk_size: Maximum character length per chunk.
         overlap: Inter-chunk overlap in characters.
 
@@ -84,3 +96,57 @@ def chunk_doc(doc: Doc, *, chunk_size: int = 1600, overlap: int = 0) -> list[dic
         }
         for i, part in enumerate(parts)
     ]
+
+
+def chunk_markdown(doc: Doc, *, chunk_size: int = 1600, overlap: int = 0) -> list[dict]:
+    """Split a Doc's markdown text on `##`…`######` headings, then chunk each section.
+
+    Lead text before the first heading inherits `doc.section`. Each heading
+    becomes its own chunk-section. Long sections are further split via
+    `split_text`. `chunk_index` is 0-based within each section.
+
+    Args:
+        doc: Source Doc. `doc.text` is treated as markdown with ATX-style
+            headings; lead content before the first heading gets `doc.section`.
+        chunk_size: Maximum character length per chunk.
+        overlap: Inter-chunk overlap in characters.
+
+    Returns:
+        List of dicts with `section` (str|None), `chunk_index` (int, 0-based
+        within section), `text` (str), `text_length` (int). Empty list if all
+        sections are empty.
+    """
+    md = doc.text
+    if not md.strip():
+        return []
+
+    matches = list(_HEADING_RE.finditer(md))
+
+    sections: list[tuple[str | None, str]] = []
+    if not matches:
+        sections.append((doc.section, md))
+    else:
+        lead = md[: matches[0].start()].strip()
+        if lead:
+            sections.append((doc.section, lead))
+        for i, m in enumerate(matches):
+            name = m.group(2).strip()
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(md)
+            sections.append((name, md[start:end].strip()))
+
+    chunks: list[dict] = []
+    for section, text in sections:
+        if not text:
+            continue
+        for idx, part in enumerate(split_text(text, chunk_size, overlap)):
+            if part.strip():
+                chunks.append(
+                    {
+                        "section": section,
+                        "chunk_index": idx,
+                        "text": part,
+                        "text_length": len(part),
+                    }
+                )
+    return chunks

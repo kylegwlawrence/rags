@@ -18,6 +18,7 @@ def health() -> dict:
         ("arxiv", db.arxiv),
         ("arxiv_rag", db.arxiv_rag),
         ("factbook", db.factbook),
+        ("factbook_rag", db.factbook_rag),
         ("openalex", db.openalex),
         ("openalex_rag", db.openalex_rag),
         ("gutenberg", db.gutenberg),

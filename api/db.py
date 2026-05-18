@@ -25,6 +25,7 @@ DATA_DIR = REPO_ROOT / "data"
 ARXIV_DB = DATA_DIR / "arxiv" / "arxiv.db"
 ARXIV_RAG_DB = DATA_DIR / "arxiv" / "arxiv_rag.db"
 FACTBOOK_DB = DATA_DIR / "factbook" / "factbook.db"
+FACTBOOK_RAG_DB = DATA_DIR / "factbook" / "factbook_rag.db"
 OPENALEX_DB = DATA_DIR / "openalex" / "openalex.db"
 OPENALEX_RAG_DB = DATA_DIR / "openalex" / "openalex_rag.db"
 GUTENBERG_DB = DATA_DIR / "gutenberg" / "gutenberg.db"
@@ -74,6 +75,7 @@ def _connect_ro_with_vec(path: Path) -> sqlite3.Connection:
 _arxiv: sqlite3.Connection | None = None
 _arxiv_rag: sqlite3.Connection | None = None
 _factbook: sqlite3.Connection | None = None
+_factbook_rag: sqlite3.Connection | None = None
 _openalex: sqlite3.Connection | None = None
 _openalex_rag: sqlite3.Connection | None = None
 _gutenberg: sqlite3.Connection | None = None
@@ -101,6 +103,14 @@ def factbook() -> sqlite3.Connection:
     if _factbook is None:
         _factbook = _connect_ro(FACTBOOK_DB)
     return _factbook
+
+
+def factbook_rag() -> sqlite3.Connection:
+    """Cached read-only connection to factbook_rag.db (built by scripts/factbook_index_rag.py)."""
+    global _factbook_rag
+    if _factbook_rag is None:
+        _factbook_rag = _connect_ro_with_vec(FACTBOOK_RAG_DB)
+    return _factbook_rag
 
 
 def openalex() -> sqlite3.Connection:

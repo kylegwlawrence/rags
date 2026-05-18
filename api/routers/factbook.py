@@ -5,7 +5,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
-from api.models import CountryDetail, CountrySummary, Page
+from api.models import Chunk, ChunksResponse, CountryDetail, CountrySummary, Page
+from rag import retriever
+from rag.retriever import is_operational_error
 
 router = APIRouter(prefix="/factbook", tags=["factbook"])
 
@@ -66,4 +68,56 @@ def get_country(
         name=row["name"],
         region=row["region"],
         data=_flatten(json.loads(row["data"])) if row["data"] else None,
+    )
+
+
+@router.get("/chunks", response_model=ChunksResponse)
+def search_chunks(
+    q: str = Query(..., description="Natural-language query. Empty → 400."),
+    top_k: int = Query(20, ge=1, le=100),
+    candidate_k: int = Query(50, ge=10, le=200),
+    rag_conn: sqlite3.Connection = Depends(db.factbook_rag),
+) -> ChunksResponse:
+    """Hybrid (FTS5 + sqlite-vec) retrieval over factbook chunks.
+
+    Each country's JSON is rendered as section-tagged markdown so chunks
+    carry their section name (Geography, Economy, etc.). `doc_id` is the
+    factbook country code (e.g. `us`, `af`).
+
+    Errors: 400 on empty `q`; 503 when `factbook_rag.db` or its `chunks_fts` /
+    `chunks_vec` tables are missing (run `scripts/factbook_index_rag.py`).
+    """
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="q must not be empty")
+    try:
+        result = retriever.retrieve(q, rag_conn, top_k=top_k, candidate_k=candidate_k)
+    except sqlite3.OperationalError as e:
+        if is_operational_error(e):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"factbook RAG data not ready ({e}). "
+                    "Run scripts/factbook_index_rag.py or restore data/factbook/factbook_rag.db."
+                ),
+            ) from e
+        raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
+
+    items = [
+        Chunk(
+            chunk_id=h.chunk_id,
+            doc_id=h.doc_id,
+            title=h.title,
+            section=h.section,
+            chunk_index=h.chunk_index,
+            text=h.text,
+            text_length=h.text_length,
+            score=h.score,
+        )
+        for h in result.hits
+    ]
+    return ChunksResponse(
+        items=items,
+        used_dense=result.used_dense,
+        top_k=top_k,
+        candidate_k=candidate_k,
     )
