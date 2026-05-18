@@ -1,9 +1,9 @@
 # datasets
 
-A read-only FastAPI app that exposes a handful of public datasets — CIA World
-Factbook, OpenAlex works, and Project Gutenberg texts — over the local network.
-Data is downloaded by the scripts in `scripts/` into SQLite files under
-`data/<source>/`; the API simply reads from those files.
+A read-only FastAPI app that exposes a handful of public datasets — arXiv
+papers, CIA World Factbook, OpenAlex works, and Project Gutenberg texts —
+over the local network. Data is downloaded by the scripts in `scripts/` into
+SQLite files under `data/<source>/`; the API simply reads from those files.
 
 This README focuses on the API. For per-script details (download cadence,
 indexer steps, known limitations) see `CLAUDE.md`.
@@ -17,6 +17,8 @@ pip install -r requirements.txt
 
 The API expects these files to already exist:
 
+- `data/arxiv/arxiv.db` (with the `papers_fts` FTS5 index built by
+  `scripts/arxiv_index_fts.py` — see `CLAUDE.md`)
 - `data/factbook/factbook.db`
 - `data/openalex/openalex.db` (with the `authors`, `work_authors`, and
   `works_fts` tables populated — see `CLAUDE.md` for the indexer order)
@@ -52,6 +54,32 @@ All list endpoints return a `Page[T]` shape:
 
 Runs `SELECT 1` against each database connection and returns per-database
 status plus a top-level `ok` boolean.
+
+### ArXiv
+
+- `GET /arxiv/papers` — list papers.
+  - `primary_category` — exact match (e.g. `cs.CL`).
+  - `category` — substring match against the whitespace-separated category
+    list (loose: `cs.C` will match `cs.CL`).
+  - `submitted_year` — year prefix on `submitted_date`.
+  - `submitted_from`, `submitted_to` — ISO date range (inclusive) on
+    `submitted_date`.
+  - `author` — substring match against the raw JSON-encoded authors text
+    (not normalized).
+  - `has_html` — `true` only returns papers with downloaded HTML, `false`
+    only returns those without.
+  - `q` — full-text search over `title` + `abstract`. Accepts the same FTS5
+    syntax as `/openalex/works?q=`. Malformed queries return 400; a missing
+    `papers_fts` index returns 503 with the indexer script name in the detail.
+  - `sort` — one of `submitted_desc` (default when `q` is not set),
+    `submitted_asc`, `updated_desc`, `relevance` (default when `q` is set;
+    requires `q`).
+- `GET /arxiv/papers/{paper_id}` — one paper. Old-style ids with embedded
+  slashes (e.g. `cond-mat/0204015`) are supported via FastAPI's `:path`
+  converter.
+- `GET /arxiv/papers/{paper_id}/content` — raw HTML body as
+  `text/html; charset=utf-8`. 404 distinguishes paper-not-found from
+  no-downloaded-HTML.
 
 ### Factbook
 
@@ -91,13 +119,13 @@ status plus a top-level `ok` boolean.
 
 ## Layout
 
-- `api/main.py` — app entrypoint, mounts the three routers and `/health`.
+- `api/main.py` — app entrypoint, mounts the four routers and `/health`.
 - `api/db.py` — opens each SQLite DB read-only (`file:...?mode=ro`) as a
   module-level singleton connection.
 - `api/models.py` — Pydantic response models and the generic `Page[T]`
   wrapper.
-- `api/routers/{factbook,openalex,gutenberg}.py` — one router per source. SQL
-  is inline and the routers are intentionally thin.
+- `api/routers/{arxiv,factbook,openalex,gutenberg}.py` — one router per source.
+  SQL is inline and the routers are intentionally thin.
 
 ## Conventions
 
