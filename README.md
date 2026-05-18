@@ -22,6 +22,9 @@ The API expects these files to already exist:
 - `data/arxiv/arxiv_rag.db` (chunks + FTS + sqlite-vec embeddings built by
   `scripts/arxiv_index_rag.py`; used by `/arxiv/chunks`)
 - `data/factbook/factbook.db`
+- `data/factbook/factbook_rag.db` (section-tagged chunks built from each
+  country's nested JSON via `scripts/factbook_index_rag.py`; used by
+  `/factbook/chunks`)
 - `data/openalex/openalex.db` (with the `authors`, `work_authors`, and
   `works_fts` tables populated — see `CLAUDE.md` for the indexer order)
 - `data/openalex/openalex_rag.db` (chunks + FTS + sqlite-vec embeddings for
@@ -100,6 +103,9 @@ status plus a top-level `ok` boolean.
   - `region` — exact match filter.
 - `GET /factbook/countries/{id}` — one country, including the parsed factbook
   JSON blob under `data`.
+- `GET /factbook/chunks` — hybrid (FTS5 + sqlite-vec) chunk search.
+  Chunks are tagged with their factbook section (Geography, Economy, etc.).
+  Same params + response shape as `/arxiv/chunks`.
 
 ### OpenAlex
 
