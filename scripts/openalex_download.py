@@ -102,5 +102,11 @@ while True:
 
     time.sleep(0.1)  # Polite pool allows up to 10 req/sec
 
+# Indexes for the API's list-with-filters endpoint.
+cur.execute("CREATE INDEX IF NOT EXISTS idx_works_cited_by_count ON works(cited_by_count)")
+cur.execute("CREATE INDEX IF NOT EXISTS idx_works_year ON works(year)")
+cur.execute("CREATE INDEX IF NOT EXISTS idx_works_venue ON works(venue)")
+con.commit()
+
 con.close()
 print(f"Done. Total records inserted: {total_inserted}")
