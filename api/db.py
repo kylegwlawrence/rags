@@ -6,10 +6,17 @@ threads, so `check_same_thread=False` is OK here.
 
 If a downloader script rewrites a DB file while the API is running, restart
 the server — the cached connection still points at the previous file.
+
+A missing or unreadable DB file at open time raises HTTPException(503) so
+routes return "Service Unavailable" rather than an opaque 500. /health
+catches the exception and reports the failure per-database without 503-ing
+the whole probe.
 """
 
 import sqlite3
 from pathlib import Path
+
+from fastapi import HTTPException
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
@@ -22,9 +29,20 @@ GUTENBERG_ROOT = DATA_DIR / "gutenberg"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
-    """Open `path` read-only and configure dict-style row access."""
+    """Open `path` read-only and configure dict-style row access.
+
+    Missing-file / permission-denied / unreadable cases surface as 503 with the
+    DB filename in the detail. Routers can catch their own per-query
+    OperationalErrors (e.g. missing FTS table) separately.
+    """
     uri = f"file:{path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    try:
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    except sqlite3.OperationalError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"{path.name} not available: {e}",
+        ) from e
     conn.row_factory = sqlite3.Row
     return conn
 
