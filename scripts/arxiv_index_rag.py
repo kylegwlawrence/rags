@@ -127,6 +127,14 @@ def main() -> int:
             )
         v_iter = iter(vectors)
         for doc, chunks in batch_docs:
+            # chunks_vec is a sqlite-vec virtual table; FK cascade doesn't reach
+            # it, so its rows for the about-to-be-deleted chunks must be cleared
+            # explicitly. Order: chunks_vec → chunks → docs_meta (children first).
+            rag_conn.execute(
+                "DELETE FROM chunks_vec WHERE chunk_id IN "
+                "(SELECT chunk_id FROM chunks WHERE doc_id = ?)",
+                (doc.doc_id,),
+            )
             rag_conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc.doc_id,))
             rag_conn.execute("DELETE FROM docs_meta WHERE doc_id = ?", (doc.doc_id,))
             rag_conn.execute(

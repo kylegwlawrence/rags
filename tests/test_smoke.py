@@ -108,3 +108,19 @@ def test_arxiv_chunks_sparse_only_when_ollama_down(client, monkeypatch):
     r = client.get("/arxiv/chunks", params={"q": "learning"})
     assert r.status_code == 200
     assert r.json()["used_dense"] is False
+
+
+def test_arxiv_rag_no_orphan_vectors():
+    """chunks_vec must have exactly one row per chunks row.
+
+    Catches the indexer-orphan bug where re-embedding a doc deletes from
+    chunks but leaves the corresponding chunks_vec rows behind. sqlite-vec
+    is a virtual table and FK cascade doesn't reach it, so the indexer's
+    flush() must delete from chunks_vec explicitly.
+    """
+    conn = db.arxiv_rag()
+    n_chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    n_vecs = conn.execute("SELECT COUNT(*) FROM chunks_vec").fetchone()[0]
+    if n_chunks == 0:
+        pytest.skip("arxiv_rag.db has no chunks; run scripts/arxiv_index_rag.py first")
+    assert n_chunks == n_vecs, f"orphan vectors: {n_chunks} chunks vs {n_vecs} vectors"
