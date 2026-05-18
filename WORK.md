@@ -12,6 +12,15 @@ Each rule has the same shape:
 
 Use these as defaults, not laws. When a rule conflicts with the situation, follow the *why* — the rule is a compressed form of the reason, and the reason is what's load-bearing.
 
+## Order of precedence
+
+When instructions conflict, follow this order (higher wins):
+
+1. Explicit user instructions in the current conversation.
+2. This file (`WORK.md`).
+3. `CLAUDE.md` — project-specific conventions and gotchas.
+4. General defaults.
+
 ---
 
 ## 1. Process — how to work
@@ -63,6 +72,12 @@ Use these as defaults, not laws. When a rule conflicts with the situation, follo
 **Why:** `rm`, `git reset --hard`, `DROP TABLE`, `force push` — these can't be undone by a follow-up command. The cost of asking is one sentence. The cost of an unwanted deletion is irrecoverable work and a damaged session.
 
 **Example:** Before running `git reset --hard origin/main` to drop local changes, confirm with the user that the local changes are truly disposable. Don't assume "the diff looks like garbage" means "the user wants it gone."
+
+### 1.9 Write commit messages that are short and descriptive.
+
+**Why:** A commit message is a permanent artifact in the project history. Vague messages ("fix stuff", "update") are useless when scanning history months later; essays are noise. A single tight sentence that says what changed and why gives future readers exactly what they need without making them skim.
+
+**Example:** "Add porter tokenizer to FTS index for stemming support" beats "updated the index script" (too vague) and "Modified openalex_index_fts.py to rebuild the works_fts FTS5 virtual table using the porter unicode61 tokenizer to improve recall for morphological variants" (too long). One clause: what, and (if non-obvious) why.
 
 ---
 
@@ -224,6 +239,7 @@ These are negations of the rules above, written out so they're easy to recognize
 - **Catch-everything error handling.** `try/except` around things that can't fail.
 - **One-doc-fits-all.** README that's simultaneously a user guide, contributor guide, and agent guide.
 - **Doc drift.** Shipping code changes without the corresponding doc change.
+- **Vague or bloated commit messages.** "fix stuff" tells nobody anything; a paragraph tells them too much.
 
 ---
 
