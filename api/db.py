@@ -14,6 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 
+ARXIV_DB = DATA_DIR / "arxiv" / "arxiv.db"
 FACTBOOK_DB = DATA_DIR / "factbook" / "factbook.db"
 OPENALEX_DB = DATA_DIR / "openalex" / "openalex.db"
 GUTENBERG_DB = DATA_DIR / "gutenberg" / "gutenberg.db"
@@ -28,9 +29,18 @@ def _connect_ro(path: Path) -> sqlite3.Connection:
     return conn
 
 
+_arxiv: sqlite3.Connection | None = None
 _factbook: sqlite3.Connection | None = None
 _openalex: sqlite3.Connection | None = None
 _gutenberg: sqlite3.Connection | None = None
+
+
+def arxiv() -> sqlite3.Connection:
+    """Cached read-only connection to arxiv.db (FTS index built by scripts/arxiv_index_fts.py)."""
+    global _arxiv
+    if _arxiv is None:
+        _arxiv = _connect_ro(ARXIV_DB)
+    return _arxiv
 
 
 def factbook() -> sqlite3.Connection:

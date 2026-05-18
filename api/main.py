@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 
 from api import db
-from api.routers import factbook, gutenberg, openalex
+from api.routers import arxiv, factbook, gutenberg, openalex
 
 app = FastAPI(title="datasets API", version="0.1.0")
+app.include_router(arxiv.router)
 app.include_router(factbook.router)
 app.include_router(openalex.router)
 app.include_router(gutenberg.router)
@@ -14,6 +15,7 @@ def health() -> dict:
     """Return per-database status by running `SELECT 1` against each connection."""
     status: dict[str, str] = {}
     for name, opener in (
+        ("arxiv", db.arxiv),
         ("factbook", db.factbook),
         ("openalex", db.openalex),
         ("gutenberg", db.gutenberg),

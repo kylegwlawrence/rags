@@ -41,3 +41,18 @@ class GutenbergText(BaseModel):
     release_date: str | None
     size_bytes: int | None
     path: str
+
+
+class Paper(BaseModel):
+    id: str
+    title: str
+    abstract: str
+    authors: list[str]
+    primary_category: str
+    categories: list[str]
+    submitted_date: str
+    updated_date: str | None
+    doi: str | None
+    journal_ref: str | None
+    comments: str | None
+    has_html: bool
