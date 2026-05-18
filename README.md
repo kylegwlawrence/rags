@@ -24,6 +24,9 @@ The API expects these files to already exist:
 - `data/factbook/factbook.db`
 - `data/openalex/openalex.db` (with the `authors`, `work_authors`, and
   `works_fts` tables populated — see `CLAUDE.md` for the indexer order)
+- `data/openalex/openalex_rag.db` (chunks + FTS + sqlite-vec embeddings for
+  the top-5000 most-cited works, built by `scripts/openalex_index_rag.py`;
+  used by `/openalex/chunks`)
 - `data/gutenberg/gutenberg.db` and the `.txt` corpus under `data/gutenberg/`
 
 If a database is missing, the corresponding routes will 500 but the rest of
@@ -116,6 +119,9 @@ status plus a top-level `ok` boolean.
 - `GET /openalex/works/{short_id}` — one work. `short_id` is the `W…` suffix
   (e.g. `W3038568908`); the full `https://openalex.org/<id>` URL is
   reconstructed server-side.
+- `GET /openalex/chunks` — hybrid (FTS5 + sqlite-vec) chunk search over the
+  top-5000 most-cited works (title + abstract embedded; not the full corpus).
+  Same params + response shape as `/arxiv/chunks`.
 
 ### Gutenberg
 
