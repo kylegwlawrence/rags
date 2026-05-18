@@ -1,7 +1,6 @@
 # Plan: Separate the arXiv Backend (Phase 1 — Read-Only Metadata API)
 
 ## Context
-Refer to `/Users/kylelawrence/Documents/PROJECTS/local_wikipedia/arxiv` for the existing arXiv backend code (note that this is coupled with a local wikipedia backend and a frontend search/embedding application).
 
 The arXiv module in this repo (`arxiv/`) is tightly coupled to the local FastAPI frontend through templates, HTMX routes, and shared infrastructure (`dumps/jobs.db`, `paths.py`, `db.py`, `workers/runner.py`). The user wants to:
 
