@@ -23,8 +23,10 @@ def _row_to_work(row: sqlite3.Row) -> Work:
     """Map a `works` row to its response model, splitting authors and shortening the id."""
     full_id = row["id"]
     short = full_id.rsplit("/", 1)[-1] if full_id else full_id
+    # Split on the same separator the downloader uses to join names, so the
+    # `authors` array in the response matches the rows in `work_authors`.
     authors_raw = row["authors"] or ""
-    authors = [a.strip() for a in authors_raw.split(",") if a.strip()]
+    authors = [a.strip() for a in authors_raw.split(", ") if a.strip()]
     return Work(
         id=short,
         openalex_url=full_id,
@@ -63,12 +65,16 @@ def list_works(
     cited_by_min: int | None = Query(None, ge=0),
     cited_by_max: int | None = Query(None, ge=0),
     venue: str | None = Query(None, description="Exact venue match"),
+    author: str | None = Query(
+        None,
+        description="Substring match against any of the work's authors (normalized table)",
+    ),
     sort: Literal["cited_by_count_desc", "year_desc", "year_asc"] = "cited_by_count_desc",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.openalex),
 ) -> Page[Work]:
-    """List works with year / citation-count / venue filters and configurable sort."""
+    """List works with year / citation-count / venue / author filters and configurable sort."""
     clauses: list[str] = []
     params: list = []
     if year is not None:
@@ -83,6 +89,13 @@ def list_works(
     if venue is not None:
         clauses.append("venue = ?")
         params.append(venue)
+    if author is not None:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM work_authors wa "
+            "JOIN authors a ON a.id = wa.author_id "
+            "WHERE wa.work_id = works.id AND a.display_name LIKE ?)"
+        )
+        params.append(f"%{author}%")
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 
