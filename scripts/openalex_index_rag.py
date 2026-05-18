@@ -160,13 +160,15 @@ def main() -> int:
         if existing == doc.version:
             n_skipped += 1
             continue
+        chunks = chunk_doc(doc, chunk_size=args.chunk_size)
+        if not chunks:
+            # No text to embed (extractor passed a NULL/empty doc through);
+            # don't count toward n_new / n_updated or it'd re-count next run.
+            continue
         if existing is None:
             n_new += 1
         else:
             n_updated += 1
-        chunks = chunk_doc(doc, chunk_size=args.chunk_size)
-        if not chunks:
-            continue
         batch_docs.append((doc, chunks))
         batch_texts.extend(
             embedder.format_document(doc.title, chunk["section"], chunk["text"])

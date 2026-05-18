@@ -38,9 +38,10 @@ def iter_docs(works_conn: sqlite3.Connection, limit: int = DEFAULT_LIMIT) -> Ite
             text = f"{title}\n\n{abstract}"
         else:
             text = title or abstract
-        # Use title (or '<no title>' fallback) for the embedder's format_document
-        # header — it goes into the document vector as provenance.
-        display_title = title or "<untitled>"
+        # Fallback to the W-id (not '<untitled>') so the embedder's
+        # format_document header doesn't push NULL-title works toward each
+        # other in vector space via a shared placeholder string.
+        display_title = title or short_id
         yield Doc(
             doc_id=short_id,
             title=display_title,
