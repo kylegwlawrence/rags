@@ -16,6 +16,7 @@ def health() -> dict:
     status: dict[str, str] = {}
     for name, opener in (
         ("arxiv", db.arxiv),
+        ("arxiv_rag", db.arxiv_rag),
         ("factbook", db.factbook),
         ("openalex", db.openalex),
         ("gutenberg", db.gutenberg),

@@ -16,12 +16,14 @@ the whole probe.
 import sqlite3
 from pathlib import Path
 
+import sqlite_vec
 from fastapi import HTTPException
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 
 ARXIV_DB = DATA_DIR / "arxiv" / "arxiv.db"
+ARXIV_RAG_DB = DATA_DIR / "arxiv" / "arxiv_rag.db"
 FACTBOOK_DB = DATA_DIR / "factbook" / "factbook.db"
 OPENALEX_DB = DATA_DIR / "openalex" / "openalex.db"
 GUTENBERG_DB = DATA_DIR / "gutenberg" / "gutenberg.db"
@@ -47,7 +49,22 @@ def _connect_ro(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _connect_ro_with_vec(path: Path) -> sqlite3.Connection:
+    """Open `path` read-only with the sqlite-vec extension loaded.
+
+    Used for the per-source `<source>_rag.db` files that include a `chunks_vec`
+    virtual table. Reuses `_connect_ro`'s 503 translation for missing /
+    unreadable DB files. Other errors propagate.
+    """
+    conn = _connect_ro(path)
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+    return conn
+
+
 _arxiv: sqlite3.Connection | None = None
+_arxiv_rag: sqlite3.Connection | None = None
 _factbook: sqlite3.Connection | None = None
 _openalex: sqlite3.Connection | None = None
 _gutenberg: sqlite3.Connection | None = None
@@ -59,6 +76,14 @@ def arxiv() -> sqlite3.Connection:
     if _arxiv is None:
         _arxiv = _connect_ro(ARXIV_DB)
     return _arxiv
+
+
+def arxiv_rag() -> sqlite3.Connection:
+    """Cached read-only connection to arxiv_rag.db (built by scripts/arxiv_index_rag.py)."""
+    global _arxiv_rag
+    if _arxiv_rag is None:
+        _arxiv_rag = _connect_ro_with_vec(ARXIV_RAG_DB)
+    return _arxiv_rag
 
 
 def factbook() -> sqlite3.Connection:

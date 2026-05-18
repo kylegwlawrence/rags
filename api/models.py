@@ -56,3 +56,25 @@ class Paper(BaseModel):
     journal_ref: str | None
     comments: str | None
     has_html: bool
+
+
+class Chunk(BaseModel):
+    """One retrieved chunk from a `<source>_rag.db` hybrid search."""
+
+    chunk_id: int
+    doc_id: str
+    title: str
+    section: str | None
+    chunk_index: int
+    text: str
+    text_length: int
+    score: float
+
+
+class ChunksResponse(BaseModel):
+    """Hybrid-search response. Not a `Page[Chunk]` — RRF doesn't paginate."""
+
+    items: list[Chunk]
+    used_dense: bool
+    top_k: int
+    candidate_k: int

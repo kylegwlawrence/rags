@@ -5,7 +5,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
-from api.models import Page, Paper
+from api.models import Chunk, ChunksResponse, Page, Paper
+from rag import retriever
 
 router = APIRouter(prefix="/arxiv", tags=["arxiv"])
 
@@ -219,3 +220,54 @@ def get_paper(
     `cond-mat/0204015`) match cleanly.
     """
     return _row_to_paper(_lookup(conn, paper_id))
+
+
+@router.get("/chunks", response_model=ChunksResponse)
+def search_chunks(
+    q: str = Query(..., description="Natural-language query. Empty → 400."),
+    top_k: int = Query(20, ge=1, le=100),
+    candidate_k: int = Query(50, ge=10, le=200),
+    rag_conn: sqlite3.Connection = Depends(db.arxiv_rag),
+) -> ChunksResponse:
+    """Hybrid (FTS5 + sqlite-vec) retrieval over arxiv chunks.
+
+    Returns RRF-merged hits. `used_dense=False` means Ollama was unreachable
+    and only sparse FTS hits contributed; the body is still useful.
+
+    Errors: 400 on empty `q`; 503 when `arxiv_rag.db` or its `chunks_fts` /
+    `chunks_vec` tables are missing (run `scripts/arxiv_index_rag.py`).
+    """
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="q must not be empty")
+    try:
+        result = retriever.retrieve(q, rag_conn, top_k=top_k, candidate_k=candidate_k)
+    except sqlite3.OperationalError as e:
+        if _is_operational(e):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"arxiv RAG data not ready ({e}). "
+                    "Run scripts/arxiv_index_rag.py or restore data/arxiv/arxiv_rag.db."
+                ),
+            ) from e
+        raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
+
+    items = [
+        Chunk(
+            chunk_id=h.chunk_id,
+            doc_id=h.doc_id,
+            title=h.title,
+            section=h.section,
+            chunk_index=h.chunk_index,
+            text=h.text,
+            text_length=h.text_length,
+            score=h.score,
+        )
+        for h in result.hits
+    ]
+    return ChunksResponse(
+        items=items,
+        used_dense=result.used_dense,
+        top_k=top_k,
+        candidate_k=candidate_k,
+    )
