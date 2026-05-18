@@ -19,6 +19,8 @@ The API expects these files to already exist:
 
 - `data/arxiv/arxiv.db` (with the `papers_fts` FTS5 index built by
   `scripts/arxiv_index_fts.py` — see `CLAUDE.md`)
+- `data/arxiv/arxiv_rag.db` (chunks + FTS + sqlite-vec embeddings built by
+  `scripts/arxiv_index_rag.py`; used by `/arxiv/chunks`)
 - `data/factbook/factbook.db`
 - `data/openalex/openalex.db` (with the `authors`, `work_authors`, and
   `works_fts` tables populated — see `CLAUDE.md` for the indexer order)
@@ -80,6 +82,14 @@ status plus a top-level `ok` boolean.
 - `GET /arxiv/papers/{paper_id}/content` — raw HTML body as
   `text/html; charset=utf-8`. 404 distinguishes paper-not-found from
   no-downloaded-HTML.
+- `GET /arxiv/chunks` — hybrid (FTS5 + sqlite-vec) chunk search.
+  - `q` (required) — natural-language query; empty/whitespace → 400.
+  - `top_k` — final result count after RRF (default 20, max 100).
+  - `candidate_k` — pool size from each side before merging (default 50, max 200).
+  - Returns `{items, used_dense, top_k, candidate_k}`. `used_dense=false`
+    means Ollama was unreachable and only sparse FTS results contributed —
+    body is still useful. 503 if `arxiv_rag.db` or its index tables are
+    missing.
 
 ### Factbook
 
@@ -121,11 +131,16 @@ status plus a top-level `ok` boolean.
 
 - `api/main.py` — app entrypoint, mounts the four routers and `/health`.
 - `api/db.py` — opens each SQLite DB read-only (`file:...?mode=ro`) as a
-  module-level singleton connection.
+  module-level singleton connection. `_connect_ro_with_vec` additionally
+  loads the sqlite-vec extension for the per-source `_rag.db` files.
 - `api/models.py` — Pydantic response models and the generic `Page[T]`
   wrapper.
 - `api/routers/{arxiv,factbook,openalex,gutenberg}.py` — one router per source.
   SQL is inline and the routers are intentionally thin.
+- `rag/` — shared RAG primitives used by both the API and the indexer
+  scripts: `chunker.py`, `embedder.py` (Ollama HTTP), `retriever.py` (RRF
+  over FTS5 + sqlite-vec), `schema.py` (uniform chunks/chunks_fts/chunks_vec/
+  docs_meta/_meta DDL).
 
 ## Conventions
 
