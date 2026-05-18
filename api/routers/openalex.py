@@ -16,7 +16,10 @@ SORTS = {
     "cited_by_count_desc": "cited_by_count DESC",
     "year_desc": "year DESC",
     "year_asc": "year ASC",
+    # Lower bm25 = better FTS match. Only valid when `q` is set.
+    "relevance": "bm25(works_fts) ASC",
 }
+Sort = Literal["cited_by_count_desc", "year_desc", "year_asc", "relevance"]
 
 
 def _row_to_work(row: sqlite3.Row) -> Work:
@@ -69,14 +72,39 @@ def list_works(
         None,
         description="Substring match against any of the work's authors (normalized table)",
     ),
-    sort: Literal["cited_by_count_desc", "year_desc", "year_asc"] = "cited_by_count_desc",
+    q: str | None = Query(
+        None,
+        description=(
+            "Full-text search on title + abstract. Accepts FTS5 syntax: "
+            "bare words AND together, `\"phrase\"` for phrases, `term*` for "
+            "prefix match, `a OR b`, `a NOT b`."
+        ),
+    ),
+    sort: Sort | None = Query(
+        None,
+        description=(
+            "Defaults to `relevance` when `q` is set, otherwise `cited_by_count_desc`. "
+            "`relevance` requires `q`."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.openalex),
 ) -> Page[Work]:
-    """List works with year / citation-count / venue / author filters and configurable sort."""
+    """List works with year / citation / venue / author / full-text filters."""
+    if sort is None:
+        sort = "relevance" if q is not None else "cited_by_count_desc"
+    if sort == "relevance" and q is None:
+        raise HTTPException(status_code=400, detail="sort=relevance requires q")
+
+    # The FROM clause grows a JOIN when full-text search is active.
+    from_clause = "works"
     clauses: list[str] = []
     params: list = []
+    if q is not None:
+        from_clause = "works JOIN works_fts ON works_fts.rowid = works.rowid"
+        clauses.append("works_fts MATCH ?")
+        params.append(q)
     if year is not None:
         clauses.append("year = ?")
         params.append(year)
@@ -99,12 +127,20 @@ def list_works(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 
-    total = conn.execute(f"SELECT COUNT(*) FROM works {where}", params).fetchone()[0]
-    rows = conn.execute(
-        f"SELECT id, title, abstract, year, cited_by_count, doi, authors, venue "
-        f"FROM works {where} ORDER BY {order} LIMIT ? OFFSET ?",
-        [*params, limit, offset],
-    ).fetchall()
+    try:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM {from_clause} {where}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT works.id, works.title, works.abstract, works.year, "
+            f"       works.cited_by_count, works.doi, works.authors, works.venue "
+            f"FROM {from_clause} {where} ORDER BY {order} LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+    except sqlite3.OperationalError as e:
+        # Most often a malformed FTS5 query (`q="("`, unbalanced quotes, etc.).
+        raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
+
     return Page[Work](
         items=[_row_to_work(r) for r in rows],
         total=total,

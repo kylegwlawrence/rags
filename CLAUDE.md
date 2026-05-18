@@ -15,6 +15,7 @@ source .venv/bin/activate
 python scripts/factbook_download.py
 python scripts/openalex_download.py
 python scripts/openalex_normalize_authors.py  # backfills authors + work_authors tables
+python scripts/openalex_index_fts.py          # builds the works_fts FTS5 index
 python scripts/gutenberg_index.py        # builds data/gutenberg/gutenberg.db from mirror + PG catalog
 bash   scripts/kaggle_download.sh
 bash   scripts/gutenberg_download.sh
@@ -35,7 +36,7 @@ Listens on `0.0.0.0:8002` so the Tailscale interface picks it up; access is gate
 `GET /health` returns per-database status. Routers:
 
 - `/factbook/countries`, `/factbook/countries/{id}` — list + detail (filter by `region`)
-- `/openalex/works`, `/openalex/works/{short_id}` — list (filter by `year`, `cited_by_min`, `cited_by_max`, `venue`, `author` substring; sort by `cited_by_count_desc` / `year_desc` / `year_asc`) + detail. `author` joins through the normalized `work_authors` / `authors` tables. `short_id` is the `W…` suffix; the full `https://openalex.org/<id>` URL is reconstructed server-side.
+- `/openalex/works`, `/openalex/works/{short_id}` — list (filter by `year`, `cited_by_min`, `cited_by_max`, `venue`, `author` substring, `q` full-text on title+abstract; sort by `cited_by_count_desc` / `year_desc` / `year_asc` / `relevance`) + detail. `author` joins through the normalized `work_authors` / `authors` tables. `q` joins through the `works_fts` FTS5 table and accepts FTS5 syntax (`"phrase"`, `term*`, `a OR b`, `a NOT b`); when `q` is set the default sort becomes `relevance` (bm25). `short_id` is the `W…` suffix; the full `https://openalex.org/<id>` URL is reconstructed server-side.
 - `/gutenberg/texts`, `/gutenberg/texts/{id}`, `/gutenberg/texts/{id}/content` — list (filter by `title` / `author` substring, `language` exact), metadata, and streamed raw `.txt`.
 
 All list endpoints paginate with `limit` (default 50, max 200) and `offset`, returning `{items, total, limit, offset}`. API is read-only — downloader / indexer scripts are the only write path.
@@ -45,6 +46,7 @@ All list endpoints paginate with `limit` (default 50, max 200) and `offset`, ret
 - **`factbook_download.py`** — Clones `github.com/factbook/factbook.json` to `/tmp/factbook_json`, walks the per-region directories, and inserts each country as one row (with the full JSON blob in a `data` column) into a `countries` table at `data/factbook/factbook.db`. Temp clone is removed on success.
 - **`openalex_download.py`** — Paginates the OpenAlex `/works` API filtering by `cited_by_count` and reconstructs abstracts from the inverted-index format the API returns. Uses the OpenAlex "polite pool" (`mailto=` param) so changing the `EMAIL` constant matters for rate limiting. Cursor pagination, ~10 req/sec. Author display names are joined with `", "` into the `works.authors` column — the normalized author tables are built by `openalex_normalize_authors.py`.
 - **`openalex_normalize_authors.py`** — One-shot backfill: creates `authors(id, display_name)` and `work_authors(work_id, author_id, position)` in `data/openalex/openalex.db` by splitting `works.authors` on `", "`. Re-runnable: clears `work_authors` first; keeps the `authors` table to avoid churning IDs. Required after `openalex_download.py` for `/openalex/works?author=` to return anything. **Known low-impact limitation (~0.08%, ~220 of 268k works):** credentialed-suffix names like `"Smith, Jr."`, `"Jones, M.D."`, `"Doe, PhD"`, `"Foo, III"` get fragmented into 2–3 phantom rows. The proper fix is a re-download using OpenAlex's authorship IDs, deferred.
+- **`openalex_index_fts.py`** — Builds the `works_fts` FTS5 virtual table over `works.title` + `works.abstract` with the `porter unicode61` tokenizer. External-content table — the index lives in `works_fts` but the original text stays in `works` (no duplication). Drop+rebuild on each run (~20 s, ~150 MB added to the DB). Required after `openalex_download.py` for `/openalex/works?q=` to return anything.
 - **`gutenberg_download.sh`** — Single rsync line that runs on a remote host (`pop-os`) via SSH and pulls `.txt` files from the ibiblio Gutenberg mirror. Not self-contained — requires that SSH alias to resolve.
 - **`gutenberg_index.py`** — Walks `data/gutenberg/` for canonical `<id>-0.txt` files, joins them against the official Project Gutenberg catalog CSV (`gutenberg.org/cache/epub/feeds/pg_catalog.csv`) for title/author/language/release-date metadata, and writes `data/gutenberg/gutenberg.db`. Indexes on `author`, `title`, `language`. Re-runnable (`INSERT OR REPLACE`); skips `old/` retired versions. Required before the `/gutenberg` API routes work.
 - **`kaggle_download.sh`** — Template script: `KAGGLE_USERNAME`, `KAGGLE_API_KEY`, and `DATASET` must be filled in before use. Writes credentials to `~/.kaggle/kaggle.json` and shells out to the `kaggle` CLI (pip-installed on demand).
