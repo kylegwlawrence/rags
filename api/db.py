@@ -26,6 +26,7 @@ ARXIV_DB = DATA_DIR / "arxiv" / "arxiv.db"
 ARXIV_RAG_DB = DATA_DIR / "arxiv" / "arxiv_rag.db"
 FACTBOOK_DB = DATA_DIR / "factbook" / "factbook.db"
 OPENALEX_DB = DATA_DIR / "openalex" / "openalex.db"
+OPENALEX_RAG_DB = DATA_DIR / "openalex" / "openalex_rag.db"
 GUTENBERG_DB = DATA_DIR / "gutenberg" / "gutenberg.db"
 GUTENBERG_ROOT = DATA_DIR / "gutenberg"
 
@@ -74,6 +75,7 @@ _arxiv: sqlite3.Connection | None = None
 _arxiv_rag: sqlite3.Connection | None = None
 _factbook: sqlite3.Connection | None = None
 _openalex: sqlite3.Connection | None = None
+_openalex_rag: sqlite3.Connection | None = None
 _gutenberg: sqlite3.Connection | None = None
 
 
@@ -107,6 +109,14 @@ def openalex() -> sqlite3.Connection:
     if _openalex is None:
         _openalex = _connect_ro(OPENALEX_DB)
     return _openalex
+
+
+def openalex_rag() -> sqlite3.Connection:
+    """Cached read-only connection to openalex_rag.db (built by scripts/openalex_index_rag.py)."""
+    global _openalex_rag
+    if _openalex_rag is None:
+        _openalex_rag = _connect_ro_with_vec(OPENALEX_RAG_DB)
+    return _openalex_rag
 
 
 def gutenberg() -> sqlite3.Connection:

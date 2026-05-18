@@ -17,7 +17,7 @@ def test_health_all_dbs_ok(client):
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
-    for name in ("arxiv", "arxiv_rag", "factbook", "openalex", "gutenberg"):
+    for name in ("arxiv", "arxiv_rag", "factbook", "openalex", "openalex_rag", "gutenberg"):
         assert body["databases"][name] == "ok", body["databases"]
 
 
@@ -123,4 +123,64 @@ def test_arxiv_rag_no_orphan_vectors():
     n_vecs = conn.execute("SELECT COUNT(*) FROM chunks_vec").fetchone()[0]
     if n_chunks == 0:
         pytest.skip("arxiv_rag.db has no chunks; run scripts/arxiv_index_rag.py first")
+    assert n_chunks == n_vecs, f"orphan vectors: {n_chunks} chunks vs {n_vecs} vectors"
+
+
+def test_openalex_chunks_happy(client):
+    r = client.get("/openalex/chunks", params={"q": "neural network", "top_k": 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body
+    assert "used_dense" in body
+    assert isinstance(body["used_dense"], bool)
+    assert body["top_k"] == 3
+    if not body["items"]:
+        pytest.skip(
+            "openalex_rag.db returned no hits for 'neural network'; "
+            "run scripts/openalex_index_rag.py to build the corpus before this assertion is meaningful"
+        )
+    item = body["items"][0]
+    for key in ("chunk_id", "doc_id", "title", "section", "text", "score"):
+        assert key in item, item
+
+
+def test_openalex_chunks_empty_q_400(client):
+    r = client.get("/openalex/chunks", params={"q": "   "})
+    assert r.status_code == 400
+
+
+def test_openalex_chunks_missing_q_400(client):
+    r = client.get("/openalex/chunks")
+    assert r.status_code in (400, 422)
+
+
+def test_openalex_chunks_503_when_rag_db_missing(client):
+    def fake_rag():
+        raise HTTPException(status_code=503, detail="openalex_rag.db not available: test")
+
+    app.dependency_overrides[db.openalex_rag] = fake_rag
+    r = client.get("/openalex/chunks", params={"q": "foo"})
+    assert r.status_code == 503
+
+
+def test_openalex_chunks_sparse_only_when_ollama_down(client, monkeypatch):
+    """If embedding raises httpx.HTTPError, the route still returns 200 with used_dense=False."""
+    from rag import embedder
+
+    def boom(*_a, **_kw):
+        raise httpx.ConnectError("simulated ollama down")
+
+    monkeypatch.setattr(embedder, "embed_text", boom)
+    r = client.get("/openalex/chunks", params={"q": "neural network"})
+    assert r.status_code == 200
+    assert r.json()["used_dense"] is False
+
+
+def test_openalex_rag_no_orphan_vectors():
+    """Same invariant as test_arxiv_rag_no_orphan_vectors, for openalex_rag.db."""
+    conn = db.openalex_rag()
+    n_chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    n_vecs = conn.execute("SELECT COUNT(*) FROM chunks_vec").fetchone()[0]
+    if n_chunks == 0:
+        pytest.skip("openalex_rag.db has no chunks; run scripts/openalex_index_rag.py first")
     assert n_chunks == n_vecs, f"orphan vectors: {n_chunks} chunks vs {n_vecs} vectors"
