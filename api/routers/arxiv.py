@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from api import db
 from api.models import Chunk, ChunksResponse, Page, Paper
 from rag import retriever
+from rag.retriever import is_operational_error
 
 router = APIRouter(prefix="/arxiv", tags=["arxiv"])
 
@@ -61,10 +62,9 @@ def _lookup(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
     return row
 
 
-def _is_operational(err: sqlite3.OperationalError) -> bool:
-    """True when the error means the DB / FTS index isn't ready, not bad SQL."""
-    msg = str(err)
-    return "no such table" in msg or "unable to open database file" in msg
+# Operational-vs-syntax classification lives in rag.retriever and is shared
+# between this router's two 503-translating try/except blocks (list_papers FTS
+# below and search_chunks at the bottom of the file).
 
 
 @router.get("/papers", response_model=Page[Paper])
@@ -171,7 +171,7 @@ def list_papers(
             [*params, limit, offset],
         ).fetchall()
     except sqlite3.OperationalError as e:
-        if _is_operational(e):
+        if is_operational_error(e):
             raise HTTPException(
                 status_code=503,
                 detail=(
@@ -242,7 +242,7 @@ def search_chunks(
     try:
         result = retriever.retrieve(q, rag_conn, top_k=top_k, candidate_k=candidate_k)
     except sqlite3.OperationalError as e:
-        if _is_operational(e):
+        if is_operational_error(e):
             raise HTTPException(
                 status_code=503,
                 detail=(

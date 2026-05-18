@@ -67,10 +67,14 @@ def test_arxiv_chunks_happy(client):
     assert "used_dense" in body
     assert isinstance(body["used_dense"], bool)
     assert body["top_k"] == 3
-    if body["items"]:
-        item = body["items"][0]
-        for key in ("chunk_id", "doc_id", "title", "section", "text", "score"):
-            assert key in item, item
+    if not body["items"]:
+        pytest.skip(
+            "arxiv_rag.db returned no hits for 'learning'; "
+            "run scripts/arxiv_index_rag.py to build the corpus before this assertion is meaningful"
+        )
+    item = body["items"][0]
+    for key in ("chunk_id", "doc_id", "title", "section", "text", "score"):
+        assert key in item, item
 
 
 def test_arxiv_chunks_empty_q_400(client):

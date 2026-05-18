@@ -54,12 +54,19 @@ def _connect_ro_with_vec(path: Path) -> sqlite3.Connection:
 
     Used for the per-source `<source>_rag.db` files that include a `chunks_vec`
     virtual table. Reuses `_connect_ro`'s 503 translation for missing /
-    unreadable DB files. Other errors propagate.
+    unreadable DB files; also translates extension-load failures (rare: would
+    mean sqlite_vec is missing or ABI-incompatible) to 503 rather than 500.
     """
     conn = _connect_ro(path)
-    conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+    except (sqlite3.OperationalError, OSError) as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"sqlite-vec extension failed to load for {path.name}: {e}",
+        ) from e
     return conn
 
 

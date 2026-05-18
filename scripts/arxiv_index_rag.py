@@ -71,6 +71,13 @@ def main() -> int:
                         help="Max chars per chunk (default 1600).")
     args = parser.parse_args()
 
+    if args.chunk_size < 1:
+        parser.error("--chunk-size must be a positive integer")
+    if args.batch < 1:
+        parser.error("--batch must be a positive integer")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer when given")
+
     if not ARXIV_DB.is_file():
         print(f"missing source DB: {ARXIV_DB}", file=sys.stderr)
         return 1

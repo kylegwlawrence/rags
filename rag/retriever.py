@@ -17,6 +17,17 @@ import httpx
 from rag import Hit, RetrievalResult, embedder
 
 
+def is_operational_error(err: sqlite3.OperationalError) -> bool:
+    """True when the error means a missing table / unreadable DB file, not bad SQL.
+
+    Shared by the retriever (decides whether to swallow vs. propagate) and the
+    route handlers (decide 503 vs. 400). SQLite doesn't expose distinct error
+    codes for these cases; the message strings are the only available signal.
+    """
+    msg = str(err)
+    return "no such table" in msg or "unable to open database file" in msg
+
+
 def retrieve(
     query: str,
     rag_conn: sqlite3.Connection,
@@ -105,7 +116,7 @@ def _sparse_search(
         ).fetchall()
         return [(r["rowid"], r["rank"]) for r in rows]
     except sqlite3.OperationalError as e:
-        if "no such table" in str(e) or "unable to open database file" in str(e):
+        if is_operational_error(e):
             raise
         return []  # bad FTS syntax → no sparse hits, dense (if up) still tried
 

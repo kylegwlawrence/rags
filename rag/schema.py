@@ -18,16 +18,22 @@ import sqlite_vec
 def connect_rag(path: pathlib.Path) -> sqlite3.Connection:
     """Open a RAG DB read-write with sqlite-vec loaded and schema ensured.
 
+    Enables `PRAGMA foreign_keys = ON` so the `chunks.doc_id REFERENCES
+    docs_meta(doc_id)` constraint is actually enforced — protects against
+    future "I forgot the delete order" bugs. The existing indexer already
+    deletes chunks before docs_meta so nothing breaks today.
+
     Args:
         path: Filesystem path to the `<source>_rag.db` file. Parent directories
             must exist; the SQLite file is created if absent.
 
     Returns:
-        sqlite3.Connection with Row factory, sqlite-vec extension loaded, and
-        all RAG tables guaranteed to exist.
+        sqlite3.Connection with Row factory, sqlite-vec extension loaded, FK
+        enforcement on, and all RAG tables guaranteed to exist.
     """
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
