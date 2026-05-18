@@ -1,7 +1,9 @@
 """Happy-path smoke tests for every route plus 400/503 cases.
 
 Phase 2a baseline. Each test makes one request and asserts shape (status code,
-required keys) — not values, since the underlying data evolves.
+required keys) — not values, since the underlying data evolves. The chunks
+endpoint tests are parametrized over every source that has a `_rag.db`:
+factbook joins the list in Phase 2c.
 """
 
 import httpx
@@ -10,6 +12,13 @@ from fastapi import HTTPException
 
 from api import db
 from api.main import app
+
+# (source_name, db.attr_name). Add new sources as their /<source>/chunks
+# endpoint ships.
+RAG_SOURCES = [
+    pytest.param("arxiv", "arxiv_rag", id="arxiv"),
+    pytest.param("openalex", "openalex_rag", id="openalex"),
+]
 
 
 def test_health_all_dbs_ok(client):
@@ -59,8 +68,14 @@ def test_arxiv_detail_404(client):
     assert r.status_code == 404
 
 
-def test_arxiv_chunks_happy(client):
-    r = client.get("/arxiv/chunks", params={"q": "learning", "top_k": 3})
+# ---------------------------------------------------------------------------
+# /<source>/chunks — parametrized across every RAG source.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("source,opener_name", RAG_SOURCES)
+def test_chunks_happy(client, source, opener_name):
+    r = client.get(f"/{source}/chunks", params={"q": "learning", "top_k": 3})
     assert r.status_code == 200
     body = r.json()
     assert "items" in body
@@ -69,35 +84,41 @@ def test_arxiv_chunks_happy(client):
     assert body["top_k"] == 3
     if not body["items"]:
         pytest.skip(
-            "arxiv_rag.db returned no hits for 'learning'; "
-            "run scripts/arxiv_index_rag.py to build the corpus before this assertion is meaningful"
+            f"{source}_rag.db returned no hits for 'learning'; "
+            f"run scripts/{source}_index_rag.py to build the corpus before this assertion is meaningful"
         )
     item = body["items"][0]
     for key in ("chunk_id", "doc_id", "title", "section", "text", "score"):
         assert key in item, item
 
 
-def test_arxiv_chunks_empty_q_400(client):
-    r = client.get("/arxiv/chunks", params={"q": "   "})
+@pytest.mark.parametrize("source,opener_name", RAG_SOURCES)
+def test_chunks_empty_q_400(client, source, opener_name):
+    r = client.get(f"/{source}/chunks", params={"q": "   "})
     assert r.status_code == 400
 
 
-def test_arxiv_chunks_missing_q_400(client):
-    r = client.get("/arxiv/chunks")
-    # FastAPI rejects the missing required Query with 422; that's also a 4xx.
+@pytest.mark.parametrize("source,opener_name", RAG_SOURCES)
+def test_chunks_missing_q_4xx(client, source, opener_name):
+    r = client.get(f"/{source}/chunks")
+    # FastAPI rejects missing required Query with 422; that's also a 4xx.
     assert r.status_code in (400, 422)
 
 
-def test_arxiv_chunks_503_when_rag_db_missing(client):
-    def fake_rag():
-        raise HTTPException(status_code=503, detail="arxiv_rag.db not available: test")
+@pytest.mark.parametrize("source,opener_name", RAG_SOURCES)
+def test_chunks_503_when_rag_db_missing(client, source, opener_name):
+    opener = getattr(db, opener_name)
 
-    app.dependency_overrides[db.arxiv_rag] = fake_rag
-    r = client.get("/arxiv/chunks", params={"q": "foo"})
+    def fake_rag():
+        raise HTTPException(status_code=503, detail=f"{opener_name}.db not available: test")
+
+    app.dependency_overrides[opener] = fake_rag
+    r = client.get(f"/{source}/chunks", params={"q": "foo"})
     assert r.status_code == 503
 
 
-def test_arxiv_chunks_sparse_only_when_ollama_down(client, monkeypatch):
+@pytest.mark.parametrize("source,opener_name", RAG_SOURCES)
+def test_chunks_sparse_only_when_ollama_down(client, source, opener_name, monkeypatch):
     """If embedding raises httpx.HTTPError, the route still returns 200 with used_dense=False."""
     from rag import embedder
 
@@ -105,82 +126,25 @@ def test_arxiv_chunks_sparse_only_when_ollama_down(client, monkeypatch):
         raise httpx.ConnectError("simulated ollama down")
 
     monkeypatch.setattr(embedder, "embed_text", boom)
-    r = client.get("/arxiv/chunks", params={"q": "learning"})
+    r = client.get(f"/{source}/chunks", params={"q": "learning"})
     assert r.status_code == 200
     assert r.json()["used_dense"] is False
 
 
-def test_arxiv_rag_no_orphan_vectors():
-    """chunks_vec must have exactly one row per chunks row.
+@pytest.mark.parametrize("source,opener_name", RAG_SOURCES)
+def test_rag_no_orphan_vectors(source, opener_name):
+    """chunks_vec must have exactly one row per chunks row across every RAG DB.
 
     Catches the indexer-orphan bug where re-embedding a doc deletes from
     chunks but leaves the corresponding chunks_vec rows behind. sqlite-vec
     is a virtual table and FK cascade doesn't reach it, so the indexer's
     flush() must delete from chunks_vec explicitly.
     """
-    conn = db.arxiv_rag()
+    conn = getattr(db, opener_name)()
     n_chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     n_vecs = conn.execute("SELECT COUNT(*) FROM chunks_vec").fetchone()[0]
     if n_chunks == 0:
-        pytest.skip("arxiv_rag.db has no chunks; run scripts/arxiv_index_rag.py first")
-    assert n_chunks == n_vecs, f"orphan vectors: {n_chunks} chunks vs {n_vecs} vectors"
-
-
-def test_openalex_chunks_happy(client):
-    r = client.get("/openalex/chunks", params={"q": "neural network", "top_k": 3})
-    assert r.status_code == 200
-    body = r.json()
-    assert "items" in body
-    assert "used_dense" in body
-    assert isinstance(body["used_dense"], bool)
-    assert body["top_k"] == 3
-    if not body["items"]:
         pytest.skip(
-            "openalex_rag.db returned no hits for 'neural network'; "
-            "run scripts/openalex_index_rag.py to build the corpus before this assertion is meaningful"
+            f"{opener_name}.db has no chunks; run scripts/{source}_index_rag.py first"
         )
-    item = body["items"][0]
-    for key in ("chunk_id", "doc_id", "title", "section", "text", "score"):
-        assert key in item, item
-
-
-def test_openalex_chunks_empty_q_400(client):
-    r = client.get("/openalex/chunks", params={"q": "   "})
-    assert r.status_code == 400
-
-
-def test_openalex_chunks_missing_q_400(client):
-    r = client.get("/openalex/chunks")
-    assert r.status_code in (400, 422)
-
-
-def test_openalex_chunks_503_when_rag_db_missing(client):
-    def fake_rag():
-        raise HTTPException(status_code=503, detail="openalex_rag.db not available: test")
-
-    app.dependency_overrides[db.openalex_rag] = fake_rag
-    r = client.get("/openalex/chunks", params={"q": "foo"})
-    assert r.status_code == 503
-
-
-def test_openalex_chunks_sparse_only_when_ollama_down(client, monkeypatch):
-    """If embedding raises httpx.HTTPError, the route still returns 200 with used_dense=False."""
-    from rag import embedder
-
-    def boom(*_a, **_kw):
-        raise httpx.ConnectError("simulated ollama down")
-
-    monkeypatch.setattr(embedder, "embed_text", boom)
-    r = client.get("/openalex/chunks", params={"q": "neural network"})
-    assert r.status_code == 200
-    assert r.json()["used_dense"] is False
-
-
-def test_openalex_rag_no_orphan_vectors():
-    """Same invariant as test_arxiv_rag_no_orphan_vectors, for openalex_rag.db."""
-    conn = db.openalex_rag()
-    n_chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-    n_vecs = conn.execute("SELECT COUNT(*) FROM chunks_vec").fetchone()[0]
-    if n_chunks == 0:
-        pytest.skip("openalex_rag.db has no chunks; run scripts/openalex_index_rag.py first")
     assert n_chunks == n_vecs, f"orphan vectors: {n_chunks} chunks vs {n_vecs} vectors"

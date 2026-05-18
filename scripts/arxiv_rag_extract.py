@@ -12,17 +12,24 @@ from typing import Iterator
 from rag import Doc
 
 
-def iter_docs(arxiv_conn: sqlite3.Connection) -> Iterator[Doc]:
-    """Yield one Doc per row in `arxiv.papers`.
+def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Iterator[Doc]:
+    """Yield one Doc per row in `arxiv.papers`, optionally capped to `limit`.
 
     `Doc.text` is `title + "\\n\\n" + abstract`. `version` is `papers.oai_datestamp`
     when present; otherwise a content hash so re-extracts still detect upstream
     edits when a paper has no OAI timestamp.
     """
-    cursor = arxiv_conn.execute(
-        "SELECT id, title, abstract, oai_datestamp, updated_date "
-        "FROM papers ORDER BY id"
-    )
+    if limit is not None:
+        cursor = arxiv_conn.execute(
+            "SELECT id, title, abstract, oai_datestamp, updated_date "
+            "FROM papers ORDER BY id LIMIT ?",
+            (limit,),
+        )
+    else:
+        cursor = arxiv_conn.execute(
+            "SELECT id, title, abstract, oai_datestamp, updated_date "
+            "FROM papers ORDER BY id"
+        )
     for row in cursor:
         title = row["title"]
         abstract = row["abstract"]
