@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -7,6 +8,26 @@ from api import db
 from api.models import CountryDetail, CountrySummary, Page
 
 router = APIRouter(prefix="/factbook", tags=["factbook"])
+
+
+def _flatten(obj: Any) -> Any:
+    """Recursively simplify the CIA Factbook {"text": "..."} wrapper pattern.
+
+    - {"text": v} (only key)  → v
+    - {"text": v, "note": …}  → {"value": v, "note": …}  (siblings preserved)
+    - everything else walks recursively unchanged
+    """
+    if isinstance(obj, dict):
+        if "text" in obj:
+            siblings = {k: _flatten(v) for k, v in obj.items() if k != "text"}
+            text_val = obj["text"]
+            if not siblings:
+                return text_val
+            return {"value": text_val, **siblings}
+        return {k: _flatten(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_flatten(v) for v in obj]
+    return obj
 
 
 @router.get("/countries", response_model=Page[CountrySummary])
@@ -44,5 +65,5 @@ def get_country(
         id=row["id"],
         name=row["name"],
         region=row["region"],
-        data=json.loads(row["data"]) if row["data"] else None,
+        data=_flatten(json.loads(row["data"])) if row["data"] else None,
     )
