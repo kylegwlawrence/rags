@@ -37,12 +37,16 @@ def main() -> int:
                         help="Embedding batch size (chunks per HTTP call).")
     parser.add_argument("--ollama-url", default=embedder.OLLAMA_URL,
                         help="Override Ollama base URL.")
-    parser.add_argument("--chunk-size", type=int, default=1600,
-                        help="Max chars per chunk (default 1600).")
+    parser.add_argument("--chunk-size", type=int, default=1500,
+                        help="Soft target chars per chunk (default 1500).")
+    parser.add_argument("--max-chunk-size", type=int, default=1800,
+                        help="Hard cap on chunk length (default 1800).")
     args = parser.parse_args()
 
     if args.chunk_size < 1:
         parser.error("--chunk-size must be a positive integer")
+    if args.max_chunk_size < args.chunk_size:
+        parser.error("--max-chunk-size must be >= --chunk-size")
     if args.batch < 1:
         parser.error("--batch must be a positive integer")
     if args.limit < 1:
@@ -56,6 +60,7 @@ def main() -> int:
         batch=args.batch,
         ollama_url=args.ollama_url,
         chunk_size=args.chunk_size,
+        max_chunk_size=args.max_chunk_size,
         extra_meta={"source_limit": str(args.limit)},
         source_label="works",
     )
