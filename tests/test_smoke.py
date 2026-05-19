@@ -19,6 +19,7 @@ RAG_SOURCES = [
     pytest.param("arxiv", "arxiv_rag", id="arxiv"),
     pytest.param("openalex", "openalex_rag", id="openalex"),
     pytest.param("factbook", "factbook_rag", id="factbook"),
+    pytest.param("gutenberg", "gutenberg_rag", id="gutenberg"),
 ]
 
 
@@ -28,7 +29,7 @@ def test_health_all_dbs_ok(client):
     body = r.json()
     assert body["ok"] is True
     for name in ("arxiv", "arxiv_rag", "factbook", "factbook_rag",
-                 "openalex", "openalex_rag", "gutenberg"):
+                 "openalex", "openalex_rag", "gutenberg", "gutenberg_rag"):
         assert body["databases"][name] == "ok", body["databases"]
 
 

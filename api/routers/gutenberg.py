@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from api import db
+from api._chunks import add_chunks_route
 from api.models import GutenbergText, Page
 
 router = APIRouter(prefix="/gutenberg", tags=["gutenberg"])
@@ -97,3 +98,11 @@ def get_text_content(
     if not full.is_file():
         raise HTTPException(status_code=404, detail="file missing on disk")
     return FileResponse(full, media_type="text/plain; charset=utf-8")
+
+
+add_chunks_route(
+    router,
+    opener=db.gutenberg_rag,
+    source_name="gutenberg",
+    indexer_script="gutenberg_index_rag.py",
+)

@@ -22,6 +22,7 @@ def health() -> dict:
         ("openalex", db.openalex),
         ("openalex_rag", db.openalex_rag),
         ("gutenberg", db.gutenberg),
+        ("gutenberg_rag", db.gutenberg_rag),
     ):
         try:
             opener().execute("SELECT 1").fetchone()
