@@ -38,8 +38,9 @@ def run_indexer(
     reset: bool = False,
     batch: int = 32,
     ollama_url: str = embedder.OLLAMA_URL,
-    chunk_size: int = 1600,
+    chunk_size: int = 1500,
     chunk_overlap: int = 0,
+    max_chunk_size: int | None = None,
     extra_meta: dict[str, str] | None = None,
     legacy_table_prefixes: tuple[str, ...] = (),
     source_label: str = "docs",
@@ -55,7 +56,10 @@ def run_indexer(
         reset: When True, wipe `rag_db_path` and rebuild from scratch.
         batch: Embedding batch size (chunks per Ollama HTTP call).
         ollama_url: Override the embedder's default URL.
-        chunk_size, chunk_overlap: Per-source chunker config.
+        chunk_size, chunk_overlap: Per-source chunker config. `chunk_size` is
+            a soft target; the chunker prefers natural boundaries near it.
+        max_chunk_size: Hard cap on chunk length in characters. When None,
+            defaults to ~1.2 × `chunk_size` inside the chunker.
         extra_meta: Additional `_meta` rows stored alongside the standard keys
             (e.g. `{"source_limit": "5000"}` for openalex).
         legacy_table_prefixes: Trigger an auto-rebuild if any table starting
@@ -97,6 +101,7 @@ def run_indexer(
             ollama_url=ollama_url,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            max_chunk_size=max_chunk_size,
             extra_meta=extra_meta,
             source_label=source_label,
         )
@@ -116,14 +121,17 @@ def _run(
     ollama_url: str,
     chunk_size: int,
     chunk_overlap: int,
+    max_chunk_size: int | None,
     extra_meta: dict[str, str] | None,
     source_label: str,
 ) -> int:
     """Inner body of `run_indexer`; called within the try/finally that owns the connections."""
+    effective_max = max_chunk_size if max_chunk_size is not None else int(chunk_size * 1.2)
     schema.set_meta(rag_conn, "embed_model", embedder.EMBED_MODEL)
     schema.set_meta(rag_conn, "embedding_dim", str(embedder.EMBEDDING_DIM))
     schema.set_meta(rag_conn, "chunk_size", str(chunk_size))
     schema.set_meta(rag_conn, "chunk_overlap", str(chunk_overlap))
+    schema.set_meta(rag_conn, "max_chunk_size", str(effective_max))
     if extra_meta:
         for k, v in extra_meta.items():
             schema.set_meta(rag_conn, k, v)
@@ -195,7 +203,12 @@ def _run(
         if existing == doc.version:
             n_skipped += 1
             continue
-        chunks = chunk_fn(doc, chunk_size=chunk_size, overlap=chunk_overlap)
+        chunks = chunk_fn(
+            doc,
+            chunk_size=chunk_size,
+            overlap=chunk_overlap,
+            max_chunk_size=effective_max,
+        )
         if not chunks:
             # Empty doc — don't count toward n_new/n_updated or it'd re-count
             # on every subsequent run (since no docs_meta row gets written).
