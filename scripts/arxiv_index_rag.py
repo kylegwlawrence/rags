@@ -21,6 +21,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import arxiv_rag_extract  # noqa: E402
 from rag import embedder  # noqa: E402
+from rag.chunker import chunk_markdown  # noqa: E402
 from rag.indexer import run_indexer  # noqa: E402
 
 ARXIV_DB = REPO_ROOT / "data" / "arxiv" / "arxiv.db"
@@ -56,6 +57,7 @@ def main() -> int:
         source_db_path=ARXIV_DB,
         rag_db_path=RAG_DB,
         extractor=lambda conn: arxiv_rag_extract.iter_docs(conn, limit=args.limit),
+        chunk_fn=chunk_markdown,
         reset=args.reset,
         batch=args.batch,
         ollama_url=args.ollama_url,

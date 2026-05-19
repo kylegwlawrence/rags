@@ -1,8 +1,11 @@
 """Extract one Doc per arxiv paper for the RAG indexer.
 
-Phase 2a embeds title + abstract only (single chunk per paper for most rows).
-Full-HTML chunking is deferred to Phase 3 alongside the OAI/render pipeline
-port from `local_wikipedia`.
+Papers with downloaded HTML (`papers.html_content`) get rendered into
+section-tagged markdown via `rag.render.html_to_markdown` and consumed by
+`rag.chunker.chunk_markdown` downstream, so each chunk carries its paper
+section (Abstract / Introduction / Methods / Results / ...) in the
+`chunks.section` column. Papers without HTML fall back to the original
+title+abstract path.
 """
 
 import sqlite3
@@ -10,37 +13,50 @@ from collections.abc import Iterator
 
 from rag import Doc, content_hash
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
+from rag.render import html_to_markdown
 
 
 def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Iterator[Doc]:
     """Yield one Doc per row in `arxiv.papers`, optionally capped to `limit`.
 
-    `Doc.text` is `title + "\\n\\n" + abstract` after HTML stripping and
-    whitespace normalisation. `version` is `papers.oai_datestamp` when present;
-    otherwise a content hash so re-extracts still detect upstream edits when a
-    paper has no OAI timestamp. `CLEANER_VERSION` is appended so any cleaner
-    change invalidates every previously-stored chunk.
+    `Doc.text` is the rendered markdown body when `papers.html_content` is
+    present; otherwise `title + "\\n\\n" + abstract` after HTML stripping and
+    whitespace normalisation. `version` is `papers.oai_datestamp` when present
+    (otherwise a content hash so re-extracts still detect upstream edits)
+    plus an 8-char hash of the html body when present (so a paper that gets
+    HTML downloaded later re-embeds even when its OAI datestamp didn't move),
+    plus `CLEANER_VERSION` so any cleaning-pipeline change invalidates every
+    previously-stored chunk.
     """
     if limit is not None:
         cursor = arxiv_conn.execute(
-            "SELECT id, title, abstract, oai_datestamp, updated_date "
+            "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
             "FROM papers ORDER BY id LIMIT ?",
             (limit,),
         )
     else:
         cursor = arxiv_conn.execute(
-            "SELECT id, title, abstract, oai_datestamp, updated_date "
+            "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
             "FROM papers ORDER BY id"
         )
     for row in cursor:
         title = normalize_whitespace(strip_html(row["title"] or ""))
-        abstract = normalize_whitespace(strip_html(row["abstract"] or ""))
-        text = f"{title}\n\n{abstract}" if title and abstract else (title or abstract)
-        base_version = row["oai_datestamp"] or content_hash(title, abstract, row["updated_date"])
+        html_content = row["html_content"]
+        text = html_to_markdown(html_content).strip() if html_content else ""
+        if not text:
+            # No HTML body, or render produced nothing — fall back to title+abstract.
+            abstract = normalize_whitespace(strip_html(row["abstract"] or ""))
+            text = f"{title}\n\n{abstract}" if title and abstract else (title or abstract)
+        # html-body hash so newly-downloaded papers re-embed even when their
+        # oai_datestamp didn't change.
+        html_marker = content_hash(html_content)[:8] if html_content else "no-html"
+        base_version = row["oai_datestamp"] or content_hash(
+            title, row["abstract"] or "", row["updated_date"]
+        )
         yield Doc(
             doc_id=row["id"],
             title=title or row["id"],
-            version=f"{base_version}-{CLEANER_VERSION}",
+            version=f"{base_version}-{html_marker}-{CLEANER_VERSION}",
             text=text,
             section=None,
         )
