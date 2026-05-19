@@ -149,6 +149,61 @@ def test_chunks_sparse_only_when_ollama_down(client, source, opener_name, monkey
     assert r.json()["used_dense"] is False
 
 
+def test_gutenberg_content_serves_file(client):
+    """/gutenberg/texts/{id}/content streams the raw .txt body."""
+    r = client.get("/gutenberg/texts?limit=1")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("gutenberg.db has no texts; run scripts/gutenberg_index.py")
+    text_id = items[0]["id"]
+    r = client.get(f"/gutenberg/texts/{text_id}/content")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert len(r.content) > 0
+
+
+def test_gutenberg_content_rejects_path_traversal(client, monkeypatch):
+    """Defense-in-depth: serving rejects any path that escapes GUTENBERG_ROOT.
+
+    Monkeypatches `_lookup` to return a malicious row; the router's resolved-path
+    check should turn the request into a 404 without reading the file.
+    """
+    from api.routers import gutenberg as gutenberg_router
+
+    def malicious_lookup(conn, text_id):
+        return {
+            "id": text_id,
+            "path": "../../etc/passwd",
+            "title": "x",
+            "author": "x",
+            "language": "en",
+            "release_date": "",
+            "size_bytes": 0,
+        }
+
+    monkeypatch.setattr(gutenberg_router, "_lookup", malicious_lookup)
+    r = client.get("/gutenberg/texts/1/content")
+    assert r.status_code == 404
+
+
+def test_arxiv_content_endpoint(client):
+    """/arxiv/papers/{id}/content returns 200 text/html when has_html, 404 otherwise."""
+    r = client.get("/arxiv/papers?limit=1")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("arxiv.db has no papers")
+    paper = items[0]
+    r = client.get(f"/arxiv/papers/{paper['id']}/content")
+    if paper["has_html"]:
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/html")
+        assert len(r.content) > 0
+    else:
+        assert r.status_code == 404
+
+
 @pytest.mark.parametrize("source,opener_name", RAG_SOURCES)
 def test_rag_no_orphan_vectors(source, opener_name):
     """chunks_vec must have exactly one row per chunks row across every RAG DB.

@@ -56,6 +56,10 @@ Listens on `0.0.0.0:8002` so the Tailscale interface picks it up; access is gate
 
 All list endpoints paginate with `limit` (default 50, max 200) and `offset`, returning `{items, total, limit, offset}`. API is read-only — downloader / indexer scripts are the only write path.
 
+## Reload model
+
+The API caches read-only SQLite connections at module load (`api/db.py`). After any downloader or indexer rewrites a `data/<source>/*.db` file, restart `uvicorn` for the cached handles to reopen against the new file. **This is the supported reload mechanism.** Per-script notes below repeat the reminder where it matters. Other approaches considered (per-request watermark invalidation in `_meta`; an admin `POST /admin/reload` endpoint) were rejected — both have higher cost than benefit for a personal hobbyist API. See `docs/retros/2026-05-18-phase-2-overall-retro.md` for the disposition decision.
+
 ## Per-script notes
 
 - **`arxiv_index_fts.py`** — Builds the `papers_fts` FTS5 virtual table over `papers.title` + `papers.abstract` with the `porter unicode61` tokenizer (matches openalex's choice). External-content table — the index lives in `papers_fts` but the original text stays in `papers` (no duplication). Drop+rebuild on each run (~0.1 s at the current ~1.2k-row scale, adds <1 MB to the DB file). Required after every refresh-copy of `data/arxiv/arxiv.db` from `local_wikipedia` for `/arxiv/papers?q=` to return anything. No `CREATE INDEX` calls — the two existing indexes on `papers` (`idx_papers_primary_cat`, `idx_papers_submitted`) ride along with the copy.
