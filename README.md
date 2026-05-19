@@ -35,8 +35,9 @@ The API expects these files to already exist:
   `scripts/gutenberg_index_rag.py`; used by `/gutenberg/chunks`)
 - `data/gutenberg/gutenberg.db` and the `.txt` corpus under `data/gutenberg/`
 
-If a database is missing, the corresponding routes will 500 but the rest of
-the app still serves. Use `/health` to check.
+If a database is missing, the corresponding routes will 503 but the rest of
+the app still serves. Use `/health` to check — it returns 503 when any
+database is broken.
 
 ## Running
 
@@ -64,7 +65,9 @@ All list endpoints return a `Page[T]` shape:
 ### `GET /health`
 
 Runs `SELECT 1` against each database connection and returns per-database
-status plus a top-level `ok` boolean.
+status plus a top-level `ok` boolean. HTTP 503 if any database is broken; 200
+otherwise. Body always carries per-DB detail so a probe can tell which one
+failed without a second call.
 
 ### ArXiv
 
@@ -121,7 +124,8 @@ status plus a top-level `ok` boolean.
   - `q` — full-text search over `title` + `abstract`. Accepts FTS5 syntax:
     bare words are ANDed, `"phrase"` matches phrases, `term*` is a prefix
     match, `a OR b` and `a NOT b` work as expected. Malformed queries return
-    400.
+    400; a missing `works_fts` index returns 503 with the indexer script name
+    in the detail.
   - `sort` — one of `cited_by_count_desc` (default when `q` is not set),
     `year_desc`, `year_asc`, `relevance` (default when `q` is set; requires
     `q`).

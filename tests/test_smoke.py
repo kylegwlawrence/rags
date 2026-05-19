@@ -33,6 +33,21 @@ def test_health_all_dbs_ok(client):
         assert body["databases"][name] == "ok", body["databases"]
 
 
+def test_health_503_when_any_db_broken(client, monkeypatch):
+    """/health flips to 503 if any opener raises; the body still names which one failed."""
+    def broken():
+        raise RuntimeError("simulated DB outage")
+
+    monkeypatch.setattr(db, "arxiv", broken)
+    r = client.get("/health")
+    assert r.status_code == 503
+    body = r.json()
+    assert body["ok"] is False
+    assert body["databases"]["arxiv"].startswith("error:")
+    # Other DBs continue to be probed; the broken one doesn't short-circuit the loop.
+    assert len(body["databases"]) == 8
+
+
 def test_factbook_list(client):
     r = client.get("/factbook/countries?limit=1")
     assert r.status_code == 200

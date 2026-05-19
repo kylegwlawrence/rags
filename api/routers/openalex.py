@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api import db
 from api._chunks import add_chunks_route
 from api.models import Page, Work
+from rag.retriever import is_operational_error
 
 router = APIRouter(prefix="/openalex", tags=["openalex"])
 
@@ -139,6 +140,15 @@ def list_works(
             [*params, limit, offset],
         ).fetchall()
     except sqlite3.OperationalError as e:
+        if is_operational_error(e):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"openalex data not ready ({e}). "
+                    "Run scripts/openalex_index_fts.py or restore "
+                    "data/openalex/openalex.db."
+                ),
+            ) from e
         # Most often a malformed FTS5 query (`q="("`, unbalanced quotes, etc.).
         raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
 
