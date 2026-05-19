@@ -79,6 +79,18 @@ When instructions conflict, follow this order (higher wins):
 
 **Example:** "Add porter tokenizer to FTS index for stemming support" beats "updated the index script" (too vague) and "Modified openalex_index_fts.py to rebuild the works_fts FTS5 virtual table using the porter unicode61 tokenizer to improve recall for morphological variants" (too long). One clause: what, and (if non-obvious) why.
 
+### 1.10 Pre-flight bulk-job estimates against real data.
+
+**Why:** Eyeballed multiplications are reliably wrong. Phase 2 of this project missed embed-runtime estimates by 6×, 12–24×, and 20× across three consecutive sub-phases — each time the data needed to do the math right was available and not used. The cost of running the unit-of-work (chunker, fetcher, processor) against real input and counting is tiny; the cost of being surprised mid-run is "user paused at the halfway point."
+
+**Example:** Before estimating a full-corpus embed, run the extractor + chunker against the real data and count the chunks, then multiply by a measured per-chunk rate from a prior run on the same hardware. "5–10 min" became "60 min" twice in Phase 2 because the chunk-count was eyeballed as one-per-doc when reality was 5–8 per doc. "Run it once on real data" beats "estimate from the spec" every time.
+
+### 1.11 Give every recurring carry-over a disposition.
+
+**Why:** A carry-over that appears in three or more retros without movement isn't a TODO — it's either a decision to live with it (which should be stated) or a blocked task (which should name the blocker). The presence-of-carry-over signal works; what fails is the resolution loop. Items that age forever crowd out the active list and make each subsequent retro's `Carry-over` section less useful.
+
+**Example:** Items like `/health` returning 200 on broken DBs or a never-used `kaggle_download.sh` stub appeared in six retros each. Either action them in the next phase, or annotate them as "accepted; see <pointer>" in a permanent-limitations doc and stop listing them as active carry-over. The worst state is documented forever, never resolved, never accepted.
+
 ---
 
 ## 2. Engineering principles
@@ -131,6 +143,12 @@ When instructions conflict, follow this order (higher wins):
 
 **Example:** A function that's only called with a validated enum value doesn't need to handle "what if the value is `None`?" — its caller has already guaranteed otherwise. The right place for that check is at the boundary where the value entered the system.
 
+### 2.9 When fixing a bug, audit peer implementations of the same pattern in the same change.
+
+**Why:** §2.4 is a JOIN-specific instance of a broader principle: when a fix lands in one of several near-identical implementations, the parallel ones should be audited in the same edit, not "next time we touch that file." Phase 2 shipped the 503-vs-400 fix for missing-FTS-table in the arxiv router and missed the openalex router with the same shape — the asymmetry survived a full project retro and four sub-phase retros before being noticed. The fix that prevents this rule's failure mode lives right next to the bug that failed it.
+
+**Example:** Fixing operational-vs-syntax error classification in `/arxiv/papers?q=`? In the same change, audit `/openalex/works?q=` (same FTS5 JOIN, same `OperationalError` path) and fix it too. Adding a retry to one HTTP downloader? Check the sibling downloaders for the same gap. The cost is one extra paragraph in the diff; the cost of forgetting is the bug surviving for months while its sibling sits one file away.
+
 ---
 
 ## 3. Decision-making patterns
@@ -176,6 +194,12 @@ When instructions conflict, follow this order (higher wins):
 **Why:** You will almost always be wrong about what the future needs. Building for it adds code that has to be maintained without delivering value. Real requirements always look different from imagined ones.
 
 **Example:** Don't add a plugin system "in case we need to add more datasources" before you have the second datasource. Add the second one and see what actually wanted to be shared.
+
+### 3.8 Deferring a bulk job is a ship state, not a half-phase.
+
+**Why:** Long-running bulk jobs (full-corpus embeds, large rebuilds, multi-day backfills) can land their consuming endpoint independently of full corpus coverage — if the indexer is incremental and the consumer works against partial data. "Endpoint shipped against a smaller scope with an idempotent resume path" is a complete state, not 80%-done. Phase 2 deferred three of four embeds and shipped all four endpoints with this shape. This is the converse of §1.3 (no half-finished branches): incremental-bulk-job-deferred is *not* a half-phase if the contract below holds.
+
+**Example:** A `/chunks` endpoint backed by a 50-doc sample is fully shipped when (a) the schema is correct, (b) smoke tests pass against the partial corpus, (c) the indexer resumes cleanly without `--reset`, and (d) the deferral is recorded in the retro's carry-over with a one-line resume command. None of those conditions are "we'll finish later" — they're "the consumer is shipped and the corpus grows on demand." Don't conflate "deferred bulk job with a stated resume path" with "half-finished branch."
 
 ---
 
@@ -227,14 +251,17 @@ These are negations of the rules above, written out so they're easy to recognize
 - **Auto-committing.** Treating "I finished the change" as authorization to commit.
 - **Stacked half-phases.** Leaving phase N at 80% to start phase N+1.
 - **Reconstructive retros.** Writing a retro weeks later, guessing at what mattered.
+- **Eyeballed bulk estimates.** Multiplying assumed-unit-count by assumed-unit-rate when real-data measurements are one chunker run away.
 - **Backgrounded restarts.** `pkill && start &` chains, where failures are invisible.
 - **Silent deferral.** "We'll do this later" with no record of what or why.
+- **Aging carry-over.** Listing the same item in three+ retros without action or formal acceptance.
 - **Scope creep on small tasks.** Refactoring around a one-line fix.
 - **Premature abstraction.** Extracting a helper after one example.
 - **Speculative frameworks.** Building plugin systems before the second plugin exists.
 - **Operational errors as user errors.** 400 for "the index isn't built."
 - **Selective parameterization.** String-formatted SQL/shell for "trusted" inputs.
 - **JOIN without column audit.** Adding a JOIN and trusting the smoke test to catch ambiguous columns.
+- **Asymmetric fix.** Patching one of several near-identical implementations without auditing the peers in the same change.
 - **Hidden caches.** Module-level state without a documented staleness mode.
 - **Catch-everything error handling.** `try/except` around things that can't fail.
 - **One-doc-fits-all.** README that's simultaneously a user guide, contributor guide, and agent guide.
