@@ -10,9 +10,10 @@ Configurable via the `OLLAMA_URL` env var (default `http://localhost:11434`).
 
 import os
 import struct
-import time
 
 import httpx
+
+from rag.retry import with_retry
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 EMBED_MODEL = "nomic-embed-text:v1.5"
@@ -20,9 +21,6 @@ EMBEDDING_DIM = 768
 
 EMBED_DOC_PREFIX = "search_document: "
 EMBED_QUERY_PREFIX = "search_query: "
-
-_MAX_ATTEMPTS = 3
-_BACKOFF_BASE = 2.0
 
 
 def format_document(title: str, section: str | None, text: str) -> str:
@@ -45,24 +43,20 @@ def format_query(query: str) -> str:
 def embed_text(text: str, base_url: str = OLLAMA_URL) -> list[float]:
     """Embed a single text via Ollama `/api/embeddings`.
 
-    Retries up to 3x with exponential backoff on HTTP errors. Raises
-    `httpx.HTTPError` if all attempts fail; the retriever catches this for the
-    sparse-only fallback path.
+    Retries up to `rag.retry.MAX_ATTEMPTS` times with exponential backoff on
+    HTTP errors. Raises `httpx.HTTPError` if all attempts fail; the retriever
+    catches this for the sparse-only fallback path.
     """
-    for attempt in range(_MAX_ATTEMPTS):
-        if attempt:
-            time.sleep(_BACKOFF_BASE**attempt)
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                resp = client.post(
-                    f"{base_url}/api/embeddings",
-                    json={"model": EMBED_MODEL, "prompt": text},
-                )
-                resp.raise_for_status()
-                return resp.json()["embedding"]
-        except httpx.HTTPError:
-            if attempt == _MAX_ATTEMPTS - 1:
-                raise
+    def _call() -> list[float]:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{base_url}/api/embeddings",
+                json={"model": EMBED_MODEL, "prompt": text},
+            )
+            resp.raise_for_status()
+            return resp.json()["embedding"]
+
+    return with_retry(_call, httpx.HTTPError)
 
 
 def embed_texts_batch(texts: list[str], base_url: str = OLLAMA_URL) -> list[list[float]]:
@@ -72,20 +66,16 @@ def embed_texts_batch(texts: list[str], base_url: str = OLLAMA_URL) -> list[list
     retry policy as `embed_text` but a longer (120 s) timeout because the batch
     can include hundreds of chunks.
     """
-    for attempt in range(_MAX_ATTEMPTS):
-        if attempt:
-            time.sleep(_BACKOFF_BASE**attempt)
-        try:
-            with httpx.Client(timeout=120.0) as client:
-                resp = client.post(
-                    f"{base_url}/api/embed",
-                    json={"model": EMBED_MODEL, "input": texts},
-                )
-                resp.raise_for_status()
-                return resp.json()["embeddings"]
-        except httpx.HTTPError:
-            if attempt == _MAX_ATTEMPTS - 1:
-                raise
+    def _call() -> list[list[float]]:
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.post(
+                f"{base_url}/api/embed",
+                json={"model": EMBED_MODEL, "input": texts},
+            )
+            resp.raise_for_status()
+            return resp.json()["embeddings"]
+
+    return with_retry(_call, httpx.HTTPError)
 
 
 def pack_embedding(embedding: list[float]) -> bytes:

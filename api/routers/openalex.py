@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
 from api._chunks import add_chunks_route
+from api._fts import translate_fts_errors
 from api.models import Page, Work
-from rag.retriever import is_operational_error
 
 router = APIRouter(prefix="/openalex", tags=["openalex"])
 
@@ -129,7 +129,9 @@ def list_works(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 
-    try:
+    with translate_fts_errors(
+        "openalex", "openalex_index_fts.py", "data/openalex/openalex.db"
+    ):
         total = conn.execute(
             f"SELECT COUNT(*) FROM {from_clause} {where}", params
         ).fetchone()[0]
@@ -139,18 +141,6 @@ def list_works(
             f"FROM {from_clause} {where} ORDER BY {order} LIMIT ? OFFSET ?",
             [*params, limit, offset],
         ).fetchall()
-    except sqlite3.OperationalError as e:
-        if is_operational_error(e):
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"openalex data not ready ({e}). "
-                    "Run scripts/openalex_index_fts.py or restore "
-                    "data/openalex/openalex.db."
-                ),
-            ) from e
-        # Most often a malformed FTS5 query (`q="("`, unbalanced quotes, etc.).
-        raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
 
     return Page[Work](
         items=[_row_to_work(r) for r in rows],

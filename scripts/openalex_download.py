@@ -19,37 +19,34 @@ from pathlib import Path
 
 import requests
 
-# Configuration
-DB_PATH = os.path.expanduser("data/openalex/openalex.db")
-MIN_CITATIONS = 500
-EMAIL = "sagansagansagan@protonmail.com"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
 
-_MAX_ATTEMPTS = 3
-_BACKOFF_BASE = 2.0
+from rag import retry  # noqa: E402
+
+DB_PATH = REPO_ROOT / "data" / "openalex" / "openalex.db"
+MIN_CITATIONS = 500
+EMAIL = os.environ.get("OPENALEX_EMAIL", "sagansagansagan@protonmail.com")
 
 
 def fetch_with_retry(url: str, params: dict) -> requests.Response:
-    """GET with exponential backoff; raises the last exception after _MAX_ATTEMPTS.
+    """GET with exponential backoff; raises the last exception after retries.
 
-    Mirrors rag/embedder.py's retry shape. A single transient 5xx used to
-    break the cursor loop entirely (losing the page-pagination position);
-    now it costs up to ~6 seconds of backoff before either recovering or
-    surfacing the error.
+    Delegates the retry/backoff policy to `rag.retry.with_retry`. A single
+    transient 5xx used to break the cursor loop entirely (losing the page-
+    pagination position); now it costs up to ~6 seconds of backoff before
+    either recovering or surfacing the error.
     """
-    for attempt in range(_MAX_ATTEMPTS):
-        if attempt:
-            time.sleep(_BACKOFF_BASE**attempt)
-        try:
-            response = requests.get(url, params=params, timeout=60)
-            response.raise_for_status()
-            return response
-        except requests.RequestException:
-            if attempt == _MAX_ATTEMPTS - 1:
-                raise
+    def _call() -> requests.Response:
+        response = requests.get(url, params=params, timeout=60)
+        response.raise_for_status()
+        return response
+
+    return retry.with_retry(_call, requests.RequestException)
 
 
 def main() -> int:
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
@@ -83,7 +80,7 @@ def main() -> int:
         try:
             response = fetch_with_retry(base_url, params)
         except requests.RequestException as e:
-            print(f"Error after {_MAX_ATTEMPTS} attempts: {e}", file=sys.stderr)
+            print(f"Error after {retry.MAX_ATTEMPTS} attempts: {e}", file=sys.stderr)
             return 1
 
         data = response.json()

@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route
+from api._fts import translate_fts_errors
 from api.models import Page, Paper
-from rag.retriever import is_operational_error
 
 router = APIRouter(prefix="/arxiv", tags=["arxiv"])
 
@@ -62,11 +62,6 @@ def _lookup(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
     return row
-
-
-# Operational-vs-syntax classification lives in rag.retriever and is shared
-# between this router's two 503-translating try/except blocks (list_papers FTS
-# below and search_chunks at the bottom of the file).
 
 
 @router.get("/papers", response_model=Page[Paper])
@@ -159,7 +154,7 @@ def list_papers(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 
-    try:
+    with translate_fts_errors("arxiv", "arxiv_index_fts.py", "data/arxiv/arxiv.db"):
         total = conn.execute(
             f"SELECT COUNT(*) FROM {from_clause} {where}", params
         ).fetchone()[0]
@@ -172,17 +167,6 @@ def list_papers(
             f"FROM {from_clause} {where} ORDER BY {order} LIMIT ? OFFSET ?",
             [*params, limit, offset],
         ).fetchall()
-    except sqlite3.OperationalError as e:
-        if is_operational_error(e):
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"arxiv data not ready ({e}). "
-                    "Run scripts/arxiv_index_fts.py or restore data/arxiv/arxiv.db."
-                ),
-            ) from e
-        # Most often a malformed FTS5 query (`q="("`, unbalanced quotes, etc.).
-        raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
 
     return Page[Paper](
         items=[_row_to_paper(r) for r in rows],

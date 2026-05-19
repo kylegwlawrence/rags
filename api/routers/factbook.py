@@ -21,7 +21,7 @@ def _flatten(obj: Any) -> Any:
     if isinstance(obj, dict):
         if "text" in obj:
             siblings = {k: _flatten(v) for k, v in obj.items() if k != "text"}
-            text_val = obj["text"]
+            text_val = _flatten(obj["text"])
             if not siblings:
                 return text_val
             return {"value": text_val, **siblings}
