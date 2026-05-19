@@ -81,6 +81,10 @@ def iter_docs(factbook_conn: sqlite3.Connection, limit: int | None = None) -> It
         text = _render_markdown(data)
         if not text.strip():
             continue
+        # Inline (not `rag.content_hash`) because the shared helper uses
+        # trailing-NUL separators for multi-arg boundary safety, which
+        # produces a different digest for the single-arg JSON-blob case and
+        # would invalidate every previously-stored factbook version.
         yield Doc(
             doc_id=row["id"],
             title=row["name"] or row["id"],

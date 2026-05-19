@@ -9,8 +9,23 @@ The embedding model is locked to `nomic-embed-text:v1.5` at 768 dimensions.
 Changing the model means rebuilding every `<source>_rag.db` from scratch.
 """
 
+import hashlib
 from dataclasses import dataclass
 from typing import NamedTuple
+
+
+def content_hash(*parts: str | None) -> str:
+    """SHA-256 hex prefix (32 chars / 128 bits) of NUL-joined parts.
+
+    Used by every per-source extractor that needs a stable version key when
+    the source schema lacks a per-row `updated_at` column. NUL separators
+    prevent boundary-collision tricks (`"ab"+"c"` vs `"a"+"bc"`).
+    """
+    h = hashlib.sha256()
+    for p in parts:
+        h.update((p or "").encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()[:32]
 
 
 @dataclass(frozen=True)

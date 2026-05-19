@@ -5,9 +5,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
-from api.models import Chunk, ChunksResponse, Page, Work
-from rag import retriever
-from rag.retriever import is_operational_error
+from api._chunks import add_chunks_route
+from api.models import Page, Work
 
 router = APIRouter(prefix="/openalex", tags=["openalex"])
 
@@ -151,52 +150,9 @@ def list_works(
     )
 
 
-@router.get("/chunks", response_model=ChunksResponse)
-def search_chunks(
-    q: str = Query(..., description="Natural-language query. Empty → 400."),
-    top_k: int = Query(20, ge=1, le=100),
-    candidate_k: int = Query(50, ge=10, le=200),
-    rag_conn: sqlite3.Connection = Depends(db.openalex_rag),
-) -> ChunksResponse:
-    """Hybrid (FTS5 + sqlite-vec) retrieval over openalex chunks (top-5k by citation).
-
-    Returns RRF-merged hits. `used_dense=False` means Ollama was unreachable
-    and only sparse FTS hits contributed; the body is still useful.
-
-    Errors: 400 on empty `q`; 503 when `openalex_rag.db` or its `chunks_fts` /
-    `chunks_vec` tables are missing (run `scripts/openalex_index_rag.py`).
-    """
-    if not q.strip():
-        raise HTTPException(status_code=400, detail="q must not be empty")
-    try:
-        result = retriever.retrieve(q, rag_conn, top_k=top_k, candidate_k=candidate_k)
-    except sqlite3.OperationalError as e:
-        if is_operational_error(e):
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"openalex RAG data not ready ({e}). "
-                    "Run scripts/openalex_index_rag.py or restore data/openalex/openalex_rag.db."
-                ),
-            ) from e
-        raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
-
-    items = [
-        Chunk(
-            chunk_id=h.chunk_id,
-            doc_id=h.doc_id,
-            title=h.title,
-            section=h.section,
-            chunk_index=h.chunk_index,
-            text=h.text,
-            text_length=h.text_length,
-            score=h.score,
-        )
-        for h in result.hits
-    ]
-    return ChunksResponse(
-        items=items,
-        used_dense=result.used_dense,
-        top_k=top_k,
-        candidate_k=candidate_k,
-    )
+add_chunks_route(
+    router,
+    opener=db.openalex_rag,
+    source_name="openalex",
+    indexer_script="openalex_index_rag.py",
+)

@@ -5,11 +5,10 @@ Full-HTML chunking is deferred to Phase 3 alongside the OAI/render pipeline
 port from `local_wikipedia`.
 """
 
-import hashlib
 import sqlite3
 from typing import Iterator
 
-from rag import Doc
+from rag import Doc, content_hash
 
 
 def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Iterator[Doc]:
@@ -34,7 +33,7 @@ def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Itera
         title = row["title"]
         abstract = row["abstract"]
         text = f"{title}\n\n{abstract}"
-        version = row["oai_datestamp"] or _content_hash(title, abstract, row["updated_date"])
+        version = row["oai_datestamp"] or content_hash(title, abstract, row["updated_date"])
         yield Doc(
             doc_id=row["id"],
             title=title,
@@ -42,12 +41,3 @@ def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Itera
             text=text,
             section=None,
         )
-
-
-def _content_hash(*parts: str | None) -> str:
-    """SHA-256 hex prefix of joined parts. `None` and missing parts become ''."""
-    h = hashlib.sha256()
-    for p in parts:
-        h.update((p or "").encode("utf-8"))
-        h.update(b"\x00")
-    return h.hexdigest()[:32]

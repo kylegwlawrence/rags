@@ -5,11 +5,10 @@ corpus is deferred. doc_id is the short W-id (after the last `/` in
 `works.id`), matching what `/openalex/works/{short_id}` already uses.
 """
 
-import hashlib
 import sqlite3
 from typing import Iterator
 
-from rag import Doc
+from rag import Doc, content_hash
 
 DEFAULT_LIMIT = 5000
 
@@ -45,16 +44,7 @@ def iter_docs(works_conn: sqlite3.Connection, limit: int = DEFAULT_LIMIT) -> Ite
         yield Doc(
             doc_id=short_id,
             title=display_title,
-            version=_content_hash(title, abstract),
+            version=content_hash(title, abstract),
             text=text,
             section=None,
         )
-
-
-def _content_hash(*parts: str | None) -> str:
-    """SHA-256 hex prefix of joined parts; nulls become ''."""
-    h = hashlib.sha256()
-    for p in parts:
-        h.update((p or "").encode("utf-8"))
-        h.update(b"\x00")
-    return h.hexdigest()[:32]

@@ -86,7 +86,40 @@ def run_indexer(
     source_conn = sqlite3.connect(f"file:{source_db_path}?mode=ro", uri=True)
     source_conn.row_factory = sqlite3.Row
     rag_conn = schema.connect_rag(rag_db_path)
+    try:
+        return _run(
+            source_conn=source_conn,
+            rag_conn=rag_conn,
+            rag_db_path=rag_db_path,
+            extractor=extractor,
+            chunk_fn=chunk_fn,
+            batch=batch,
+            ollama_url=ollama_url,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            extra_meta=extra_meta,
+            source_label=source_label,
+        )
+    finally:
+        rag_conn.close()
+        source_conn.close()
 
+
+def _run(
+    *,
+    source_conn: sqlite3.Connection,
+    rag_conn: sqlite3.Connection,
+    rag_db_path: Path,
+    extractor: Callable[[sqlite3.Connection], Iterable[Doc]],
+    chunk_fn: Callable[..., list[dict]],
+    batch: int,
+    ollama_url: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    extra_meta: dict[str, str] | None,
+    source_label: str,
+) -> int:
+    """Inner body of `run_indexer`; called within the try/finally that owns the connections."""
     schema.set_meta(rag_conn, "embed_model", embedder.EMBED_MODEL)
     schema.set_meta(rag_conn, "embedding_dim", str(embedder.EMBEDDING_DIM))
     schema.set_meta(rag_conn, "chunk_size", str(chunk_size))
@@ -187,8 +220,6 @@ def run_indexer(
     print("rebuilding chunks_fts...", file=sys.stderr)
     rag_conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
     rag_conn.commit()
-    rag_conn.close()
-    source_conn.close()
 
     elapsed = time.time() - t0
     db_mb = rag_db_path.stat().st_size / (1024**2)
@@ -198,7 +229,7 @@ def run_indexer(
         f"{n_updated} updated, {n_skipped} unchanged. "
         f"Chunks embedded: {n_chunks}. DB size: {db_mb:.1f} MB."
     )
-    print(f"(Restart uvicorn so api.db.<source>_rag() reopens the new file.)")
+    print(f"(Restart uvicorn so api.db.{rag_db_path.stem}() reopens the new file.)")
     return 0
 
 
