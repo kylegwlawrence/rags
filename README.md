@@ -30,6 +30,9 @@ The API expects these files to already exist:
 - `data/openalex/openalex_rag.db` (chunks + FTS + sqlite-vec embeddings for
   the top-5000 most-cited works, built by `scripts/openalex_index_rag.py`;
   used by `/openalex/chunks`)
+- `data/gutenberg/gutenberg_rag.db` (chunks + FTS + sqlite-vec embeddings
+  for a sampled subset of English Gutenberg texts, built by
+  `scripts/gutenberg_index_rag.py`; used by `/gutenberg/chunks`)
 - `data/gutenberg/gutenberg.db` and the `.txt` corpus under `data/gutenberg/`
 
 If a database is missing, the corresponding routes will 500 but the rest of
@@ -138,6 +141,10 @@ status plus a top-level `ok` boolean.
 - `GET /gutenberg/texts/{id}/content` — stream the raw `.txt` file as
   `text/plain; charset=utf-8`. Paths are resolved against `GUTENBERG_ROOT` and
   rejected if they escape the root.
+- `GET /gutenberg/chunks` — hybrid (FTS5 + sqlite-vec) chunk search.
+  Same params + response shape as `/arxiv/chunks`. The on-disk `.txt` body
+  is read, the Project Gutenberg banners stripped, and the rest chunked at
+  paragraph boundaries (default `chunk_size=2000`).
 
 ## Layout
 
