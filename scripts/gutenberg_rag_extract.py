@@ -21,19 +21,31 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from rag import Doc
+from rag.cleaner import CLEANER_VERSION, strip_markdown
 
-# Project Gutenberg has used several banner formats over the years; this
-# matches the standard `*** START/END OF ... PROJECT GUTENBERG EBOOK ... ***`
-# variant. Older Small-Print sections aren't fully stripped — see the
-# project retro for tradeoffs.
+# Project Gutenberg has used several banner formats over the years. The
+# audit found 5/14 chunks still containing "Project Gutenberg" after the old
+# single-pattern regex — these alternates cover the older "Small-Print"
+# preamble and the bare-prose "End of the Project Gutenberg..." footer. A
+# defensive line-level scrub below catches any stray "Project Gutenberg"
+# references that survive the structural banner removal.
 _PG_START_RE = re.compile(
-    r"\*\*\*\s*START OF (?:THIS|THE) PROJECT GUTENBERG EBOOK[^*]*\*\*\*",
+    r"\*\*\*\s*START\s+OF\s+(?:THIS|THE)?\s*PROJECT\s+GUTENBERG[^\n*]*\*\*\*"
+    r"|\*END\*THE\s+SMALL\s+PRINT[^*\n]*\*"
+    r"|\*\s*START\s+OF\s+THE\s+PROJECT\s+GUTENBERG[^\n]*",
     re.IGNORECASE,
 )
 _PG_END_RE = re.compile(
-    r"\*\*\*\s*END OF (?:THIS|THE) PROJECT GUTENBERG EBOOK[^*]*\*\*\*",
-    re.IGNORECASE,
+    r"\*\*\*\s*END\s+OF\s+(?:THIS|THE)?\s*PROJECT\s+GUTENBERG[^\n*]*\*\*\*"
+    r"|\*END\s+THE\s+SMALL\s+PRINT[^*\n]*\*"
+    r"|End\s+of\s+(?:the\s+)?Project\s+Gutenberg.*?(?=\n\n|\Z)",
+    re.IGNORECASE | re.DOTALL,
 )
+_PG_MENTION_LINE_RE = re.compile(
+    r"^.*Project\s+Gutenberg.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 
 def iter_docs(
@@ -68,7 +80,7 @@ def iter_docs(
         yield Doc(
             doc_id=str(row["id"]),
             title=title,
-            version=_file_fingerprint(path, row["size_bytes"]),
+            version=f"{_file_fingerprint(path, row['size_bytes'])}-{CLEANER_VERSION}",
             text=body,
             section=None,
         )
@@ -86,13 +98,23 @@ def _read_text(path: Path) -> str:
 
 
 def _strip_banners(text: str) -> str:
-    """Remove the PG start/end banner blocks, keeping the body between them."""
+    """Remove PG start/end banner blocks plus stray "Project Gutenberg" mentions.
+
+    Sequence: snip everything before the start banner and after the end
+    banner, then defensively delete any remaining line that mentions
+    "Project Gutenberg" (catches Small-Print remnants and footer prose the
+    structural regexes miss), then drop markdown emphasis runs (`**`) the
+    older PG text uses for inline emphasis, then collapse blank-line runs.
+    """
     start = _PG_START_RE.search(text)
     end = _PG_END_RE.search(text)
     if start:
         text = text[start.end():]
     if end:
         text = text[: end.start()]
+    text = _PG_MENTION_LINE_RE.sub("", text)
+    text = strip_markdown(text)
+    text = _BLANK_RUN_RE.sub("\n\n", text)
     return text.strip()
 
 

@@ -30,6 +30,7 @@ import sqlite3
 from collections.abc import Iterator
 
 from rag import Doc
+from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
 
 # Top-level section keys that show up in factbook JSON. Used both as the
 # canonical ordering and as the set of "## heading" producers — anything
@@ -84,11 +85,13 @@ def iter_docs(factbook_conn: sqlite3.Connection, limit: int | None = None) -> It
         # Inline (not `rag.content_hash`) because the shared helper uses
         # trailing-NUL separators for multi-arg boundary safety, which
         # produces a different digest for the single-arg JSON-blob case and
-        # would invalidate every previously-stored factbook version.
+        # would invalidate every previously-stored factbook version. The
+        # CLEANER_VERSION suffix invalidates on any cleaning-behaviour change.
+        version = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
         yield Doc(
             doc_id=row["id"],
             title=row["name"] or row["id"],
-            version=hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32],
+            version=f"{version}-{CLEANER_VERSION}",
             text=text,
             section=None,
         )
@@ -135,7 +138,7 @@ def _walk_to_lines(obj: object, path: str) -> Iterator[str]:
     """
     if isinstance(obj, dict):
         if "text" in obj and isinstance(obj["text"], str):
-            text_val = obj["text"].strip()
+            text_val = normalize_whitespace(strip_html(obj["text"]))
             if text_val:
                 yield _line(path, text_val)
             for k, v in obj.items():
@@ -151,7 +154,7 @@ def _walk_to_lines(obj: object, path: str) -> Iterator[str]:
     elif obj is None:
         return
     elif isinstance(obj, str):
-        s = obj.strip()
+        s = normalize_whitespace(strip_html(obj))
         if s:
             yield _line(path, s)
     else:
