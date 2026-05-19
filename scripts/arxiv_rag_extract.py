@@ -6,7 +6,7 @@ port from `local_wikipedia`.
 """
 
 import sqlite3
-from typing import Iterator
+from collections.abc import Iterator
 
 from rag import Doc, content_hash
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html

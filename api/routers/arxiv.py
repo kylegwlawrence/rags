@@ -28,13 +28,15 @@ def _row_to_paper(row: sqlite3.Row) -> Paper:
     `papers.categories` is a whitespace-separated token string from the OAI
     feed. Both are parsed here.
     """
+    authors_raw = row["authors"]
+    categories_raw = row["categories"]
     return Paper(
         id=row["id"],
         title=row["title"],
         abstract=row["abstract"],
-        authors=json.loads(row["authors"]),
+        authors=json.loads(authors_raw) if authors_raw else [],
         primary_category=row["primary_category"],
-        categories=row["categories"].split(),
+        categories=categories_raw.split() if categories_raw else [],
         submitted_date=row["submitted_date"],
         updated_date=row["updated_date"],
         doi=row["doi"],

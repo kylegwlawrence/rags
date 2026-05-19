@@ -65,7 +65,7 @@ def iter_docs(
         limit: Max number of texts to yield, ordered by `texts.id`.
     """
     cursor = gutenberg_conn.execute(
-        "SELECT id, title, author, path, size_bytes FROM texts "
+        "SELECT id, title, author, path FROM texts "
         "WHERE language = ? ORDER BY id LIMIT ?",
         (language, limit),
     )
@@ -80,7 +80,7 @@ def iter_docs(
         yield Doc(
             doc_id=str(row["id"]),
             title=title,
-            version=f"{_file_fingerprint(path, row['size_bytes'])}-{CLEANER_VERSION}",
+            version=f"{_file_fingerprint(path)}-{CLEANER_VERSION}",
             text=body,
             section=None,
         )
@@ -118,7 +118,7 @@ def _strip_banners(text: str) -> str:
     return text.strip()
 
 
-def _file_fingerprint(path: Path, size_bytes: int | None) -> str:
+def _file_fingerprint(path: Path) -> str:
     """`{size}-{hex}` where hex is SHA-256 prefix over first+last 4 KB.
 
     mtime drifts on rsync mirrors; size+endpoint-hash is a stable change-detection

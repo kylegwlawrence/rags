@@ -91,9 +91,3 @@ def embed_texts_batch(texts: list[str], base_url: str = OLLAMA_URL) -> list[list
 def pack_embedding(embedding: list[float]) -> bytes:
     """Serialize a float32 vector to raw bytes for sqlite-vec storage."""
     return struct.pack(f"{len(embedding)}f", *embedding)
-
-
-def unpack_embedding(data: bytes) -> list[float]:
-    """Deserialize raw bytes from sqlite-vec back to a float list."""
-    n = len(data) // 4
-    return list(struct.unpack(f"{n}f", data))

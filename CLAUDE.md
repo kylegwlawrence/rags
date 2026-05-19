@@ -22,7 +22,6 @@ python scripts/openalex_index_fts.py          # builds the works_fts FTS5 index
 python scripts/openalex_index_rag.py          # builds data/openalex/openalex_rag.db (top-5k by citation count)
 python scripts/gutenberg_index.py             # builds data/gutenberg/gutenberg.db from mirror + PG catalog
 python scripts/gutenberg_index_rag.py         # builds data/gutenberg/gutenberg_rag.db (chunks + FTS + sqlite-vec)
-bash   scripts/kaggle_download.sh
 bash   scripts/gutenberg_download.sh
 ```
 
@@ -73,7 +72,6 @@ The API caches read-only SQLite connections at module load (`api/db.py`). After 
 - **`openalex_index_fts.py`** — Builds the `works_fts` FTS5 virtual table over `works.title` + `works.abstract` with the `porter unicode61` tokenizer. External-content table — the index lives in `works_fts` but the original text stays in `works` (no duplication). Drop+rebuild on each run (~20 s, ~150 MB added to the DB). Required after `openalex_download.py` for `/openalex/works?q=` to return anything.
 - **`gutenberg_download.sh`** — Single rsync line that runs on a remote host (`pop-os`) via SSH and pulls `.txt` files from the ibiblio Gutenberg mirror. Not self-contained — requires that SSH alias to resolve.
 - **`gutenberg_index.py`** — Walks `data/gutenberg/` for canonical `<id>-0.txt` files, joins them against the official Project Gutenberg catalog CSV (`gutenberg.org/cache/epub/feeds/pg_catalog.csv`) for title/author/language/release-date metadata, and writes `data/gutenberg/gutenberg.db`. Indexes on `author`, `title`, `language`. Re-runnable (`INSERT OR REPLACE`); skips `old/` retired versions. Required before the `/gutenberg` API routes work.
-- **`kaggle_download.sh`** — Template script: `KAGGLE_USERNAME`, `KAGGLE_API_KEY`, and `DATASET` must be filled in before use. Writes credentials to `~/.kaggle/kaggle.json` and shells out to the `kaggle` CLI (pip-installed on demand).
 
 ### Re-indexing after a CLEANER_VERSION bump
 
