@@ -41,7 +41,7 @@ def format_query(query: str) -> str:
 
 
 def embed_text(text: str, base_url: str = OLLAMA_URL) -> list[float]:
-    """Embed a single text via Ollama `/api/embeddings`.
+    """Embed a single text via Ollama `/api/embed`.
 
     Retries up to `rag.retry.MAX_ATTEMPTS` times with exponential backoff on
     HTTP errors. Raises `httpx.HTTPError` if all attempts fail; the retriever
@@ -50,11 +50,11 @@ def embed_text(text: str, base_url: str = OLLAMA_URL) -> list[float]:
     def _call() -> list[float]:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
-                f"{base_url}/api/embeddings",
-                json={"model": EMBED_MODEL, "prompt": text},
+                f"{base_url}/api/embed",
+                json={"model": EMBED_MODEL, "input": [text]},
             )
             resp.raise_for_status()
-            return resp.json()["embedding"]
+            return resp.json()["embeddings"][0]
 
     return with_retry(_call, httpx.HTTPError)
 
