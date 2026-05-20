@@ -43,7 +43,8 @@ def main() -> int:
     parser.add_argument("--max-chunk-size", type=int, default=1800,
                         help="Hard cap on chunk length (default 1800).")
     parser.add_argument("--overlap", type=int, default=150,
-                        help="Inter-chunk overlap in chars (default 150 = 10%% of chunk-size).")
+                        help="Inter-chunk overlap in chars (default 150 = 10%% of chunk-size). "
+                             "Overlap is within-section only — does not carry across ## heading boundaries.")
     args = parser.parse_args()
 
     if args.chunk_size < 1:

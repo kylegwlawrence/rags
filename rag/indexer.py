@@ -39,7 +39,7 @@ def run_indexer(
     batch: int = 32,
     ollama_url: str = embedder.OLLAMA_URL,
     chunk_size: int = 1500,
-    chunk_overlap: int = 0,
+    chunk_overlap: int | None = None,
     max_chunk_size: int | None = None,
     extra_meta: dict[str, str] | None = None,
     legacy_table_prefixes: tuple[str, ...] = (),
@@ -58,6 +58,7 @@ def run_indexer(
         ollama_url: Override the embedder's default URL.
         chunk_size, chunk_overlap: Per-source chunker config. `chunk_size` is
             a soft target; the chunker prefers natural boundaries near it.
+            `chunk_overlap` defaults to 10% of `chunk_size` when None.
         max_chunk_size: Hard cap on chunk length in characters. When None,
             defaults to ~1.2 × `chunk_size` inside the chunker.
         extra_meta: Additional `_meta` rows stored alongside the standard keys
@@ -120,17 +121,18 @@ def _run(
     batch: int,
     ollama_url: str,
     chunk_size: int,
-    chunk_overlap: int,
+    chunk_overlap: int | None,
     max_chunk_size: int | None,
     extra_meta: dict[str, str] | None,
     source_label: str,
 ) -> int:
     """Inner body of `run_indexer`; called within the try/finally that owns the connections."""
     effective_max = max_chunk_size if max_chunk_size is not None else int(chunk_size * 1.2)
+    effective_overlap = chunk_overlap if chunk_overlap is not None else int(chunk_size * 0.1)
     schema.set_meta(rag_conn, "embed_model", embedder.EMBED_MODEL)
     schema.set_meta(rag_conn, "embedding_dim", str(embedder.EMBEDDING_DIM))
     schema.set_meta(rag_conn, "chunk_size", str(chunk_size))
-    schema.set_meta(rag_conn, "chunk_overlap", str(chunk_overlap))
+    schema.set_meta(rag_conn, "chunk_overlap", str(effective_overlap))
     schema.set_meta(rag_conn, "max_chunk_size", str(effective_max))
     if extra_meta:
         for k, v in extra_meta.items():
@@ -206,7 +208,7 @@ def _run(
         chunks = chunk_fn(
             doc,
             chunk_size=chunk_size,
-            overlap=chunk_overlap,
+            overlap=effective_overlap,
             max_chunk_size=effective_max,
         )
         if not chunks:
