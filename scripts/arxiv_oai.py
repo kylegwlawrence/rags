@@ -9,7 +9,8 @@ record header so the embed pipeline can detect "this paper changed").
 
 arXiv asks bulk harvesters for >= 3 s between requests and a contact
 ``mailto:`` in the User-Agent. Both are honored; the email is overridable
-via the ``ARXIV_OAI_EMAIL`` environment variable.
+via the ``ARXIV_EMAIL`` environment variable (shared with
+``scripts/arxiv_download.py``).
 
 Ported from ``local_wikipedia/arxiv/oai.py``. Two intentional deviations:
 
@@ -42,8 +43,8 @@ from typing import Any
 import httpx
 
 OAI_ENDPOINT = "https://oaipmh.arxiv.org/oai"
-ARXIV_OAI_EMAIL = os.environ.get("ARXIV_OAI_EMAIL", "kylegwlawrence@gmail.com")
-USER_AGENT = f"datasets/0.1 (mailto:{ARXIV_OAI_EMAIL})"
+ARXIV_EMAIL = os.environ.get("ARXIV_EMAIL", "kylegwlawrence@gmail.com")
+USER_AGENT = f"datasets/0.1 (mailto:{ARXIV_EMAIL})"
 MIN_REQUEST_INTERVAL = 3.0
 MAX_ATTEMPTS = 3
 BACKOFF_BASE = 5.0
