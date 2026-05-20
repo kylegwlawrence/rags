@@ -120,13 +120,25 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 def reset_data(conn: sqlite3.Connection) -> None:
-    """Delete all rows from papers, authors, paper_authors, ingest_state. Schema preserved."""
+    """Delete all rows from papers, authors, paper_authors, ingest_state. Schema preserved.
+
+    Also resets the AUTOINCREMENT counter for ``authors`` so subsequent
+    inserts start at id=1 again instead of continuing from whatever the
+    counter reached pre-reset. ``sqlite_sequence`` is created lazily by
+    SQLite the first time AUTOINCREMENT fires, so we check for its presence
+    before issuing the DELETE.
+    """
     conn.executescript(
         "DELETE FROM paper_authors;"
         " DELETE FROM authors;"
         " DELETE FROM papers;"
         " DELETE FROM ingest_state;"
     )
+    has_sequence = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'"
+    ).fetchone()
+    if has_sequence is not None:
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'authors'")
     conn.commit()
 
 
@@ -186,12 +198,24 @@ def _get_or_create_author(conn: sqlite3.Connection, author: dict[str, Any]) -> i
     affiliation would not violate ``UNIQUE`` — we always SELECT first with
     ``IS ?`` (null-safe in SQLite) before INSERTing, to avoid creating
     duplicates in that case.
+
+    On a dedup hit, ``display_name`` is updated if it differs from what's
+    stored. Suffixes fold into ``display_name`` but are NOT part of the
+    dedup key, so the same author can legitimately arrive with a different
+    display_name on a later record (e.g. "Alice Smith" then "Alice Smith
+    Jr."). The newer string wins.
     """
     row = conn.execute(
-        "SELECT id FROM authors WHERE keyname = ? AND forenames = ? AND affiliation IS ?",
+        "SELECT id, display_name FROM authors "
+        "WHERE keyname = ? AND forenames = ? AND affiliation IS ?",
         (author["keyname"], author["forenames"], author["affiliation"]),
     ).fetchone()
     if row is not None:
+        if row["display_name"] != author["display_name"]:
+            conn.execute(
+                "UPDATE authors SET display_name = ? WHERE id = ?",
+                (author["display_name"], row["id"]),
+            )
         return row["id"]
     cur = conn.execute(
         "INSERT INTO authors (keyname, forenames, display_name, affiliation) "

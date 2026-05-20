@@ -257,6 +257,35 @@ class TestGetOrCreateAuthor:
         assert a != b
         assert conn.execute("SELECT COUNT(*) FROM authors").fetchone()[0] == 2
 
+    def test_display_name_updated_on_dedup_hit(self, conn: sqlite3.Connection) -> None:
+        # Suffix folds into display_name but isn't part of the dedup key.
+        # The same author arriving later with a different display_name (e.g.
+        # gaining a suffix) updates the existing row in place.
+        a = _get_or_create_author(
+            conn,
+            {
+                "keyname": "Smith",
+                "forenames": "Alice",
+                "affiliation": None,
+                "display_name": "Alice Smith",
+            },
+        )
+        b = _get_or_create_author(
+            conn,
+            {
+                "keyname": "Smith",
+                "forenames": "Alice",
+                "affiliation": None,
+                "display_name": "Alice Smith Jr.",
+            },
+        )
+        assert a == b
+        assert conn.execute("SELECT COUNT(*) FROM authors").fetchone()[0] == 1
+        stored = conn.execute(
+            "SELECT display_name FROM authors WHERE id = ?", (a,)
+        ).fetchone()[0]
+        assert stored == "Alice Smith Jr."
+
 
 class TestIngestRecords:
     def test_accumulates_stats(self, conn: sqlite3.Connection) -> None:
@@ -318,6 +347,32 @@ class TestResetData:
         reset_data(conn)
         # Schema should still exist; we can upsert again afterwards.
         assert upsert_paper(conn, _record()) == "inserted"
+
+    def test_resets_authors_autoincrement(self, conn: sqlite3.Connection) -> None:
+        # Insert a paper (creates 2 authors with id=1, id=2).
+        upsert_paper(conn, _record())
+        max_id = conn.execute("SELECT MAX(id) FROM authors").fetchone()[0]
+        assert max_id == 2
+
+        reset_data(conn)
+
+        # After reset, the next inserted author should start at id=1 again,
+        # not continue from id=3 onwards.
+        upsert_paper(conn, _record())
+        first_id = conn.execute("SELECT MIN(id) FROM authors").fetchone()[0]
+        assert first_id == 1
+
+    def test_handles_freshly_created_db_without_sqlite_sequence(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        # sqlite_sequence is created lazily on first AUTOINCREMENT fire.
+        # reset_data on a brand-new DB (no inserts yet) shouldn't crash.
+        db = tmp_path / "fresh.db"
+        c = connect(db)
+        try:
+            reset_data(c)  # should not raise
+        finally:
+            c.close()
 
 
 class TestArxivIngestImport:

@@ -152,6 +152,17 @@ class TestParseRecord:
         parsed = parse_record(_record_element(_record(datestamp="")))
         assert parsed is None
 
+    def test_empty_title_returns_none(self) -> None:
+        # arxiv submissions require a title; an empty value means the OAI
+        # feed entry is malformed. Reject to avoid blank rows in the API.
+        parsed = parse_record(_record_element(_record(title="")))
+        assert parsed is None
+
+    def test_empty_abstract_returns_none(self) -> None:
+        # Same as title — arxiv requires an abstract; empty == malformed.
+        parsed = parse_record(_record_element(_record(abstract="")))
+        assert parsed is None
+
 
 class TestStructuredAuthors:
     """The Phase 3 carry-over: WORK.md section 2.1 — keep <keyname>/<forenames>/<affiliation> separate."""

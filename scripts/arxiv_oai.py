@@ -218,6 +218,10 @@ def parse_record(record_el: ET.Element) -> dict[str, Any] | None:
     * The ``<arXiv:id>`` element is missing or empty — the arxiv id is the
       primary key on ``papers``, so a missing id would either crash the
       insert or collide with other malformed records.
+    * ``<title>`` or ``<abstract>`` is missing or empty — arxiv requires both
+      on every submission, so an empty value indicates a malformed feed
+      entry rather than a real paper. Dropping at parse time avoids polluting
+      the API responses with blank rows.
     """
     header = record_el.find("oai:header", NS)
     if header is None:
@@ -249,6 +253,13 @@ def parse_record(record_el: ET.Element) -> dict[str, Any] | None:
     if not paper_id:
         return None
 
+    title = _collapse_ws(text_of("title"))
+    if not title:
+        return None
+    abstract = _collapse_ws(text_of("abstract"))
+    if not abstract:
+        return None
+
     authors = _parse_authors(arxiv_el)
     categories = text_of("categories")
     primary_category = categories.split()[0] if categories else ""
@@ -256,8 +267,8 @@ def parse_record(record_el: ET.Element) -> dict[str, Any] | None:
     return {
         "id": paper_id,
         "oai_datestamp": datestamp,
-        "title": _collapse_ws(text_of("title")),
-        "abstract": _collapse_ws(text_of("abstract")),
+        "title": title,
+        "abstract": abstract,
         "authors": authors,
         "categories": categories,
         "primary_category": primary_category,
