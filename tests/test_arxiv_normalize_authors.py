@@ -112,6 +112,18 @@ class TestAuthorDictFromLegacy:
         assert author_dict_from_legacy("") is None
         assert author_dict_from_legacy("   ") is None
 
+    def test_display_name_whitespace_normalized(self) -> None:
+        # Internal double spaces in the source string don't leak into
+        # display_name — it gets the same single-space form that split_name
+        # produced for keyname/forenames.
+        d = author_dict_from_legacy("  Alice   Smith  ")
+        assert d == {
+            "keyname": "Smith",
+            "forenames": "Alice",
+            "affiliation": None,
+            "display_name": "Alice Smith",
+        }
+
 
 class TestBackfill:
     def test_populates_authors_and_paper_authors(
@@ -195,3 +207,34 @@ class TestBackfill:
         stats = backfill(conn)
         assert stats["links"] == 1
         assert conn.execute("SELECT COUNT(*) FROM authors").fetchone()[0] == 1
+
+
+class TestFreshSchemaExit:
+    """`main` should exit cleanly when the DB is already on the new schema."""
+
+    def test_main_returns_0_on_fresh_schema(self, tmp_path: pathlib.Path) -> None:
+        # A DB created purely by arxiv_ingest.create_schema has no legacy
+        # `papers.authors` JSON column. The backfill should detect this and
+        # bail without crashing on `no such column: authors`.
+        db = tmp_path / "fresh.db"
+        c = sqlite3.connect(db)
+        arxiv_ingest.create_schema(c)
+        c.close()
+
+        # main runs without exception and returns 0.
+        rc = arxiv_normalize_authors.main(["--db", str(db)])
+        assert rc == 0
+
+    def test_has_legacy_authors_column_detection(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        # On a fresh-schema DB: False.
+        db = tmp_path / "fresh.db"
+        c = sqlite3.connect(db)
+        arxiv_ingest.create_schema(c)
+        assert arxiv_normalize_authors._has_legacy_authors_column(c) is False
+        # After ALTER TABLE to add the legacy column: True.
+        c.execute("ALTER TABLE papers ADD COLUMN authors TEXT")
+        c.commit()
+        assert arxiv_normalize_authors._has_legacy_authors_column(c) is True
+        c.close()

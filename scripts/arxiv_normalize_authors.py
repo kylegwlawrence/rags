@@ -60,18 +60,33 @@ def author_dict_from_legacy(name: str) -> dict[str, str | None] | None:
     """Turn one legacy collapsed-name string into a structured author dict.
 
     Returns the dict that ``arxiv_ingest._get_or_create_author`` expects, or
-    ``None`` if the input is empty / whitespace-only.
+    ``None`` if the input is empty / whitespace-only. ``display_name`` is
+    whitespace-normalised to a single-space form so it matches the value
+    produced by ``" ".join((forenames, keyname))`` from the cleaned tokens —
+    avoids storing internal double-spaces from messy upstream data.
     """
     keyname, forenames = split_name(name)
     if not keyname and not forenames:
         return None
-    display_name = name.strip()
+    display_name = " ".join(name.split())
     return {
         "keyname": keyname,
         "forenames": forenames,
         "affiliation": None,
         "display_name": display_name,
     }
+
+
+def _has_legacy_authors_column(conn: sqlite3.Connection) -> bool:
+    """Return True iff ``papers`` has the legacy ``authors`` JSON column.
+
+    Fresh-schema DBs (created by ``arxiv_ingest.create_schema``) don't have
+    this column — there's nothing for the backfill to convert. Detecting
+    this lets ``main`` exit cleanly with a useful message instead of
+    crashing on ``no such column: authors``.
+    """
+    rows = conn.execute("PRAGMA table_info(papers)").fetchall()
+    return any(row[1] == "authors" for row in rows)
 
 
 def backfill(
@@ -144,6 +159,16 @@ def main(argv: list[str] | None = None) -> int:
     conn.row_factory = sqlite3.Row
     # Ensure authors + paper_authors exist before the backfill writes to them.
     arxiv_ingest.create_schema(conn)
+
+    if not _has_legacy_authors_column(conn):
+        print(
+            "No legacy `papers.authors` column found — this DB is already on "
+            "the structured-author schema (created by "
+            "`scripts/arxiv_ingest.py`). Nothing to backfill.",
+            file=sys.stderr,
+        )
+        conn.close()
+        return 0
 
     t0 = time.time()
     stats = backfill(conn)

@@ -202,7 +202,16 @@ def list_papers(
             [*params, limit, offset],
         ).fetchall()
 
-    authors_by_paper = _fetch_authors_many(conn, [r["id"] for r in rows])
+    # translate_fts_errors maps missing-table errors to 503; it's generic
+    # over the operational-vs-syntax distinction, so re-use it here for the
+    # paper_authors / authors join too. If the user shipped this commit
+    # without running arxiv_normalize_authors.py (legacy DB) or
+    # arxiv_ingest.py (fresh DB), the tables don't exist and we want a
+    # 503 with the right hint, not a generic 500.
+    with translate_fts_errors(
+        "arxiv", "arxiv_normalize_authors.py", "data/arxiv/arxiv.db"
+    ):
+        authors_by_paper = _fetch_authors_many(conn, [r["id"] for r in rows])
     return Page[Paper](
         items=[_row_to_paper(r, authors_by_paper.get(r["id"], [])) for r in rows],
         total=total,
@@ -241,7 +250,11 @@ def get_paper(
     `cond-mat/0204015`) match cleanly.
     """
     row = _lookup(conn, paper_id)
-    return _row_to_paper(row, _fetch_authors_one(conn, paper_id))
+    with translate_fts_errors(
+        "arxiv", "arxiv_normalize_authors.py", "data/arxiv/arxiv.db"
+    ):
+        authors = _fetch_authors_one(conn, paper_id)
+    return _row_to_paper(row, authors)
 
 
 add_chunks_route(

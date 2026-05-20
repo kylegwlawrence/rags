@@ -86,6 +86,61 @@ def test_arxiv_detail_404(client):
     assert r.status_code == 404
 
 
+def test_arxiv_papers_503_when_paper_authors_missing(client, tmp_path):
+    """A DB without paper_authors/authors should produce 503, not 500.
+
+    Catches the regression where /arxiv/papers reaches the author-join
+    SELECT and gets `no such table: paper_authors` from SQLite. Without
+    the translation it'd surface as a generic 500; with the
+    translate_fts_errors wrap it surfaces as 503 with a hint to run the
+    backfill or ingest scripts.
+    """
+    import sqlite3
+
+    db_path = tmp_path / "no_authors.db"
+    c = sqlite3.connect(db_path)
+    c.executescript(
+        """
+        CREATE TABLE papers (
+            id TEXT PRIMARY KEY,
+            oai_datestamp TEXT NOT NULL,
+            title TEXT NOT NULL,
+            abstract TEXT NOT NULL,
+            categories TEXT NOT NULL,
+            primary_category TEXT NOT NULL,
+            submitted_date TEXT NOT NULL,
+            updated_date TEXT,
+            doi TEXT,
+            journal_ref TEXT,
+            comments TEXT,
+            html_content TEXT,
+            download_status TEXT,
+            downloaded_at TEXT
+        );
+        """
+    )
+    c.execute(
+        "INSERT INTO papers (id, oai_datestamp, title, abstract, categories, "
+        "primary_category, submitted_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("2401.0001", "2024-01-22", "T", "A", "cs.CL", "cs.CL", "2024-01-22"),
+    )
+    c.commit()
+    c.close()
+
+    ro_conn = sqlite3.connect(
+        f"file:{db_path}?mode=ro", uri=True, check_same_thread=False
+    )
+    ro_conn.row_factory = sqlite3.Row
+
+    app.dependency_overrides[db.arxiv] = lambda: ro_conn
+    try:
+        r = client.get("/arxiv/papers?limit=1")
+        assert r.status_code == 503, r.text
+        assert "arxiv_normalize_authors.py" in r.json()["detail"]
+    finally:
+        ro_conn.close()
+
+
 # ---------------------------------------------------------------------------
 # /<source>/chunks — parametrized across every RAG source.
 # ---------------------------------------------------------------------------
