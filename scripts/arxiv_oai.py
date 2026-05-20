@@ -205,7 +205,19 @@ def iter_cached_records(cache_dir: pathlib.Path) -> Iterator[dict[str, Any]]:
 
 
 def parse_record(record_el: ET.Element) -> dict[str, Any] | None:
-    """Parse one ``<record>``. Returns ``None`` for deleted records."""
+    """Parse one ``<record>``. Returns ``None`` for unusable records.
+
+    A record is treated as unusable (None returned) when any of these hold:
+
+    * The header is missing or marked ``status="deleted"``.
+    * The header has no ``<datestamp>`` (or it's empty) — without it, the
+      ingest step has no way to detect "this paper changed" for incremental
+      re-embed.
+    * The metadata wrapper or the ``<arXiv>`` element is missing.
+    * The ``<arXiv:id>`` element is missing or empty — the arxiv id is the
+      primary key on ``papers``, so a missing id would either crash the
+      insert or collide with other malformed records.
+    """
     header = record_el.find("oai:header", NS)
     if header is None:
         return None
@@ -216,6 +228,8 @@ def parse_record(record_el: ET.Element) -> dict[str, Any] | None:
     datestamp = ""
     if datestamp_el is not None and datestamp_el.text:
         datestamp = datestamp_el.text.strip()
+    if not datestamp:
+        return None
 
     metadata = record_el.find("oai:metadata", NS)
     if metadata is None:
@@ -230,12 +244,16 @@ def parse_record(record_el: ET.Element) -> dict[str, Any] | None:
             return ""
         return node.text.strip()
 
+    paper_id = text_of("id")
+    if not paper_id:
+        return None
+
     authors = _parse_authors(arxiv_el)
     categories = text_of("categories")
     primary_category = categories.split()[0] if categories else ""
 
     return {
-        "id": text_of("id"),
+        "id": paper_id,
         "oai_datestamp": datestamp,
         "title": _collapse_ws(text_of("title")),
         "abstract": _collapse_ws(text_of("abstract")),
@@ -267,6 +285,12 @@ def _parse_authors(arxiv_el: ET.Element) -> list[dict[str, str | None]]:
     Diverges from ``local_wikipedia/arxiv/oai.py:227-240`` (which collapsed
     ``f"{forenames} {keyname}"``) so the structured fields survive ingest —
     fixing the WORK.md section 2.1 carry-over.
+
+    An ``<author>`` element with no usable fields (no name parts AND no
+    affiliation) is treated as junk and skipped. An author with affiliation
+    but no name parts is kept (its ``display_name`` will be empty but the
+    affiliation is preserved); this case is vanishingly rare in real arxiv
+    data but the explicit policy avoids silent data loss.
     """
     authors_el = arxiv_el.find("arXiv:authors", NS)
     if authors_el is None:
@@ -278,7 +302,7 @@ def _parse_authors(arxiv_el: ET.Element) -> list[dict[str, str | None]]:
         suffix = _child_text(author, "suffix")
         affiliation = _child_text(author, "affiliation") or None
         display_name = " ".join(part for part in (forenames, keyname, suffix) if part)
-        if not display_name:
+        if not display_name and not affiliation:
             continue
         out.append(
             {

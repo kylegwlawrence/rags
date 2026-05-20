@@ -140,6 +140,18 @@ class TestParseRecord:
         parsed = parse_record(_record_element(_record(updated=None)))
         assert parsed["updated_date"] is None
 
+    def test_empty_id_returns_none(self) -> None:
+        # arxiv id is the primary key; a record without one would either
+        # crash the INSERT in slice 2 or collide on empty-string PK.
+        parsed = parse_record(_record_element(_record(arxiv_id="")))
+        assert parsed is None
+
+    def test_empty_datestamp_returns_none(self) -> None:
+        # Without a datestamp, slice 2's incremental skip can't detect
+        # "this paper changed" — drop the record at parse time.
+        parsed = parse_record(_record_element(_record(datestamp="")))
+        assert parsed is None
+
 
 class TestStructuredAuthors:
     """The Phase 3 carry-over: WORK.md section 2.1 — keep <keyname>/<forenames>/<affiliation> separate."""
@@ -211,9 +223,30 @@ class TestStructuredAuthors:
         assert parsed["authors"][0]["display_name"] == "Mononym"
 
     def test_empty_author_element_skipped(self) -> None:
+        # No name parts AND no affiliation → junk record, drop.
         body = _record(authors_xml="<authors><author></author></authors>")
         parsed = parse_record(_record_element(body))
         assert parsed["authors"] == []
+
+    def test_author_with_only_affiliation_kept(self) -> None:
+        # Vanishingly rare in real arxiv data but documented as the explicit
+        # policy: affiliation alone is enough to keep the record.
+        body = _record(
+            authors_xml=(
+                "<authors>"
+                "<author><affiliation>CERN</affiliation></author>"
+                "</authors>"
+            )
+        )
+        parsed = parse_record(_record_element(body))
+        assert parsed["authors"] == [
+            {
+                "keyname": "",
+                "forenames": "",
+                "affiliation": "CERN",
+                "display_name": "",
+            }
+        ]
 
     def test_no_authors_element_returns_empty_list(self) -> None:
         # Author parsing pulls from <authors>; an arXiv record without one
@@ -240,14 +273,16 @@ class TestStructuredAuthors:
 
 class TestIterCachedRecords:
     def test_walks_xml_files_in_sorted_order(self, tmp_path: pathlib.Path) -> None:
-        # Drop two cache files; assert both records come back in deterministic order.
+        # Write files in reverse name order to confirm the iterator sorts by
+        # filename, not by filesystem creation/inode order. With inode-order
+        # iteration this test would return [0002, 0001] and fail.
         cache = tmp_path / "cache"
         cache.mkdir()
-        (cache / "01.xml").write_text(
-            _list_records_page(_record(arxiv_id="2401.0001")), encoding="utf-8"
-        )
         (cache / "02.xml").write_text(
             _list_records_page(_record(arxiv_id="2401.0002")), encoding="utf-8"
+        )
+        (cache / "01.xml").write_text(
+            _list_records_page(_record(arxiv_id="2401.0001")), encoding="utf-8"
         )
         records = list(iter_cached_records(cache))
         assert [r["id"] for r in records] == ["2401.0001", "2401.0002"]
