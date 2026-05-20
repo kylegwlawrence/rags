@@ -20,7 +20,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-CLEANER_VERSION = "v2"
+CLEANER_VERSION = "v3"
 
 
 def strip_html(text: str) -> str:

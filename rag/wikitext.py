@@ -39,6 +39,14 @@ _FILE_PREFIXES = ("file:", "image:", "media:")
 _CATEGORY_PREFIX = "category:"
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
 
+# Sections that are pure navigation/bibliographic noise — lists of links or
+# titles with no prose value for retrieval.
+_NAV_SECTIONS = frozenset({
+    "related pages", "other websites", "see also", "external links",
+    "references", "notes", "further reading", "bibliography",
+    "footnotes", "citations",
+})
+
 
 def is_redirect(wikitext: str) -> bool:
     """Return True if this article is a #REDIRECT stub."""
@@ -71,7 +79,7 @@ def wikitext_to_markdown(wikitext: str) -> str:
         lead = wikitext[: matches[0].start()]
         lead_body = _strip_fragment(lead)
         if lead_body:
-            parts.append(lead_body)
+            parts.append(f"## Introduction\n\n{lead_body}")
         for i, m in enumerate(matches):
             level = len(m.group(1))
             heading = m.group(2).strip()
@@ -79,6 +87,8 @@ def wikitext_to_markdown(wikitext: str) -> str:
             fragment = wikitext[m.end():end]
             body = _strip_fragment(fragment)
             if not heading and not body:
+                continue
+            if heading.lower() in _NAV_SECTIONS:
                 continue
             # Map ==..====== (2..6 equals signs) onto markdown ##..######.
             # `chunk_markdown` splits on ##/###/####; deeper headings just
