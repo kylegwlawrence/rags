@@ -41,6 +41,8 @@ _BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 # Sections that are pure navigation/bibliographic noise — lists of links or
 # titles with no prose value for retrieval.
+_STRIP_TAGS = frozenset({"ref", "references", "gallery"})
+
 _NAV_SECTIONS = frozenset({
     "related pages", "other websites", "see also", "external links",
     "references", "notes", "further reading", "bibliography",
@@ -118,6 +120,12 @@ def _strip_fragment(fragment: str) -> str:
         # mwparserfromhell can raise on severely malformed input; fall back
         # to the raw fragment so we don't lose the section entirely.
         return fragment.strip()
+
+    for tag in list(parsed.filter_tags(matches=lambda n: str(n.tag).lower() in _STRIP_TAGS)):
+        try:
+            parsed.remove(tag)
+        except ValueError:
+            pass
 
     for wl in list(parsed.filter_wikilinks()):
         title = str(wl.title).strip().lower()
