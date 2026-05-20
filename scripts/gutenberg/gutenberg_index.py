@@ -14,7 +14,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GUTENBERG_ROOT = REPO_ROOT / "data" / "gutenberg"
 DB_PATH = GUTENBERG_ROOT / "gutenberg.db"
 CATALOG_URL = "https://www.gutenberg.org/cache/epub/feeds/pg_catalog.csv"
