@@ -12,20 +12,20 @@ A Python venv lives at `.venv/`. Activate before running Python scripts:
 
 ```bash
 source .venv/bin/activate
-python scripts/arxiv_ingest.py                # harvests metadata via OAI-PMH into data/arxiv/arxiv.db
-python scripts/arxiv_download.py              # fetches HTML bodies for papers in arxiv.db
-python scripts/arxiv_normalize_authors.py     # backfills authors + paper_authors from legacy JSON (one-shot)
-python scripts/arxiv_index_fts.py             # builds the papers_fts FTS5 index
-python scripts/arxiv_index_rag.py             # builds data/arxiv/arxiv_rag.db (chunks + FTS + sqlite-vec)
-python scripts/factbook_download.py
-python scripts/factbook_index_rag.py          # builds data/factbook/factbook_rag.db from countries JSON
-python scripts/openalex_download.py
-python scripts/openalex_normalize_authors.py  # backfills authors + work_authors tables
-python scripts/openalex_index_fts.py          # builds the works_fts FTS5 index
-python scripts/openalex_index_rag.py          # builds data/openalex/openalex_rag.db (top-5k by citation count)
-python scripts/gutenberg_index.py             # builds data/gutenberg/gutenberg.db from mirror + PG catalog
-python scripts/gutenberg_index_rag.py         # builds data/gutenberg/gutenberg_rag.db (chunks + FTS + sqlite-vec)
-bash   scripts/gutenberg_download.sh
+python scripts/arxiv/arxiv_ingest.py                # harvests metadata via OAI-PMH into data/arxiv/arxiv.db
+python scripts/arxiv/arxiv_download.py              # fetches HTML bodies for papers in arxiv.db
+python scripts/arxiv/arxiv_normalize_authors.py     # backfills authors + paper_authors from legacy JSON (one-shot)
+python scripts/arxiv/arxiv_index_fts.py             # builds the papers_fts FTS5 index
+python scripts/arxiv/arxiv_index_rag.py             # builds data/arxiv/arxiv_rag.db (chunks + FTS + sqlite-vec)
+python scripts/factbook/factbook_download.py
+python scripts/factbook/factbook_index_rag.py       # builds data/factbook/factbook_rag.db from countries JSON
+python scripts/openalex/openalex_download.py
+python scripts/openalex/openalex_normalize_authors.py  # backfills authors + work_authors tables
+python scripts/openalex/openalex_index_fts.py       # builds the works_fts FTS5 index
+python scripts/openalex/openalex_index_rag.py       # builds data/openalex/openalex_rag.db (top-5k by citation count)
+python scripts/gutenberg/gutenberg_index.py         # builds data/gutenberg/gutenberg.db from mirror + PG catalog
+python scripts/gutenberg/gutenberg_index_rag.py     # builds data/gutenberg/gutenberg_rag.db (chunks + FTS + sqlite-vec)
+bash   scripts/gutenberg/gutenberg_download.sh
 ```
 
 The arxiv ingest pipeline is self-contained in this repo (Phase 3 ported it
