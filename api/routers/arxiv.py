@@ -1,4 +1,3 @@
-import json
 import sqlite3
 from typing import Literal
 
@@ -21,20 +20,20 @@ SORTS = {
 Sort = Literal["submitted_desc", "submitted_asc", "updated_desc", "relevance"]
 
 
-def _row_to_paper(row: sqlite3.Row) -> Paper:
-    """Map a `papers` row to its response model.
+def _row_to_paper(row: sqlite3.Row, authors: list[str]) -> Paper:
+    """Map a `papers` row + its ordered author display_names to the response model.
 
-    `papers.authors` is a JSON array of `"forenames keyname"` strings;
-    `papers.categories` is a whitespace-separated token string from the OAI
-    feed. Both are parsed here.
+    `authors` is fetched separately (single-query batch for `list_papers`,
+    per-paper for `get_paper`) — the normalized `paper_authors` / `authors`
+    tables replaced the legacy JSON column in Phase 3. `papers.categories`
+    is a whitespace-separated token string from the OAI feed.
     """
-    authors_raw = row["authors"]
     categories_raw = row["categories"]
     return Paper(
         id=row["id"],
         title=row["title"],
         abstract=row["abstract"],
-        authors=json.loads(authors_raw) if authors_raw else [],
+        authors=authors,
         primary_category=row["primary_category"],
         categories=categories_raw.split() if categories_raw else [],
         submitted_date=row["submitted_date"],
@@ -53,7 +52,7 @@ def _lookup(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
     need the same fetch-or-404 step, so it lives in one place.
     """
     row = conn.execute(
-        "SELECT id, title, abstract, authors, primary_category, categories, "
+        "SELECT id, title, abstract, primary_category, categories, "
         "       submitted_date, updated_date, doi, journal_ref, comments, "
         "       download_status, html_content "
         "FROM papers WHERE id = ?",
@@ -62,6 +61,37 @@ def _lookup(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
     return row
+
+
+def _fetch_authors_one(conn: sqlite3.Connection, paper_id: str) -> list[str]:
+    """Return the ordered list of author display_names for one paper."""
+    rows = conn.execute(
+        "SELECT a.display_name FROM paper_authors pa "
+        "JOIN authors a ON a.id = pa.author_id "
+        "WHERE pa.paper_id = ? ORDER BY pa.position",
+        (paper_id,),
+    ).fetchall()
+    return [r["display_name"] for r in rows]
+
+
+def _fetch_authors_many(
+    conn: sqlite3.Connection, paper_ids: list[str]
+) -> dict[str, list[str]]:
+    """Batch lookup: return ``{paper_id: [display_name, ...]}`` ordered by position."""
+    if not paper_ids:
+        return {}
+    placeholders = ",".join("?" * len(paper_ids))
+    rows = conn.execute(
+        f"SELECT pa.paper_id, a.display_name "
+        f"FROM paper_authors pa JOIN authors a ON a.id = pa.author_id "
+        f"WHERE pa.paper_id IN ({placeholders}) "
+        f"ORDER BY pa.paper_id, pa.position",
+        paper_ids,
+    ).fetchall()
+    out: dict[str, list[str]] = {pid: [] for pid in paper_ids}
+    for r in rows:
+        out[r["paper_id"]].append(r["display_name"])
+    return out
 
 
 @router.get("/papers", response_model=Page[Paper])
@@ -94,8 +124,8 @@ def list_papers(
     author: str | None = Query(
         None,
         description=(
-            "Substring match against the raw JSON-encoded papers.authors text. "
-            "Not normalized — matches across author boundaries are possible."
+            "Substring match against any of the paper's authors via the "
+            "normalized `paper_authors` / `authors` tables."
         ),
     ),
     has_html: bool | None = Query(
@@ -143,7 +173,11 @@ def list_papers(
         clauses.append("submitted_date <= ?")
         params.append(submitted_to)
     if author is not None:
-        clauses.append("authors LIKE ?")
+        clauses.append(
+            "EXISTS (SELECT 1 FROM paper_authors pa "
+            "JOIN authors a ON a.id = pa.author_id "
+            "WHERE pa.paper_id = papers.id AND a.display_name LIKE ?)"
+        )
         params.append(f"%{author}%")
     if has_html is not None:
         # IS / IS NOT are SQLite's null-safe comparators. Bare `!= 'downloaded'`
@@ -159,7 +193,7 @@ def list_papers(
             f"SELECT COUNT(*) FROM {from_clause} {where}", params
         ).fetchone()[0]
         rows = conn.execute(
-            f"SELECT papers.id, papers.title, papers.abstract, papers.authors, "
+            f"SELECT papers.id, papers.title, papers.abstract, "
             f"       papers.primary_category, papers.categories, "
             f"       papers.submitted_date, papers.updated_date, papers.doi, "
             f"       papers.journal_ref, papers.comments, papers.download_status, "
@@ -168,8 +202,9 @@ def list_papers(
             [*params, limit, offset],
         ).fetchall()
 
+    authors_by_paper = _fetch_authors_many(conn, [r["id"] for r in rows])
     return Page[Paper](
-        items=[_row_to_paper(r) for r in rows],
+        items=[_row_to_paper(r, authors_by_paper.get(r["id"], [])) for r in rows],
         total=total,
         limit=limit,
         offset=offset,
@@ -205,7 +240,8 @@ def get_paper(
     `{paper_id:path}` so old-style ids with embedded slashes (e.g.
     `cond-mat/0204015`) match cleanly.
     """
-    return _row_to_paper(_lookup(conn, paper_id))
+    row = _lookup(conn, paper_id)
+    return _row_to_paper(row, _fetch_authors_one(conn, paper_id))
 
 
 add_chunks_route(

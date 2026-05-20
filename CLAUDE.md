@@ -12,7 +12,10 @@ A Python venv lives at `.venv/`. Activate before running Python scripts:
 
 ```bash
 source .venv/bin/activate
-python scripts/arxiv_index_fts.py             # builds the papers_fts FTS5 index over data/arxiv/arxiv.db
+python scripts/arxiv_ingest.py                # harvests metadata via OAI-PMH into data/arxiv/arxiv.db
+python scripts/arxiv_download.py              # fetches HTML bodies for papers in arxiv.db
+python scripts/arxiv_normalize_authors.py     # backfills authors + paper_authors from legacy JSON (one-shot)
+python scripts/arxiv_index_fts.py             # builds the papers_fts FTS5 index
 python scripts/arxiv_index_rag.py             # builds data/arxiv/arxiv_rag.db (chunks + FTS + sqlite-vec)
 python scripts/factbook_download.py
 python scripts/factbook_index_rag.py          # builds data/factbook/factbook_rag.db from countries JSON
@@ -25,10 +28,13 @@ python scripts/gutenberg_index_rag.py         # builds data/gutenberg/gutenberg_
 bash   scripts/gutenberg_download.sh
 ```
 
-`data/arxiv/arxiv.db` is not downloaded by a script in this repo — it's copied
-from the `local_wikipedia` repo on this machine (the source of truth for arxiv
-ingest). After each refresh-copy, re-run `scripts/arxiv_index_fts.py` and
-restart uvicorn so the cached connection picks up the new file.
+The arxiv ingest pipeline is self-contained in this repo (Phase 3 ported it
+from `local_wikipedia/arxiv/`). Typical workflow on a fresh checkout:
+`arxiv_ingest.py` (OAI metadata) → `arxiv_download.py` (HTML bodies) →
+`arxiv_index_fts.py` (FTS) → `arxiv_index_rag.py` (chunks + embeddings).
+`arxiv_normalize_authors.py` is only needed for older arxiv.db files that
+still carry the legacy JSON authors column; freshly-ingested DBs already
+have the structured authors / paper_authors tables populated.
 
 Scripts assume they are run from the repo root — they use relative paths like `./data/<source>/<source>.db` or `data/<source>/<source>.db`. `cd` to the repo root first.
 
@@ -61,7 +67,10 @@ The API caches read-only SQLite connections at module load (`api/db.py`). After 
 
 ## Per-script notes
 
-- **`arxiv_index_fts.py`** — Builds the `papers_fts` FTS5 virtual table over `papers.title` + `papers.abstract` with the `porter unicode61` tokenizer (matches openalex's choice). External-content table — the index lives in `papers_fts` but the original text stays in `papers` (no duplication). Drop+rebuild on each run (~0.1 s at the current ~1.2k-row scale, adds <1 MB to the DB file). Required after every refresh-copy of `data/arxiv/arxiv.db` from `local_wikipedia` for `/arxiv/papers?q=` to return anything. No `CREATE INDEX` calls — the two existing indexes on `papers` (`idx_papers_primary_cat`, `idx_papers_submitted`) ride along with the copy.
+- **`arxiv_ingest.py`** — OAI-PMH metadata harvester. Walks `oaipmh.arxiv.org/oai` from `--from YYYY-MM-DD` (default: `ingest_state.last_harvested_date`, else `2021-01-01`) up to `--until` (default: today). Writes `papers` rows plus normalized `authors` / `paper_authors` rows (structured `<keyname>` / `<forenames>` / `<affiliation>` preserved per WORK.md §2.1). Idempotent: papers with unchanged `oai_datestamp` are skipped; updated papers get their `paper_authors` rebuilt. Watermark in `ingest_state` advances only on network harvests, not `--from-cache` replays. Rate-limited at 3 s per request with a `mailto:` User-Agent overridable via `ARXIV_EMAIL`. CLI flags: `--from`, `--until`, `--db`, `--cache-dir`, `--from-cache`, `--reset`. Restart uvicorn after.
+- **`arxiv_download.py`** — HTML body fetcher. Reads `papers` for rows with NULL or `'retry'` `download_status`, newest-first by `submitted_date`. GETs `arxiv.org/html/{id}` (3 s rate limit) and writes `html_content` + `download_status='downloaded'` on 200, `'no_html'` on 404. Transient errors leave `download_status` unchanged so the next run retries. Honors `Retry-After` on 429 / 5xx. CLI flags: `--db`, `--limit`, `--force`. Restart uvicorn after.
+- **`arxiv_normalize_authors.py`** — One-shot backfill that populates `authors` / `paper_authors` from the legacy JSON `papers.authors` column. Only needed for arxiv.db files that predate the Phase 3 ingest port (which writes structured authors directly). Heuristic split: last whitespace-delimited token is the surname. `affiliation` is always NULL in the backfill output. Idempotent. Becomes obsolete after a fresh `arxiv_ingest.py` re-harvest.
+- **`arxiv_index_fts.py`** — Builds the `papers_fts` FTS5 virtual table over `papers.title` + `papers.abstract` with the `porter unicode61` tokenizer (matches openalex's choice). External-content table — the index lives in `papers_fts` but the original text stays in `papers` (no duplication). Drop+rebuild on each run (~0.1 s at the current ~1.2k-row scale, adds <1 MB to the DB file). Required after every ingest run for `/arxiv/papers?q=` to return anything. No `CREATE INDEX` calls — the two indexes on `papers` (`idx_papers_primary_cat`, `idx_papers_submitted`) are created by `arxiv_ingest.create_schema`.
 - **`arxiv_index_rag.py`** — Builds `data/arxiv/arxiv_rag.db` (chunks + FTS5 + sqlite-vec) by rendering each paper's downloaded HTML body to markdown via `rag.render.html_to_markdown` and chunking with `chunk_markdown` so per-chunk `section` labels (Abstract / Introduction / Methods / Results / ...) populate. Papers without downloaded HTML (`papers.download_status != 'downloaded'`) fall back to title+abstract via the existing `strip_html` + `normalize_whitespace` path. Re-runnable: version key is `{oai_datestamp or content_hash}-{html_body_hash_prefix or 'no-html'}-{CLEANER_VERSION}`, so a paper that gets HTML downloaded later re-embeds on the next run even when its OAI datestamp didn't move. Detects legacy upstream schema (`paper_chunks*` from `local_wikipedia`) or embed model/dim mismatch and rebuilds from scratch. CLI flags: `--limit`, `--reset`, `--batch`, `--ollama-url`, `--chunk-size` (default 1500), `--max-chunk-size` (default 1800). **Re-measure chunks-per-doc after the next full run** — full-body chunking will produce several more chunks per paper than the title+abstract-only path did; the prior `~25-40 min` estimate is for title+abstract only. **Restart uvicorn after this runs** — the cached connection in `api/db.py` still points at the previous file.
 - **`openalex_index_rag.py`** — Builds `data/openalex/openalex_rag.db` over the top-N most-cited OpenAlex works (default 5000 via `--limit`). Title and abstract are HTML-stripped and entity-decoded by `rag.cleaner` before chunking (the inverted-index reconstruction in `openalex_download.py` leaves `&amp;` / `<a>` in raw text). Same shared `rag/` machinery as the arxiv indexer; same embed model + 768d; same incremental version-hash skip (now suffixed with `CLEANER_VERSION`); same `--reset`/`--batch`/`--ollama-url` flags plus `--chunk-size` (default 1500) and `--max-chunk-size` (default 1800). Version key is a content hash of `(title, abstract)` since OpenAlex doesn't expose per-work `updated_at` in the current schema. Embed runtime depends on the chunker — re-measure before quoting an estimate (see WORK.md §1.10). Restart uvicorn after.
 - **`factbook_index_rag.py`** — Builds `data/factbook/factbook_rag.db` from the nested `countries.data` JSON. Each country becomes one Doc; the JSON is rendered as section-tagged markdown (one `##` per top-level section). Every JSON leaf string is HTML-stripped and whitespace-normalised by `rag.cleaner` during the walk — the source JSON has embedded `<br>` and `<p>` tags that previously leaked into 26.8% of chunks. Chunked with `rag.chunker.chunk_markdown` (passed via `chunk_fn` to the shared indexer) so chunks preserve `Geography` / `Economy` / etc. labels in the `section` column (the `##` marker never reaches the chunk body). Version key is a SHA-256 of the JSON blob plus `CLEANER_VERSION`. CLI: `--chunk-size` (default 1000 — factbook is dense key:value), `--max-chunk-size` (default 1200), plus the standard `--limit`/`--reset`/`--batch`/`--ollama-url`. **Source-data caveat:** some factbook keys repeat themselves in their text values (e.g. key `"improved: urban"` with text `"urban: 99% ..."`); this produces `"improved: urban: urban: 99% ..."` lines and is left as-is.
