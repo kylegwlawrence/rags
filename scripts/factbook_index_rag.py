@@ -43,12 +43,16 @@ def main() -> int:
                         help="Soft target chars per chunk (default 1000 — factbook is dense key:value).")
     parser.add_argument("--max-chunk-size", type=int, default=1200,
                         help="Hard cap on chunk length (default 1200).")
+    parser.add_argument("--overlap", type=int, default=100,
+                        help="Inter-chunk overlap in chars (default 100 = 10%% of chunk-size).")
     args = parser.parse_args()
 
     if args.chunk_size < 1:
         parser.error("--chunk-size must be a positive integer")
     if args.max_chunk_size < args.chunk_size:
         parser.error("--max-chunk-size must be >= --chunk-size")
+    if args.overlap < 0 or args.overlap >= args.chunk_size:
+        parser.error("--overlap must be >= 0 and < --chunk-size")
     if args.batch < 1:
         parser.error("--batch must be a positive integer")
     if args.limit is not None and args.limit < 1:
@@ -63,6 +67,7 @@ def main() -> int:
         batch=args.batch,
         ollama_url=args.ollama_url,
         chunk_size=args.chunk_size,
+        chunk_overlap=args.overlap,
         max_chunk_size=args.max_chunk_size,
         source_label="countries",
     )
