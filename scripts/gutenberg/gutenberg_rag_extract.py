@@ -48,12 +48,17 @@ _PG_MENTION_LINE_RE = re.compile(
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 
+CHARS_PER_PAGE = 2000
+
+
 def iter_docs(
     gutenberg_conn: sqlite3.Connection,
     *,
     gutenberg_root: Path,
     language: str = "en",
     limit: int = 100,
+    exclude_ids: list[int] | None = None,
+    max_pages: int | None = None,
 ) -> Iterator[Doc]:
     """Yield one Doc per Gutenberg text matching `language`, capped to `limit`.
 
@@ -63,11 +68,27 @@ def iter_docs(
             (`data/gutenberg/`).
         language: ISO language code to filter on. Default `en`.
         limit: Max number of texts to yield, ordered by `texts.id`.
+        exclude_ids: Gutenberg text IDs to skip entirely.
+        max_pages: Skip texts whose estimated page count (size_bytes /
+            CHARS_PER_PAGE) exceeds this value.
     """
+    excluded = exclude_ids or []
+    params: list = [language]
+
+    clauses = ["language = ?"]
+    if excluded:
+        placeholders = ",".join("?" * len(excluded))
+        clauses.append(f"id NOT IN ({placeholders})")
+        params.extend(excluded)
+    if max_pages is not None:
+        clauses.append("size_bytes <= ?")
+        params.append(max_pages * CHARS_PER_PAGE)
+
+    where = " AND ".join(clauses)
+    params.append(limit)
     cursor = gutenberg_conn.execute(
-        "SELECT id, title, author, path FROM texts "
-        "WHERE language = ? ORDER BY id LIMIT ?",
-        (language, limit),
+        f"SELECT id, title, author, path FROM texts WHERE {where} ORDER BY id LIMIT ?",
+        params,
     )
     for row in cursor:
         path = gutenberg_root / row["path"]

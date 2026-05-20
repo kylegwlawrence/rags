@@ -36,6 +36,12 @@ def main() -> int:
                         help="Process at most N texts (default 100).")
     parser.add_argument("--language", default="en",
                         help="ISO language code filter (default 'en').")
+    parser.add_argument("--exclude-id", type=int, nargs="+", default=[],
+                        metavar="ID", dest="exclude_ids",
+                        help="Gutenberg IDs to skip (e.g. --exclude-id 10 30 1581).")
+    parser.add_argument("--max-pages", type=int, default=None,
+                        metavar="N", dest="max_pages",
+                        help="Skip texts estimated over N pages (~2000 chars/page).")
     parser.add_argument("--reset", action="store_true",
                         help="Wipe gutenberg_rag.db and rebuild from scratch.")
     parser.add_argument("--batch", type=int, default=32,
@@ -69,6 +75,8 @@ def main() -> int:
             gutenberg_root=GUTENBERG_ROOT,
             language=args.language,
             limit=args.limit,
+            exclude_ids=args.exclude_ids,
+            max_pages=args.max_pages,
         ),
         reset=args.reset,
         batch=args.batch,
