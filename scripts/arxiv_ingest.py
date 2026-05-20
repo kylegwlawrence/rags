@@ -142,12 +142,25 @@ def reset_data(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def upsert_paper(conn: sqlite3.Connection, record: dict[str, Any]) -> str:
+def upsert_paper(
+    conn: sqlite3.Connection,
+    record: dict[str, Any],
+    *,
+    legacy_authors_column: bool = False,
+) -> str:
     """Insert / update one paper + its normalized authors.
 
     Returns one of ``'inserted'`` / ``'updated'`` / ``'skipped'`` depending on
     whether the paper was new, present with an older ``oai_datestamp``, or
     already up to date.
+
+    ``legacy_authors_column`` is True when the ``papers`` table still carries
+    the pre-Phase-3 JSON ``authors`` NOT NULL column (e.g. an arxiv.db copied
+    from ``local_wikipedia`` rather than freshly created). When True, INSERTs
+    include the column with the placeholder ``'[]'`` to satisfy NOT NULL;
+    UPDATEs leave the column untouched so existing legacy data is preserved.
+    The normalized ``authors`` / ``paper_authors`` tables are the source of
+    truth either way. Caller should detect via ``_has_legacy_authors_column``.
     """
     paper_id = record["id"]
 
@@ -159,14 +172,21 @@ def upsert_paper(conn: sqlite3.Connection, record: dict[str, Any]) -> str:
 
     values = tuple(record[col] for col in _PAPER_COLS)
     if existing is None:
-        cols = ", ".join(("id",) + _PAPER_COLS)
-        placeholders = ", ".join("?" * (1 + len(_PAPER_COLS)))
+        insert_cols = ("id",) + _PAPER_COLS
+        insert_vals: tuple[Any, ...] = (paper_id, *values)
+        if legacy_authors_column:
+            insert_cols = insert_cols + ("authors",)
+            insert_vals = insert_vals + ("[]",)
+        placeholders = ", ".join("?" * len(insert_cols))
         conn.execute(
-            f"INSERT INTO papers ({cols}) VALUES ({placeholders})",
-            (paper_id, *values),
+            f"INSERT INTO papers ({', '.join(insert_cols)}) VALUES ({placeholders})",
+            insert_vals,
         )
         action = "inserted"
     else:
+        # UPDATE deliberately omits the legacy `authors` column so existing
+        # JSON data isn't clobbered with '[]'. The normalized tables stay
+        # current via the paper_authors rebuild below.
         set_clause = ", ".join(f"{c} = ?" for c in _PAPER_COLS)
         conn.execute(
             f"UPDATE papers SET {set_clause} WHERE id = ?",
@@ -246,6 +266,19 @@ def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
+def _has_legacy_authors_column(conn: sqlite3.Connection) -> bool:
+    """Return True iff ``papers`` carries the pre-Phase-3 JSON ``authors`` column.
+
+    Newly-created DBs (via ``create_schema``) don't have this column. DBs that
+    were copied from ``local_wikipedia`` before the Phase 3 schema rewrite
+    still do — and the column is ``NOT NULL``, so the new INSERT would fail
+    without a placeholder value. ``upsert_paper`` accepts a flag to handle
+    both cases; this helper is the canonical way to compute it.
+    """
+    rows = conn.execute("PRAGMA table_info(papers)").fetchall()
+    return any(row[1] == "authors" for row in rows)
+
+
 def ingest_records(
     conn: sqlite3.Connection,
     records: Iterable[dict[str, Any]],
@@ -261,9 +294,10 @@ def ingest_records(
         progress: Optional callback invoked with a one-line status string at
             each commit boundary. Useful for the CLI; tests pass None.
     """
+    legacy_authors = _has_legacy_authors_column(conn)
     stats = {"inserted": 0, "updated": 0, "skipped": 0}
     for i, record in enumerate(records, 1):
-        action = upsert_paper(conn, record)
+        action = upsert_paper(conn, record, legacy_authors_column=legacy_authors)
         stats[action] += 1
         if i % batch_size == 0:
             conn.commit()

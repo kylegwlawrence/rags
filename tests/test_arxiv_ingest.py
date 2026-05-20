@@ -380,3 +380,134 @@ class TestArxivIngestImport:
         assert arxiv_ingest.DEFAULT_FROM == "2021-01-01"
         assert arxiv_ingest.DEFAULT_DB.name == "arxiv.db"
         assert arxiv_ingest.BATCH_SIZE == 1000
+
+
+class TestLegacyAuthorsColumn:
+    """Backwards-compat: ingest must work against DBs copied from local_wikipedia.
+
+    Those DBs have a `papers.authors TEXT NOT NULL` column from the pre-Phase-3
+    schema. The new ingest doesn't supply that column; without the
+    `legacy_authors_column=True` path, INSERT would crash on NOT NULL.
+    """
+
+    def test_helper_detects_column(self, tmp_path: pathlib.Path) -> None:
+        db = tmp_path / "legacy.db"
+        c = sqlite3.connect(db)
+        try:
+            arxiv_ingest.create_schema(c)
+            assert arxiv_ingest._has_legacy_authors_column(c) is False
+            c.execute("ALTER TABLE papers ADD COLUMN authors TEXT")
+            c.commit()
+            assert arxiv_ingest._has_legacy_authors_column(c) is True
+        finally:
+            c.close()
+
+    def test_insert_works_against_legacy_not_null_column(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        # Build a DB matching the local_wikipedia legacy shape: `papers.authors`
+        # is `TEXT NOT NULL`. The new ingest must still be able to insert.
+        db = tmp_path / "legacy.db"
+        c = sqlite3.connect(db)
+        c.row_factory = sqlite3.Row
+        try:
+            c.executescript(
+                """
+                CREATE TABLE papers (
+                    id               TEXT PRIMARY KEY,
+                    oai_datestamp    TEXT NOT NULL,
+                    title            TEXT NOT NULL,
+                    abstract         TEXT NOT NULL,
+                    authors          TEXT NOT NULL,
+                    categories       TEXT NOT NULL,
+                    primary_category TEXT NOT NULL,
+                    submitted_date   TEXT NOT NULL,
+                    updated_date     TEXT,
+                    doi              TEXT,
+                    journal_ref      TEXT,
+                    comments         TEXT
+                );
+                """
+            )
+            # Add the post-Phase-3 columns + author tables idempotently.
+            for col in ("html_content TEXT", "download_status TEXT", "downloaded_at TEXT"):
+                try:
+                    c.execute(f"ALTER TABLE papers ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass
+            arxiv_ingest.create_schema(c)
+            c.commit()
+
+            # Now ingest one record. Without the legacy-aware INSERT this
+            # raises IntegrityError: NOT NULL constraint failed: papers.authors.
+            stats = arxiv_ingest.ingest_records(c, iter([_record()]))
+            assert stats == {"inserted": 1, "updated": 0, "skipped": 0}
+
+            # The legacy column gets the placeholder '[]'.
+            legacy_val = c.execute(
+                "SELECT authors FROM papers WHERE id = ?", ("2401.0001",)
+            ).fetchone()["authors"]
+            assert legacy_val == "[]"
+
+            # The normalized tables still get the real authors.
+            n_links = c.execute(
+                "SELECT COUNT(*) FROM paper_authors WHERE paper_id = ?",
+                ("2401.0001",),
+            ).fetchone()[0]
+            assert n_links == 2
+        finally:
+            c.close()
+
+    def test_update_does_not_clobber_legacy_authors_value(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        # On UPDATE (paper exists, oai_datestamp newer), the legacy `authors`
+        # column should be left alone — preserving whatever JSON was there
+        # from the local_wikipedia copy.
+        db = tmp_path / "legacy.db"
+        c = sqlite3.connect(db)
+        c.row_factory = sqlite3.Row
+        try:
+            c.executescript(
+                """
+                CREATE TABLE papers (
+                    id               TEXT PRIMARY KEY,
+                    oai_datestamp    TEXT NOT NULL,
+                    title            TEXT NOT NULL,
+                    abstract         TEXT NOT NULL,
+                    authors          TEXT NOT NULL,
+                    categories       TEXT NOT NULL,
+                    primary_category TEXT NOT NULL,
+                    submitted_date   TEXT NOT NULL,
+                    updated_date     TEXT,
+                    doi              TEXT,
+                    journal_ref      TEXT,
+                    comments         TEXT
+                );
+                """
+            )
+            arxiv_ingest.create_schema(c)
+            # Seed a row with the legacy authors column populated (as if
+            # copied from local_wikipedia).
+            c.execute(
+                "INSERT INTO papers (id, oai_datestamp, title, abstract, authors, "
+                "categories, primary_category, submitted_date) "
+                "VALUES ('2401.0001', '2024-01-22', 'T', 'A', "
+                "'[\"Alice Smith\", \"Bob Jones\"]', 'cs.CL', 'cs.CL', '2024-01-22')"
+            )
+            c.commit()
+
+            # Ingest the same paper with a newer oai_datestamp — should UPDATE,
+            # not clobber the legacy column.
+            stats = arxiv_ingest.ingest_records(
+                c,
+                iter([_record(oai_datestamp="2024-02-01")]),
+            )
+            assert stats == {"inserted": 0, "updated": 1, "skipped": 0}
+
+            legacy_val = c.execute(
+                "SELECT authors FROM papers WHERE id = ?", ("2401.0001",)
+            ).fetchone()["authors"]
+            assert legacy_val == '["Alice Smith", "Bob Jones"]'
+        finally:
+            c.close()

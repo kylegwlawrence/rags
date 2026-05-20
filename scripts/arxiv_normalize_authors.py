@@ -78,15 +78,8 @@ def author_dict_from_legacy(name: str) -> dict[str, str | None] | None:
 
 
 def _has_legacy_authors_column(conn: sqlite3.Connection) -> bool:
-    """Return True iff ``papers`` has the legacy ``authors`` JSON column.
-
-    Fresh-schema DBs (created by ``arxiv_ingest.create_schema``) don't have
-    this column — there's nothing for the backfill to convert. Detecting
-    this lets ``main`` exit cleanly with a useful message instead of
-    crashing on ``no such column: authors``.
-    """
-    rows = conn.execute("PRAGMA table_info(papers)").fetchall()
-    return any(row[1] == "authors" for row in rows)
+    """Re-exported from ``arxiv_ingest`` so the test suite has a single import."""
+    return arxiv_ingest._has_legacy_authors_column(conn)
 
 
 def backfill(
