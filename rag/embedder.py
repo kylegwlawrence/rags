@@ -63,11 +63,12 @@ def embed_texts_batch(texts: list[str], base_url: str = OLLAMA_URL) -> list[list
     """Embed multiple texts in one HTTP round-trip via Ollama `/api/embed`.
 
     Used by the indexer's hot path — N texts go in one POST instead of N. Same
-    retry policy as `embed_text` but a longer (120 s) timeout because the batch
-    can include hundreds of chunks.
+    retry policy as `embed_text` but a longer (600 s) timeout because the batch
+    can include hundreds of chunks and Ollama can stall under memory pressure
+    (model swap-outs, parallel requests) for well past two minutes.
     """
     def _call() -> list[list[float]]:
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             resp = client.post(
                 f"{base_url}/api/embed",
                 json={"model": EMBED_MODEL, "input": texts},
