@@ -43,6 +43,17 @@ class GutenbergText(BaseModel):
     path: str
 
 
+class Article(BaseModel):
+    """One row from `simplewiki.articles`. Wikitext body lives at /content."""
+
+    page_id: int
+    title: str
+    namespace: int
+    revision_id: int
+    timestamp: str
+    text_bytes: int | None
+
+
 class Paper(BaseModel):
     id: str
     title: str

@@ -31,6 +31,8 @@ OPENALEX_RAG_DB = DATA_DIR / "openalex" / "openalex_rag.db"
 GUTENBERG_DB = DATA_DIR / "gutenberg" / "gutenberg.db"
 GUTENBERG_RAG_DB = DATA_DIR / "gutenberg" / "gutenberg_rag.db"
 GUTENBERG_ROOT = DATA_DIR / "gutenberg"
+SIMPLEWIKI_DB = DATA_DIR / "simplewiki" / "simplewiki.db"
+SIMPLEWIKI_RAG_DB = DATA_DIR / "simplewiki" / "simplewiki_rag.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -81,6 +83,8 @@ _openalex: sqlite3.Connection | None = None
 _openalex_rag: sqlite3.Connection | None = None
 _gutenberg: sqlite3.Connection | None = None
 _gutenberg_rag: sqlite3.Connection | None = None
+_simplewiki: sqlite3.Connection | None = None
+_simplewiki_rag: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -145,3 +149,19 @@ def gutenberg_rag() -> sqlite3.Connection:
     if _gutenberg_rag is None:
         _gutenberg_rag = _connect_ro_with_vec(GUTENBERG_RAG_DB)
     return _gutenberg_rag
+
+
+def simplewiki() -> sqlite3.Connection:
+    """Cached read-only connection to simplewiki.db (built by scripts/simplewiki_parse.py)."""
+    global _simplewiki
+    if _simplewiki is None:
+        _simplewiki = _connect_ro(SIMPLEWIKI_DB)
+    return _simplewiki
+
+
+def simplewiki_rag() -> sqlite3.Connection:
+    """Cached read-only connection to simplewiki_rag.db (built by scripts/simplewiki_index_rag.py)."""
+    global _simplewiki_rag
+    if _simplewiki_rag is None:
+        _simplewiki_rag = _connect_ro_with_vec(SIMPLEWIKI_RAG_DB)
+    return _simplewiki_rag
