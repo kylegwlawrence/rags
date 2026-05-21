@@ -33,15 +33,22 @@ def create_schema(cur: sqlite3.Cursor) -> None:
             text          TEXT,
             UNIQUE (title, section_label, headline)
         );
+
+        -- The UNIQUE constraint's implicit index is keyed on
+        -- (title, section_label, headline), so its leftmost column is `title`
+        -- and it can't serve a standalone `section_label = ?` lookup. The
+        -- /wikihow/articles?section_label= filter needs its own index.
+        CREATE INDEX IF NOT EXISTS idx_articles_section_label
+            ON articles (section_label);
     """)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Load wikihowAll.csv into SQLite.")
+    parser = argparse.ArgumentParser(description="Load wikihowSep.csv into SQLite.")
     parser.add_argument("--db", default=DEFAULT_DB,
                         help=f"Path to SQLite database (default: {DEFAULT_DB})")
     parser.add_argument("--csv", default=DEFAULT_CSV,
-                        help=f"Path to wikihowAll.csv (default: {DEFAULT_CSV})")
+                        help=f"Path to wikihowSep.csv (default: {DEFAULT_CSV})")
     args = parser.parse_args()
 
     if not os.path.exists(args.csv):
