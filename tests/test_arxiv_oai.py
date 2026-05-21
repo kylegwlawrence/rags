@@ -12,7 +12,7 @@ import pathlib
 import sys
 import xml.etree.ElementTree as ET
 
-SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "scripts"
+SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "arxiv"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
