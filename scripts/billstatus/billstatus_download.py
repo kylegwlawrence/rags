@@ -9,14 +9,15 @@ import argparse
 import os
 import re
 import sqlite3
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from typing import Optional
 
 import requests
 
-DEFAULT_DB = "./data/congress/bill_summaries.db"
-DEFAULT_DOWNLOAD_DIR = "./data/congress/raw"
+DEFAULT_DB = "./data/billstatus/billstatus.db"
+DEFAULT_DOWNLOAD_DIR = "./data/billstatus/raw"
 START_CONGRESS = 108   # 108th = 2003 (earliest available)
 DEFAULT_END_CONGRESS = 119
 
@@ -181,8 +182,10 @@ def main() -> None:
                         f.write(chunk)
             except requests.RequestException as e:
                 print(f"  Request failed: {e} — skipping")
+                time.sleep(1)
                 continue
 
+            time.sleep(1)
             count = 0
             try:
                 with zipfile.ZipFile(zip_path, "r") as z:
@@ -194,7 +197,7 @@ def main() -> None:
                         if parsed is None:
                             continue
                         cur.execute("""
-                            INSERT OR IGNORE INTO bills
+                            INSERT OR REPLACE INTO bills
                             (bill_id, congress, bill_type, bill_number, title,
                              sponsor, introduced_date, latest_action, policy_area,
                              subjects, summary)
