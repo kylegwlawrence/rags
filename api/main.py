@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Response
+from fastapi.staticfiles import StaticFiles
 
 from api import db
 from api.routers import (
@@ -19,6 +20,8 @@ app.include_router(gutenberg.router)
 app.include_router(simplewiki.router)
 app.include_router(python_docs.router)
 app.include_router(wikihow.router)
+
+app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
 
 @app.get("/health")
