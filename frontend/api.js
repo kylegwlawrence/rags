@@ -65,3 +65,17 @@ export async function getChunks(source, query, topK = 10) {
   const resp = await _fetch(`${source.chunksEndpoint}?${params}`);
   return resp.json();
 }
+
+/**
+ * Fetch all stored chunks for a specific document, ordered by chunk_index.
+ * Returns [] if the document has not been indexed.
+ *
+ * @param {object} source
+ * @param {string|number} docId
+ * @returns {Promise<StoredChunk[]>}
+ */
+export async function getDocChunks(source, docId) {
+  const params = new URLSearchParams({ doc_id: String(docId) });
+  const resp = await _fetch(`${source.docChunksEndpoint}?${params}`);
+  return resp.json();
+}

@@ -97,6 +97,17 @@ class WikihowArticle(BaseModel):
     text_chars: int | None
 
 
+class StoredChunk(BaseModel):
+    """One chunk row from `<source>_rag.db`, fetched by doc_id for inspection."""
+
+    chunk_id: int
+    doc_id: str
+    section: str | None
+    chunk_index: int
+    text: str
+    text_length: int
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

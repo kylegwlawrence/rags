@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.models import Chunk, ChunksResponse
+from api.models import Chunk, ChunksResponse, StoredChunk
 from rag import retriever
 from rag.retriever import is_operational_error
 
@@ -91,3 +91,65 @@ def add_chunks_route(
             top_k=top_k,
             candidate_k=candidate_k,
         )
+
+
+def add_doc_chunks_route(
+    router: APIRouter,
+    *,
+    opener: Callable[[], sqlite3.Connection],
+    source_name: str,
+    indexer_script: str,
+    rag_db_path: str | None = None,
+) -> None:
+    """Attach `GET /doc-chunks` to `router`.
+
+    Returns all stored chunks for a specific `doc_id`, ordered by
+    `chunk_index`. Intended for per-document inspection, not retrieval.
+    Empty result (doc not yet indexed) returns `[]`, not 404.
+
+    Args:
+        router: The source's existing APIRouter.
+        opener: Cached read-only RAG connection getter from `api.db`.
+        source_name: Short source name for 503 detail messages.
+        indexer_script: Filename of the script that builds this RAG DB.
+        rag_db_path: Repo-relative path to the `_rag.db` file.
+    """
+    if rag_db_path is None:
+        rag_db_path = f"data/{source_name}/{source_name}_rag.db"
+
+    @router.get("/doc-chunks", response_model=list[StoredChunk])
+    def get_doc_chunks(
+        doc_id: str = Query(..., description="Document ID whose chunks to fetch."),
+        rag_conn: sqlite3.Connection = Depends(opener),
+    ) -> list[StoredChunk]:
+        try:
+            rows = rag_conn.execute(
+                """
+                SELECT chunk_id, doc_id, section, chunk_index, text, text_length
+                FROM chunks
+                WHERE doc_id = ?
+                ORDER BY chunk_index
+                """,
+                (doc_id,),
+            ).fetchall()
+        except sqlite3.OperationalError as e:
+            if is_operational_error(e):
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"{source_name} RAG data not ready ({e}). "
+                        f"Run scripts/{indexer_script} or restore {rag_db_path}."
+                    ),
+                ) from e
+            raise
+        return [
+            StoredChunk(
+                chunk_id=row["chunk_id"],
+                doc_id=row["doc_id"],
+                section=row["section"],
+                chunk_index=row["chunk_index"],
+                text=row["text"],
+                text_length=row["text_length"],
+            )
+            for row in rows
+        ]

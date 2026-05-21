@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
-from api._chunks import add_chunks_route
+from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_fts_errors
 from api.models import Page, Work
 
@@ -151,6 +151,12 @@ def list_works(
 
 
 add_chunks_route(
+    router,
+    opener=db.openalex_rag,
+    source_name="openalex",
+    indexer_script="openalex_index_rag.py",
+)
+add_doc_chunks_route(
     router,
     opener=db.openalex_rag,
     source_name="openalex",

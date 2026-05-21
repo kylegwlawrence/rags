@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
-from api._chunks import add_chunks_route
+from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_fts_errors
 from api.models import Page, Paper
 
@@ -258,6 +258,12 @@ def get_paper(
 
 
 add_chunks_route(
+    router,
+    opener=db.arxiv_rag,
+    source_name="arxiv",
+    indexer_script="arxiv_index_rag.py",
+)
+add_doc_chunks_route(
     router,
     opener=db.arxiv_rag,
     source_name="arxiv",
