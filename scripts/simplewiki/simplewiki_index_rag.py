@@ -46,12 +46,13 @@ def main() -> int:
                         help="Embedding batch size (chunks per HTTP call).")
     parser.add_argument("--ollama-url", default=embedder.OLLAMA_URL,
                         help="Override Ollama base URL.")
-    parser.add_argument("--chunk-size", type=int, default=1500,
-                        help="Soft target chars per chunk (default 1500).")
-    parser.add_argument("--max-chunk-size", type=int, default=1800,
-                        help="Hard cap on chunk length (default 1800).")
-    parser.add_argument("--overlap", type=int, default=150,
-                        help="Inter-chunk overlap in chars (default 150 = 10%% of chunk-size). "
+    parser.add_argument("--chunk-size", type=int, default=800,
+                        help="Soft target chars per chunk (default 800 ~= 200 tokens; "
+                             "tuned small for accurate retrieval on small Ollama models).")
+    parser.add_argument("--max-chunk-size", type=int, default=1000,
+                        help="Hard cap on chunk length (default 1000).")
+    parser.add_argument("--overlap", type=int, default=100,
+                        help="Inter-chunk overlap in chars (default 100 ~= 12%% of chunk-size). "
                              "Overlap is within-section only — does not carry across ## heading boundaries.")
     args = parser.parse_args()
 

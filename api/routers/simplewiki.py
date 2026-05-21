@@ -18,9 +18,11 @@ router = APIRouter(prefix="/simplewiki", tags=["simplewiki"])
 # Live-embed chunk settings. Keep in sync with the argparse defaults in
 # scripts/simplewiki/simplewiki_index_rag.py so an article embedded via the
 # button chunks identically to one embedded by a full batch indexer run.
-_CHUNK_SIZE = 1500
-_MAX_CHUNK_SIZE = 1800
-_OVERLAP = 150
+# Tuned smaller than the 1500 baseline for tighter, single-idea chunks — more
+# accurate retrieval with small Ollama embed/reader models (~200 tokens/chunk).
+_CHUNK_SIZE = 800
+_MAX_CHUNK_SIZE = 1000
+_OVERLAP = 100
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:
