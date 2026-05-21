@@ -28,6 +28,7 @@ Status of each datasource as of 2026-05-22.
 | **ceps / eurlex** | ✓ (142,036 EU laws, 1952–2019, from Harvard Dataverse) | 1.6 GB (DB); 4.0 GB total incl. raw CSV | ~4 GB (complete) | ✗ | ✗ |
 | **uspto** | ✓ (6,423,626 patent summaries, 2000–2025) | 63 GB | ~63 GB (complete) | ✗ | ✗ |
 | **openfoodfacts** | ✓ (4,490,000 products, full JSONL export) | 14 GB | ~14 GB (complete) | ✗ | ✗ |
+| **sec_edgar** | ✓ (2,928,790 filings, 1993-08 through 2026-05) | 805 MB | ~805 MB (complete) | ✗ | ✗ |
 
 ---
 
@@ -46,7 +47,6 @@ Status of each datasource as of 2026-05-22.
 | **dailymed** | `scripts/dailymed/dailymed_download.py` | FDA DailyMed drug label data |
 | **kaggle** | `scripts/kaggle/kaggle_download.sh` | Kaggle datasets (general) |
 | **noaa** | `scripts/noaa/noaa_download.py` | NOAA climate/weather data |
-| **sec_edgar** | `scripts/sec_edgar/sec_edgar_download.py` | SEC EDGAR filings |
 | **taxcourt** | `scripts/taxcourt/taxcourt_download.py` | US Tax Court opinions |
 | **un_treaties** | `scripts/un_treaties/un_treaties_download.py` | UN treaty collection |
 | **worldbank** | `scripts/worldbank/worldbank_data360_download.py` | World Bank Data360 indicators |
