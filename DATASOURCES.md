@@ -26,6 +26,7 @@ Status of each datasource as of 2026-05-22.
 | **federal_register** | ✓ (329,851 documents, 1994-01-03 through 2026-05-21) | 464 MB | ~464 MB (complete) | ✗ | ✗ |
 | **loc** | ✗ (script run but 0 records downloaded) | 24 KB | Est. hundreds of MB (495k English manuscripts) | ✗ | ✗ |
 | **ceps / eurlex** | ✓ (142,036 EU laws, 1952–2019, from Harvard Dataverse) | 1.6 GB (DB); 4.0 GB total incl. raw CSV | ~4 GB (complete) | ✗ | ✗ |
+| **uspto** | ✓ (6,423,626 patent summaries, 2000–2025) | 63 GB | ~63 GB (complete) | ✗ | ✗ |
 
 ---
 
@@ -37,4 +38,15 @@ Status of each datasource as of 2026-05-22.
 | **lib_congress_manuscripts** | `scripts/lib_congress_manuscripts/lib_congress_manuscripts.py` | LOC manuscripts |
 | **lib_congress_newspapers** | `scripts/lib_congress_newspapers/lib_congress_newspapers_download.py` | LOC digitized newspapers |
 | **stackexchange** | `scripts/stackexchange/stackexchange_download.py` | Stack Exchange Q&A dumps |
-| **uspto** | `scripts/uspto/uspto_download.py` | US patent data |
+| **chembl** | `scripts/chembl/chembl_download.py` | ChEMBL chemistry/drug compound database |
+| **clinicaltrials** | `scripts/clinicaltrials/clinicaltrials_download.py` | ClinicalTrials.gov trial metadata |
+| **congress_summaries** | `scripts/congress_summaries/congress_summaries_download.py` | CRS bill summaries (may overlap with billstatus) |
+| **courtlistener** | `scripts/courtlistener/courtlistener_download.py` | CourtListener legal opinions |
+| **dailymed** | `scripts/dailymed/dailymed_download.py` | FDA DailyMed drug label data |
+| **kaggle** | `scripts/kaggle/kaggle_download.sh` | Kaggle datasets (general) |
+| **noaa** | `scripts/noaa/noaa_download.py` | NOAA climate/weather data |
+| **openfoodfacts** | `scripts/openfoodfacts/openfoodfacts_download.py` | Open Food Facts product database |
+| **sec_edgar** | `scripts/sec_edgar/sec_edgar_download.py` | SEC EDGAR filings |
+| **taxcourt** | `scripts/taxcourt/taxcourt_download.py` | US Tax Court opinions |
+| **un_treaties** | `scripts/un_treaties/un_treaties_download.py` | UN treaty collection |
+| **worldbank** | `scripts/worldbank/worldbank_data360_download.py` | World Bank Data360 indicators |
