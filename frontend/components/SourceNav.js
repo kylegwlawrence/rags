@@ -22,10 +22,8 @@ export default defineComponent({
           :aria-current="key === active ? 'page' : null"
           @click="$emit('select', key)"
         >
-          <button class="source-nav__btn">
-            <span class="source-nav__label">{{ sources[key].label }}</span>
-            <span class="source-nav__sub">{{ sources[key].subtitle }}</span>
-          </button>
+          <span class="source-nav__label">{{ sources[key].label }}</span>
+          <span class="source-nav__sub">{{ sources[key].subtitle }}</span>
         </li>
       </ul>
       <div class="sidebar__footer">
