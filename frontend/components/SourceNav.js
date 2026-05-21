@@ -19,11 +19,13 @@ export default defineComponent({
           v-for="key in order"
           :key="key"
           class="source-nav__item"
-          :class="{ 'source-nav__item--active': key === active }"
+          :aria-current="key === active ? 'page' : null"
           @click="$emit('select', key)"
         >
-          <span class="source-nav__label">{{ sources[key].label }}</span>
-          <span class="source-nav__sub">{{ sources[key].subtitle }}</span>
+          <button class="source-nav__btn">
+            <span class="source-nav__label">{{ sources[key].label }}</span>
+            <span class="source-nav__sub">{{ sources[key].subtitle }}</span>
+          </button>
         </li>
       </ul>
       <div class="sidebar__footer">
