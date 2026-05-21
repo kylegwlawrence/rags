@@ -108,6 +108,20 @@ class StoredChunk(BaseModel):
     text_length: int
 
 
+class EmbedResult(BaseModel):
+    """Result of a live single-document embed (`POST .../{id}/embed`).
+
+    `chunk_count` is the number of chunks written; `embedded` is False when the
+    document yielded no chunks (e.g. a redirect or empty body), in which case
+    any previously-stored chunks for it were removed.
+    """
+
+    doc_id: str
+    title: str
+    chunk_count: int
+    embedded: bool
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

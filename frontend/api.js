@@ -3,8 +3,8 @@
  * All functions throw { status, message } on non-2xx responses.
  */
 
-async function _fetch(url) {
-  const resp = await fetch(url);
+async function _fetch(url, options) {
+  const resp = await fetch(url, options);
   if (!resp.ok) {
     let message = `HTTP ${resp.status}`;
     try {
@@ -77,5 +77,18 @@ export async function getChunks(source, query, topK = 10) {
 export async function getDocChunks(source, docId) {
   const params = new URLSearchParams({ doc_id: String(docId) });
   const resp = await _fetch(`${source.docChunksEndpoint}?${params}`);
+  return resp.json();
+}
+
+/**
+ * Embed a single document into its RAG database on demand (live, synchronous).
+ * Only available for sources whose config defines `embedEndpoint`.
+ *
+ * @param {object} source
+ * @param {string|number} id - the document's primary key
+ * @returns {Promise<{doc_id: string, title: string, chunk_count: number, embedded: boolean}>}
+ */
+export async function embedDoc(source, id) {
+  const resp = await _fetch(source.embedEndpoint(id), { method: 'POST' });
   return resp.json();
 }

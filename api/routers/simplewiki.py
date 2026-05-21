@@ -1,13 +1,26 @@
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_fts_errors
-from api.models import Article, Page
+from api.models import Article, EmbedResult, Page
+from rag import Doc
+from rag.chunker import chunk_markdown
+from rag.cleaner import CLEANER_VERSION
+from rag.embed_one import embed_doc
+from rag.wikitext import wikitext_to_markdown
 
 router = APIRouter(prefix="/simplewiki", tags=["simplewiki"])
+
+# Live-embed chunk settings. Keep in sync with the argparse defaults in
+# scripts/simplewiki/simplewiki_index_rag.py so an article embedded via the
+# button chunks identically to one embedded by a full batch indexer run.
+_CHUNK_SIZE = 1500
+_MAX_CHUNK_SIZE = 1800
+_OVERLAP = 150
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:
@@ -126,6 +139,60 @@ def get_article(
 ) -> Article:
     """Return metadata for one article by page_id."""
     return _row_to_article(_lookup(conn, page_id))
+
+
+@router.post("/articles/{page_id}/embed", response_model=EmbedResult)
+def embed_article(
+    page_id: int,
+    conn: sqlite3.Connection = Depends(db.simplewiki),
+) -> EmbedResult:
+    """Embed one article into simplewiki_rag.db on demand (synchronous).
+
+    Renders the article's wikitext to markdown via the same path as
+    `simplewiki_index_rag.py` and replaces any chunks already stored for it, so
+    the article becomes searchable through `/simplewiki/chunks` and visible in
+    `/simplewiki/doc-chunks` straight away — the RAG DB runs in WAL mode, so the
+    cached read-only connection picks up the new rows without a uvicorn restart.
+
+    A single article is ~1-5 chunks, a few seconds on local Ollama, so this
+    blocks the request rather than queueing a job. Redirects / empty bodies
+    embed nothing and return `embedded=false`. A 503 means Ollama was
+    unreachable; the article's existing chunks (if any) are left untouched.
+    """
+    row = _lookup(conn, page_id)
+    markdown = wikitext_to_markdown(row["text_content"] or "")
+    doc = Doc(
+        doc_id=str(row["page_id"]),
+        title=row["title"],
+        version=f"{row['revision_id']}-{CLEANER_VERSION}",
+        text=markdown,
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.SIMPLEWIKI_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_fn=chunk_markdown,
+            chunk_size=_CHUNK_SIZE,
+            overlap=_OVERLAP,
+            max_chunk_size=_MAX_CHUNK_SIZE,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
 
 
 add_chunks_route(

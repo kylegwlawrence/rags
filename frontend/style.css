@@ -488,11 +488,55 @@ body {
   font-size: 16px;
   font-weight: 500;
   margin: 0;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-primary);
   line-height: 1.4;
+}
+
+.doc-view__embed {
+  flex-shrink: 0;
+  align-self: center;
+  width: auto;
+  margin: 0;
+  white-space: nowrap;
+  background: var(--accent);
+  color: var(--accent-on);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.doc-view__embed:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.doc-view__embed:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Already-indexed: a quieter "Re-embed" so it reads as a secondary action. */
+.doc-view__embed--done {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.doc-view__embed--done:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.doc-view__embed--error {
+  background: var(--danger);
+  color: var(--accent-on);
 }
 
 .doc-view__tabs {

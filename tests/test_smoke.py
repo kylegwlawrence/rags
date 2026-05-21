@@ -158,6 +158,73 @@ def test_simplewiki_content_returns_wikitext(client):
     assert len(r.content) > 0
 
 
+def test_simplewiki_embed_404(client):
+    r = client.post("/simplewiki/articles/99999999/embed")
+    assert r.status_code == 404
+
+
+def _first_simplewiki_page_id(client):
+    r = client.get("/simplewiki/articles?limit=1")
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("simplewiki.db has no articles; run scripts/simplewiki/simplewiki_parse.py")
+    return items[0]["page_id"]
+
+
+# Two deterministic chunks so the embed path is exercised regardless of whether
+# the first real article happens to be a redirect (which would render empty).
+def _fake_chunks(doc, **_kw):
+    return [
+        {"section": None, "chunk_index": 0, "text": "alpha alpha", "text_length": 11},
+        {"section": "History", "chunk_index": 0, "text": "beta beta", "text_length": 9},
+    ]
+
+
+def test_simplewiki_embed_happy(client, monkeypatch, tmp_path):
+    """POST .../embed chunks + embeds one article into a throwaway RAG DB.
+
+    The embedder and chunker are stubbed (no Ollama, deterministic chunks) and
+    the target RAG DB is redirected to tmp_path so the test never mutates the
+    real data/simplewiki/simplewiki_rag.db.
+    """
+    from rag import embedder
+
+    page_id = _first_simplewiki_page_id(client)
+    monkeypatch.setattr(db, "SIMPLEWIKI_RAG_DB", tmp_path / "sw_rag.db")
+    monkeypatch.setattr("api.routers.simplewiki.chunk_markdown", _fake_chunks)
+    monkeypatch.setattr(
+        embedder,
+        "embed_texts_batch",
+        lambda texts, base_url=embedder.OLLAMA_URL: [
+            [0.0] * embedder.EMBEDDING_DIM for _ in texts
+        ],
+    )
+
+    r = client.post(f"/simplewiki/articles/{page_id}/embed")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["doc_id"] == str(page_id)
+    assert set(body) == {"doc_id", "title", "chunk_count", "embedded"}
+    assert body["chunk_count"] == 2
+    assert body["embedded"] is True
+
+
+def test_simplewiki_embed_503_when_ollama_down(client, monkeypatch, tmp_path):
+    """If embedding raises httpx.HTTPError, the embed route returns 503."""
+    from rag import embedder
+
+    page_id = _first_simplewiki_page_id(client)
+    monkeypatch.setattr(db, "SIMPLEWIKI_RAG_DB", tmp_path / "sw_rag.db")
+    monkeypatch.setattr("api.routers.simplewiki.chunk_markdown", _fake_chunks)
+
+    def boom(*_a, **_kw):
+        raise httpx.ConnectError("simulated ollama down")
+
+    monkeypatch.setattr(embedder, "embed_texts_batch", boom)
+    r = client.post(f"/simplewiki/articles/{page_id}/embed")
+    assert r.status_code == 503
+
+
 def test_pydocs_list(client):
     r = client.get("/pydocs/docs?limit=1")
     assert r.status_code == 200

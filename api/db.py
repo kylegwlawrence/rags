@@ -19,6 +19,8 @@ from pathlib import Path
 import sqlite_vec
 from fastapi import HTTPException
 
+from rag.schema import connect_rag
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 
@@ -55,6 +57,25 @@ def _connect_ro(path: Path) -> sqlite3.Connection:
             detail=f"{path.name} not available: {e}",
         ) from e
     conn.row_factory = sqlite3.Row
+    return conn
+
+
+def connect_rag_rw(path: Path) -> sqlite3.Connection:
+    """Open a `<source>_rag.db` read-write for a single live embed.
+
+    The cached `*_rag()` openers above are read-only and shared process-wide;
+    this returns a FRESH read-write connection (sqlite-vec loaded, schema
+    ensured, foreign keys on) that the caller must close. The narrow write path
+    for the "embed this article" button is the only writer in the API — the
+    read path stays read-only.
+
+    Writes land on this connection; the cached read-only connection sees them
+    immediately because the RAG DBs run in WAL mode (no uvicorn restart needed,
+    unlike a full indexer-script rebuild). `busy_timeout` lets a concurrent
+    embed wait for the single WAL writer slot rather than erroring out.
+    """
+    conn = connect_rag(path)
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 

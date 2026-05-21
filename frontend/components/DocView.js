@@ -1,5 +1,5 @@
-import { defineComponent, ref, onMounted } from '/ui/vendor/vue.esm-browser.js';
-import { getContent, getDocChunks } from '/ui/api.js';
+import { defineComponent, ref, computed, onMounted } from '/ui/vendor/vue.esm-browser.js';
+import { getContent, getDocChunks, embedDoc } from '/ui/api.js';
 
 export default defineComponent({
   name: 'DocView',
@@ -23,6 +23,21 @@ export default defineComponent({
     const chunksError = ref(null);
     const chunksLoaded = ref(false);
     const expandedChunks = ref(new Set());
+
+    // On-demand embed state (only for sources with an embedEndpoint).
+    const embedding = ref(false);
+    const embedError = ref(null);
+
+    // "Embedded" means we've confirmed (via the doc-chunks fetch) that the RAG
+    // DB holds chunks for this doc. Until that fetch lands, status is unknown
+    // and the button stays disabled.
+    const isEmbedded = computed(() => chunksLoaded.value && chunks.value.length > 0);
+
+    const embedLabel = computed(() => {
+      if (embedding.value) return 'Embedding…';
+      if (embedError.value) return 'Retry embed';
+      return isEmbedded.value ? 'Re-embed' : 'Embed';
+    });
 
     function visibleMetaFields() {
       return props.source.metaFields.filter((f) => {
@@ -64,6 +79,22 @@ export default defineComponent({
       loadChunks();
     }
 
+    async function embedArticle() {
+      embedding.value = true;
+      embedError.value = null;
+      try {
+        await embedDoc(props.source, props.doc[props.source.idField]);
+        // Re-fetch so the chunk inspector and the button's embedded state both
+        // reflect what was just written.
+        chunksLoaded.value = false;
+        await loadChunks();
+      } catch (e) {
+        embedError.value = e.message || 'Embed failed';
+      } finally {
+        embedding.value = false;
+      }
+    }
+
     function toggleExpand(chunkId) {
       if (expandedChunks.value.has(chunkId)) {
         expandedChunks.value.delete(chunkId);
@@ -78,13 +109,20 @@ export default defineComponent({
       if (props.source.contentType !== 'none') {
         loadContent();
       }
+      // Preload chunks when the source supports embedding so the header button
+      // can show the right state (Embed vs Re-embed) without waiting for the
+      // Chunks tab to be opened. The query is indexed and cheap.
+      if (props.source.embedEndpoint) {
+        loadChunks();
+      }
     });
 
     return {
       activeTab, content, contentLoading, contentError,
-      chunks, chunksLoading, chunksError,
+      chunks, chunksLoading, chunksError, chunksLoaded,
       expandedChunks,
-      visibleMetaFields, openChunksTab, toggleExpand,
+      embedding, embedError, isEmbedded, embedLabel,
+      visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
     };
   },
 
@@ -93,6 +131,17 @@ export default defineComponent({
       <div class="doc-view__header">
         <button class="doc-view__back" @click="$emit('back')">← Back</button>
         <h2 class="doc-view__title">{{ doc[source.titleField] || '(untitled)' }}</h2>
+        <button
+          v-if="source.embedEndpoint"
+          class="doc-view__embed"
+          :class="{
+            'doc-view__embed--done': isEmbedded && !embedding && !embedError,
+            'doc-view__embed--error': embedError && !embedding,
+          }"
+          :disabled="embedding || chunksLoading"
+          :title="embedError || (isEmbedded ? 'Already embedded — click to re-embed into semantic search' : 'Embed this article into semantic search')"
+          @click="embedArticle"
+        >{{ embedLabel }}</button>
       </div>
 
       <div class="doc-view__tabs">

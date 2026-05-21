@@ -93,6 +93,7 @@ export const SOURCES = {
     contentEndpoint: (id) => `/simplewiki/articles/${id}/content`,
     chunksEndpoint: '/simplewiki/chunks',
     docChunksEndpoint: '/simplewiki/doc-chunks',
+    embedEndpoint: (id) => `/simplewiki/articles/${id}/embed`,
     idField: 'page_id',
     titleField: 'title',
     subtitle_fn: () => '',
