@@ -139,6 +139,10 @@ body {
   padding: 0;
   overflow-y: auto;
   flex: 1;
+  /* Pico sets `nav ul { display: flex }` (row) for nav bars; the sidebar
+     is a <nav>, so force a vertical stack here. */
+  display: flex;
+  flex-direction: column;
 }
 
 .source-nav__item {
