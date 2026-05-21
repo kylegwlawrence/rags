@@ -33,6 +33,8 @@ GUTENBERG_RAG_DB = DATA_DIR / "gutenberg" / "gutenberg_rag.db"
 GUTENBERG_ROOT = DATA_DIR / "gutenberg"
 SIMPLEWIKI_DB = DATA_DIR / "simplewiki" / "simplewiki.db"
 SIMPLEWIKI_RAG_DB = DATA_DIR / "simplewiki" / "simplewiki_rag.db"
+PYDOCS_DB = DATA_DIR / "pydocs" / "python_docs.db"
+PYDOCS_RAG_DB = DATA_DIR / "pydocs" / "python_docs_rag.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -85,6 +87,8 @@ _gutenberg: sqlite3.Connection | None = None
 _gutenberg_rag: sqlite3.Connection | None = None
 _simplewiki: sqlite3.Connection | None = None
 _simplewiki_rag: sqlite3.Connection | None = None
+_pydocs: sqlite3.Connection | None = None
+_pydocs_rag: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -165,3 +169,19 @@ def simplewiki_rag() -> sqlite3.Connection:
     if _simplewiki_rag is None:
         _simplewiki_rag = _connect_ro_with_vec(SIMPLEWIKI_RAG_DB)
     return _simplewiki_rag
+
+
+def pydocs() -> sqlite3.Connection:
+    """Cached read-only connection to python_docs.db (FTS index built by scripts/python_docs/python_docs_index_fts.py)."""
+    global _pydocs
+    if _pydocs is None:
+        _pydocs = _connect_ro(PYDOCS_DB)
+    return _pydocs
+
+
+def pydocs_rag() -> sqlite3.Connection:
+    """Cached read-only connection to python_docs_rag.db (built by scripts/python_docs/python_docs_index_rag.py)."""
+    global _pydocs_rag
+    if _pydocs_rag is None:
+        _pydocs_rag = _connect_ro_with_vec(PYDOCS_RAG_DB)
+    return _pydocs_rag

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Response
 
 from api import db
-from api.routers import arxiv, factbook, gutenberg, openalex, simplewiki
+from api.routers import arxiv, factbook, gutenberg, openalex, python_docs, simplewiki
 
 app = FastAPI(title="datasets API", version="0.1.0")
 app.include_router(arxiv.router)
@@ -9,6 +9,7 @@ app.include_router(factbook.router)
 app.include_router(openalex.router)
 app.include_router(gutenberg.router)
 app.include_router(simplewiki.router)
+app.include_router(python_docs.router)
 
 
 @app.get("/health")
@@ -30,6 +31,8 @@ def health(response: Response) -> dict:
         ("gutenberg_rag", db.gutenberg_rag),
         ("simplewiki", db.simplewiki),
         ("simplewiki_rag", db.simplewiki_rag),
+        ("pydocs", db.pydocs),
+        ("pydocs_rag", db.pydocs_rag),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

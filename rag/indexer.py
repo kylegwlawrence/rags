@@ -235,6 +235,11 @@ def _run(
     print("rebuilding chunks_fts...", file=sys.stderr)
     rag_conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
     rag_conn.commit()
+    # Merge the WAL back into the main DB file so the size reported below
+    # reflects the data we just wrote. In journal_mode=WAL the committed pages
+    # live in the `-wal` sidecar until a checkpoint, so stat()-ing the `.db`
+    # file before this would report a near-empty file (~0.0 MB).
+    rag_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     elapsed = time.time() - t0
     db_mb = rag_db_path.stat().st_size / (1024**2)

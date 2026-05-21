@@ -69,6 +69,20 @@ class Paper(BaseModel):
     has_html: bool
 
 
+class PydocsDoc(BaseModel):
+    """One row from `python_docs.docs`. Raw body lives at /content.
+
+    `content_chars` is `length(content)` — SQLite returns the character count
+    for a TEXT value, not its UTF-8 byte length, so this is named for what it
+    actually measures.
+    """
+
+    doc_path: str
+    section: str | None
+    title: str | None
+    content_chars: int | None
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

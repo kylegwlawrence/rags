@@ -21,6 +21,7 @@ RAG_SOURCES = [
     pytest.param("factbook", "factbook_rag", id="factbook"),
     pytest.param("gutenberg", "gutenberg_rag", id="gutenberg"),
     pytest.param("simplewiki", "simplewiki_rag", id="simplewiki"),
+    pytest.param("pydocs", "pydocs_rag", id="pydocs"),
 ]
 
 # Path to each source's rag.db; used by the happy-path test to skip cleanly
@@ -32,6 +33,7 @@ RAG_DB_PATHS = {
     "factbook_rag": db.FACTBOOK_RAG_DB,
     "gutenberg_rag": db.GUTENBERG_RAG_DB,
     "simplewiki_rag": db.SIMPLEWIKI_RAG_DB,
+    "pydocs_rag": db.PYDOCS_RAG_DB,
 }
 
 HEALTH_DBS = (
@@ -40,7 +42,21 @@ HEALTH_DBS = (
     "openalex", "openalex_rag",
     "gutenberg", "gutenberg_rag",
     "simplewiki", "simplewiki_rag",
+    "pydocs", "pydocs_rag",
 )
+
+# Repo-relative path to each source's rag indexer script. Most sources have
+# `scripts/<source>/<source>_index_rag.py`; pydocs lives at
+# `scripts/python_docs/python_docs_index_rag.py` (the on-disk script dir name
+# doesn't match the short `pydocs` source name). Used in skip messages.
+INDEXER_SCRIPTS = {
+    "arxiv": "scripts/arxiv/arxiv_index_rag.py",
+    "openalex": "scripts/openalex/openalex_index_rag.py",
+    "factbook": "scripts/factbook/factbook_index_rag.py",
+    "gutenberg": "scripts/gutenberg/gutenberg_index_rag.py",
+    "simplewiki": "scripts/simplewiki/simplewiki_index_rag.py",
+    "pydocs": "scripts/python_docs/python_docs_index_rag.py",
+}
 
 
 def test_health_all_dbs_ok(client):
@@ -138,6 +154,61 @@ def test_simplewiki_content_returns_wikitext(client):
     assert len(r.content) > 0
 
 
+def test_pydocs_list(client):
+    r = client.get("/pydocs/docs?limit=1")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "total" in body
+    if body["items"]:
+        item = body["items"][0]
+        for key in ("doc_path", "section", "title", "content_chars"):
+            assert key in item, item
+
+
+def test_pydocs_section_filter(client):
+    """Filtering by top-level section returns only docs from that section."""
+    r = client.get("/pydocs/docs?section=library&limit=3")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("pydocs has no library docs; run scripts/python_docs/python_docs_download.py")
+    for item in items:
+        assert item["section"] == "library", item
+
+
+def test_pydocs_fts_query(client):
+    """`q` runs an FTS5 match over title + content; results are bm25-ranked."""
+    r = client.get("/pydocs/docs?q=asyncio&limit=3")
+    if r.status_code == 503:
+        # FTS index not built yet — surface as a skip, same as the rag.db pattern.
+        pytest.skip("docs_fts not built; run scripts/python_docs/python_docs_index_fts.py")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("pydocs has no 'asyncio' matches")
+    # Both title and content are indexed; at least one of them should mention asyncio.
+    assert any("asyncio" in (it["title"] or "").lower() or it["doc_path"].startswith("library")
+               for it in items)
+
+
+def test_pydocs_detail_404(client):
+    r = client.get("/pydocs/docs/nonexistent/page")
+    assert r.status_code == 404
+
+
+def test_pydocs_content_returns_text(client):
+    """/pydocs/docs/{doc_path}/content returns raw Sphinx-text body as text/plain."""
+    r = client.get("/pydocs/docs?limit=1")
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("python_docs.db has no docs; run scripts/python_docs/python_docs_download.py")
+    doc_path = items[0]["doc_path"]
+    r = client.get(f"/pydocs/docs/{doc_path}/content")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert len(r.content) > 0
+
+
 def test_arxiv_list(client):
     r = client.get("/arxiv/papers?limit=1")
     assert r.status_code == 200
@@ -220,7 +291,7 @@ def test_chunks_happy(client, source, opener_name):
     rag_path = RAG_DB_PATHS[opener_name]
     if not rag_path.exists():
         pytest.skip(
-            f"{rag_path} missing — run scripts/{source}/{source}_index_rag.py to build it"
+            f"{rag_path} missing — run {INDEXER_SCRIPTS[source]} to build it"
         )
     r = client.get(f"/{source}/chunks", params={"q": "learning", "top_k": 3})
     assert r.status_code == 200
@@ -246,7 +317,7 @@ def test_chunks_empty_q_400(client, source, opener_name):
     rag_path = RAG_DB_PATHS[opener_name]
     if not rag_path.exists():
         pytest.skip(
-            f"{rag_path} missing — run scripts/{source}/{source}_index_rag.py to build it"
+            f"{rag_path} missing — run {INDEXER_SCRIPTS[source]} to build it"
         )
     r = client.get(f"/{source}/chunks", params={"q": "   "})
     assert r.status_code == 400
@@ -257,7 +328,7 @@ def test_chunks_missing_q_4xx(client, source, opener_name):
     rag_path = RAG_DB_PATHS[opener_name]
     if not rag_path.exists():
         pytest.skip(
-            f"{rag_path} missing — run scripts/{source}/{source}_index_rag.py to build it"
+            f"{rag_path} missing — run {INDEXER_SCRIPTS[source]} to build it"
         )
     r = client.get(f"/{source}/chunks")
     # FastAPI rejects missing required Query with 422; that's also a 4xx.
@@ -284,7 +355,7 @@ def test_chunks_sparse_only_when_ollama_down(client, source, opener_name, monkey
     rag_path = RAG_DB_PATHS[opener_name]
     if not rag_path.exists():
         pytest.skip(
-            f"{rag_path} missing — run scripts/{source}/{source}_index_rag.py to build it"
+            f"{rag_path} missing — run {INDEXER_SCRIPTS[source]} to build it"
         )
 
     def boom(*_a, **_kw):
@@ -363,13 +434,13 @@ def test_rag_no_orphan_vectors(source, opener_name):
     rag_path = RAG_DB_PATHS[opener_name]
     if not rag_path.exists():
         pytest.skip(
-            f"{rag_path} missing — run scripts/{source}/{source}_index_rag.py to build it"
+            f"{rag_path} missing — run {INDEXER_SCRIPTS[source]} to build it"
         )
     conn = getattr(db, opener_name)()
     n_chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     n_vecs = conn.execute("SELECT COUNT(*) FROM chunks_vec").fetchone()[0]
     if n_chunks == 0:
         pytest.skip(
-            f"{opener_name}.db has no chunks; run scripts/{source}_index_rag.py first"
+            f"{opener_name}.db has no chunks; run {INDEXER_SCRIPTS[source]} first"
         )
     assert n_chunks == n_vecs, f"orphan vectors: {n_chunks} chunks vs {n_vecs} vectors"

@@ -23,6 +23,7 @@ def add_chunks_route(
     opener: Callable[[], sqlite3.Connection],
     source_name: str,
     indexer_script: str,
+    rag_db_path: str | None = None,
 ) -> None:
     """Attach `GET /chunks` to `router`.
 
@@ -35,11 +36,17 @@ def add_chunks_route(
         router: The source's existing APIRouter (already mounted at `/<source>`).
         opener: Cached read-only connection getter from `api.db`
             (e.g. `db.arxiv_rag`). Loads sqlite-vec on first call.
-        source_name: Short source name; appears in the 503 detail body and
-            in the assumed `data/<source>/<source>_rag.db` path.
+        source_name: Short source name; appears in the 503 detail body.
         indexer_script: Filename of the script that rebuilds this RAG DB,
             named in the 503 detail so the caller knows what to run.
+        rag_db_path: Repo-relative path to the source's `_rag.db`, named in
+            the 503 detail as a restore hint. Defaults to
+            `data/<source_name>/<source_name>_rag.db`; pass explicitly when
+            the file name doesn't match the source name (e.g. pydocs uses
+            `python_docs_rag.db`).
     """
+    if rag_db_path is None:
+        rag_db_path = f"data/{source_name}/{source_name}_rag.db"
 
     @router.get("/chunks", response_model=ChunksResponse)
     def search_chunks(
@@ -60,8 +67,7 @@ def add_chunks_route(
                     status_code=503,
                     detail=(
                         f"{source_name} RAG data not ready ({e}). "
-                        f"Run scripts/{indexer_script} or restore "
-                        f"data/{source_name}/{source_name}_rag.db."
+                        f"Run scripts/{indexer_script} or restore {rag_db_path}."
                     ),
                 ) from e
             raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
