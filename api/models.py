@@ -83,6 +83,20 @@ class PydocsDoc(BaseModel):
     content_chars: int | None
 
 
+class WikihowArticle(BaseModel):
+    """One row from `wikihow.articles` — a single step of a how-to guide.
+
+    Several rows share a `title` (one per step); `/wikihow/chunks` reassembles
+    whole guides for retrieval. Raw step `text` lives at /content.
+    """
+
+    id: int
+    title: str | None
+    section_label: str | None
+    headline: str | None
+    text_chars: int | None
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

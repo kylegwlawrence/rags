@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Load the wikihowAll.csv dataset into a local SQLite database."""
+"""Load the wikihowSep.csv dataset into a local SQLite database.
+
+`wikihowSep.csv` is the per-step ("separated") form of the wikiHow corpus:
+one CSV row per step, several rows sharing a guide `title`. Each row carries
+the guide-level `overview` (repeated on every step of the guide), the
+per-section `sectionLabel` (e.g. "Using Home Remedies"), the step `headline`
+(its bolded summary sentence) and the step `text`.
+
+Rows are stored one-per-step in `articles`; the autoincrement `id` preserves
+CSV order, which is step order within a guide. The RAG extractor reconstructs
+whole guides by grouping on `title` and ordering by `id`.
+"""
 
 import argparse
 import csv
@@ -8,17 +19,19 @@ import sqlite3
 import sys
 
 DEFAULT_DB = "./data/wikihow/wikihow.db"
-DEFAULT_CSV = "./data/wikihow/wikihowAll.csv"
+DEFAULT_CSV = "./data/wikihow/wikihowSep.csv"
 
 
 def create_schema(cur: sqlite3.Cursor) -> None:
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS articles (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            title    TEXT,
-            headline TEXT,
-            text     TEXT,
-            UNIQUE (title, headline)
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            title         TEXT,
+            section_label TEXT,
+            headline      TEXT,
+            overview      TEXT,
+            text          TEXT,
+            UNIQUE (title, section_label, headline)
         );
     """)
 
@@ -56,15 +69,18 @@ def main() -> None:
             headline = (row.get("headline") or "").strip()
             title = (row.get("title") or "").strip()
             text = (row.get("text") or "").strip()
+            section_label = (row.get("sectionLabel") or "").strip()
+            overview = (row.get("overview") or "").strip()
 
             if not text and not headline:
                 skipped += 1
                 continue
 
             cur.execute("""
-                INSERT OR IGNORE INTO articles (title, headline, text)
-                VALUES (?, ?, ?)
-            """, (title, headline, text))
+                INSERT OR IGNORE INTO articles
+                    (title, section_label, headline, overview, text)
+                VALUES (?, ?, ?, ?, ?)
+            """, (title, section_label, headline, overview, text))
             total += 1
 
             if total % 1000 == 0:

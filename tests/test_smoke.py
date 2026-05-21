@@ -22,6 +22,7 @@ RAG_SOURCES = [
     pytest.param("gutenberg", "gutenberg_rag", id="gutenberg"),
     pytest.param("simplewiki", "simplewiki_rag", id="simplewiki"),
     pytest.param("pydocs", "pydocs_rag", id="pydocs"),
+    pytest.param("wikihow", "wikihow_rag", id="wikihow"),
 ]
 
 # Path to each source's rag.db; used by the happy-path test to skip cleanly
@@ -34,6 +35,7 @@ RAG_DB_PATHS = {
     "gutenberg_rag": db.GUTENBERG_RAG_DB,
     "simplewiki_rag": db.SIMPLEWIKI_RAG_DB,
     "pydocs_rag": db.PYDOCS_RAG_DB,
+    "wikihow_rag": db.WIKIHOW_RAG_DB,
 }
 
 HEALTH_DBS = (
@@ -43,6 +45,7 @@ HEALTH_DBS = (
     "gutenberg", "gutenberg_rag",
     "simplewiki", "simplewiki_rag",
     "pydocs", "pydocs_rag",
+    "wikihow", "wikihow_rag",
 )
 
 # Repo-relative path to each source's rag indexer script. Most sources have
@@ -56,6 +59,7 @@ INDEXER_SCRIPTS = {
     "gutenberg": "scripts/gutenberg/gutenberg_index_rag.py",
     "simplewiki": "scripts/simplewiki/simplewiki_index_rag.py",
     "pydocs": "scripts/python_docs/python_docs_index_rag.py",
+    "wikihow": "scripts/wikihow/wikihow_index_rag.py",
 }
 
 
@@ -194,6 +198,51 @@ def test_pydocs_fts_query(client):
 def test_pydocs_detail_404(client):
     r = client.get("/pydocs/docs/nonexistent/page")
     assert r.status_code == 404
+
+
+def test_wikihow_list(client):
+    r = client.get("/wikihow/articles?limit=1")
+    if r.status_code == 503:
+        pytest.skip("wikihow.db not built; run scripts/wikihow/wikihow_loader.py")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "total" in body
+    if body["items"]:
+        item = body["items"][0]
+        for key in ("id", "title", "section_label", "headline", "text_chars"):
+            assert key in item, item
+
+
+def test_wikihow_fts_query(client):
+    """`q` runs an FTS5 match over title + headline + text; results are bm25-ranked."""
+    r = client.get("/wikihow/articles?q=water&limit=3")
+    if r.status_code == 503:
+        pytest.skip("articles_fts not built; run scripts/wikihow/wikihow_index_fts.py")
+    assert r.status_code == 200
+    assert "items" in r.json()
+
+
+def test_wikihow_detail_404(client):
+    r = client.get("/wikihow/articles?limit=1")
+    if r.status_code == 503:
+        pytest.skip("wikihow.db not built; run scripts/wikihow/wikihow_loader.py")
+    r = client.get("/wikihow/articles/999999999")
+    assert r.status_code == 404
+
+
+def test_wikihow_content_returns_text(client):
+    """/wikihow/articles/{id}/content returns the raw step body as text/plain."""
+    r = client.get("/wikihow/articles?limit=1")
+    if r.status_code == 503:
+        pytest.skip("wikihow.db not built; run scripts/wikihow/wikihow_loader.py")
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("wikihow.db has no rows; run scripts/wikihow/wikihow_loader.py")
+    article_id = items[0]["id"]
+    r = client.get(f"/wikihow/articles/{article_id}/content")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert len(r.content) > 0
 
 
 def test_pydocs_content_returns_text(client):

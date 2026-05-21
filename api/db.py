@@ -35,6 +35,8 @@ SIMPLEWIKI_DB = DATA_DIR / "simplewiki" / "simplewiki.db"
 SIMPLEWIKI_RAG_DB = DATA_DIR / "simplewiki" / "simplewiki_rag.db"
 PYDOCS_DB = DATA_DIR / "pydocs" / "python_docs.db"
 PYDOCS_RAG_DB = DATA_DIR / "pydocs" / "python_docs_rag.db"
+WIKIHOW_DB = DATA_DIR / "wikihow" / "wikihow.db"
+WIKIHOW_RAG_DB = DATA_DIR / "wikihow" / "wikihow_rag.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -89,6 +91,8 @@ _simplewiki: sqlite3.Connection | None = None
 _simplewiki_rag: sqlite3.Connection | None = None
 _pydocs: sqlite3.Connection | None = None
 _pydocs_rag: sqlite3.Connection | None = None
+_wikihow: sqlite3.Connection | None = None
+_wikihow_rag: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -185,3 +189,19 @@ def pydocs_rag() -> sqlite3.Connection:
     if _pydocs_rag is None:
         _pydocs_rag = _connect_ro_with_vec(PYDOCS_RAG_DB)
     return _pydocs_rag
+
+
+def wikihow() -> sqlite3.Connection:
+    """Cached read-only connection to wikihow.db (FTS index built by scripts/wikihow/wikihow_index_fts.py)."""
+    global _wikihow
+    if _wikihow is None:
+        _wikihow = _connect_ro(WIKIHOW_DB)
+    return _wikihow
+
+
+def wikihow_rag() -> sqlite3.Connection:
+    """Cached read-only connection to wikihow_rag.db (built by scripts/wikihow/wikihow_index_rag.py)."""
+    global _wikihow_rag
+    if _wikihow_rag is None:
+        _wikihow_rag = _connect_ro_with_vec(WIKIHOW_RAG_DB)
+    return _wikihow_rag
