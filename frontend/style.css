@@ -71,7 +71,7 @@ body {
 }
 
 .sidebar {
-  width: 196px;
+  width: 216px;
   flex-shrink: 0;
   background: var(--bg);
   border-right: 1px solid var(--border);
@@ -139,20 +139,22 @@ body {
   padding: 0;
   overflow-y: auto;
   flex: 1;
-  /* Pico sets `nav ul { display: flex }` (row) for nav bars; the sidebar
-     is a <nav>, so force a vertical stack here. */
+  /* Pico sets `nav ul { display: flex; align-items: center }` for nav bars;
+     force a vertical stack with stretch so items fill the full sidebar width. */
   display: flex;
   flex-direction: column;
+  align-items: stretch;
 }
 
 .source-nav__item {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 2px var(--space-sm);
+  display: grid;
+  height: 28px;
+  padding: 0 var(--space-sm);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-xs);
   cursor: pointer;
+  align-content: center;
+  overflow: hidden;
   transition: background 0.15s ease;
 }
 
@@ -171,13 +173,13 @@ body {
 
 .source-nav__label {
   font-size: 14px;
-  line-height: 1.3;
+  line-height: 1.1;
   color: var(--text-primary);
 }
 
 .source-nav__sub {
   font-size: 12px;
-  line-height: 1.3;
+  line-height: 1.1;
   color: var(--text-secondary);
 }
 
