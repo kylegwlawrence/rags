@@ -54,6 +54,7 @@ export const SOURCES = {
     chunksEndpoint: '/openalex/chunks',
     docChunksEndpoint: '/openalex/doc-chunks',
     idField: 'id',
+    docIdField: 'openalex_url',
     titleField: 'title',
     subtitle_fn: (item) => (item.authors || []).slice(0, 3).join(', '),
     meta_fn: (item) => [item.year, item.venue].filter(Boolean).join(' · '),

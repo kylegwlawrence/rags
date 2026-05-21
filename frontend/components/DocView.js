@@ -49,7 +49,8 @@ export default defineComponent({
       chunksLoading.value = true;
       chunksError.value = null;
       try {
-        chunks.value = await getDocChunks(props.source, props.doc[props.source.idField]);
+        const docId = props.doc[props.source.docIdField || props.source.idField];
+        chunks.value = await getDocChunks(props.source, docId);
         chunksLoaded.value = true;
       } catch (e) {
         chunksError.value = e.message || 'Failed to load chunks';
