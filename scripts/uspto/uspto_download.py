@@ -118,7 +118,7 @@ def main() -> None:
                     )
                     for row in reader:
                         patent_id = (row.get("patent_id") or "").strip()
-                        summary = (row.get("text") or "").strip()
+                        summary = (row.get("summary_text") or "").strip()
 
                         if not patent_id or not summary:
                             continue
