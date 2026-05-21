@@ -50,6 +50,7 @@ def download_csv_files(files: list[dict], download_dir: str) -> list[str]:
             paths.append(dest)
             continue
 
+        tmp = dest + ".tmp"
         print(f"  Downloading {filename} ({size / 1e6:.1f} MB)...")
         r = requests.get(
             f"{DATAVERSE_BASE}/api/access/datafile/{file_id}",
@@ -58,9 +59,15 @@ def download_csv_files(files: list[dict], download_dir: str) -> list[str]:
             timeout=600,
         )
         r.raise_for_status()
-        with open(dest, "wb") as out:
-            for chunk in r.iter_content(chunk_size=8192):
-                out.write(chunk)
+        try:
+            with open(tmp, "wb") as out:
+                for chunk in r.iter_content(chunk_size=8192):
+                    out.write(chunk)
+            os.replace(tmp, dest)
+        except Exception:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
         paths.append(dest)
 
     return paths

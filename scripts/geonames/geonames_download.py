@@ -43,20 +43,31 @@ def create_schema(cur: sqlite3.Cursor) -> None:
             timezone     TEXT,
             sentence     TEXT
         );
+        CREATE INDEX IF NOT EXISTS idx_places_name ON places(name);
+        CREATE INDEX IF NOT EXISTS idx_places_country_feature
+            ON places(country_code, feature_class, feature_code);
+        CREATE INDEX IF NOT EXISTS idx_places_population ON places(population);
     """)
 
 
 def download_file(url: str, dest: str) -> None:
-    """Download a file, skipping if already present."""
+    """Download a file, skipping if already present. Writes atomically via a .tmp sibling."""
     if os.path.exists(dest):
         print(f"  Already downloaded: {os.path.basename(dest)}")
         return
     print(f"  Downloading {url}...")
-    r = requests.get(url, stream=True, timeout=300)
-    r.raise_for_status()
-    with open(dest, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
+    tmp = dest + ".tmp"
+    try:
+        r = requests.get(url, stream=True, timeout=300)
+        r.raise_for_status()
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+        os.replace(tmp, dest)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def load_country_names(path: str) -> dict[str, str]:
@@ -116,6 +127,10 @@ def main() -> None:
                         help=f"Path to SQLite database (default: {DEFAULT_DB})")
     parser.add_argument("--download-dir", default=DEFAULT_DOWNLOAD_DIR,
                         help=f"Directory for downloaded files (default: {DEFAULT_DOWNLOAD_DIR})")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Stop after inserting this many rows (for testing)")
+    parser.add_argument("--reset", action="store_true",
+                        help="Drop and recreate the places table before importing")
     args = parser.parse_args()
 
     db_dir = os.path.dirname(args.db)
@@ -143,6 +158,10 @@ def main() -> None:
 
     con = sqlite3.connect(args.db)
     cur = con.cursor()
+    if args.reset:
+        print("Resetting places table...")
+        cur.execute("DROP TABLE IF EXISTS places")
+        con.commit()
     create_schema(cur)
     con.commit()
 
@@ -164,7 +183,8 @@ def main() -> None:
                     lat  = float(record["latitude"])  if record["latitude"]  else None
                     lon  = float(record["longitude"]) if record["longitude"] else None
                     pop  = int(record["population"])  if record["population"] else 0
-                    elev = int(record["elevation"])   if record["elevation"]  else None
+                    _elev = int(record["elevation"]) if record["elevation"] else None
+                    elev = None if _elev == -9999 else _elev
                 except ValueError:
                     continue
 
@@ -188,14 +208,13 @@ def main() -> None:
                 ))
                 total += cur.rowcount
 
-                if total % 50000 == 0:
+                if total > 0 and total % 50000 == 0:
                     con.commit()
                     print(f"  {total} places inserted...")
 
-    con.commit()
+                if args.limit and total >= args.limit:
+                    break
 
-    print("Creating index on name...")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_name ON places(name)")
     con.commit()
     con.close()
 

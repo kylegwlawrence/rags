@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download USPTO patent abstracts from PatentsView into a local SQLite database."""
+"""Download USPTO patent brief summary text from PatentsView into a local SQLite database."""
 
 import argparse
 import csv
@@ -18,11 +18,13 @@ START_YEAR = 2000
 DEFAULT_END_YEAR = 2025
 
 
-def create_schema(cur: sqlite3.Cursor) -> None:
+def create_schema(cur: sqlite3.Cursor, reset: bool = False) -> None:
+    if reset:
+        cur.executescript("DROP TABLE IF EXISTS summaries; DROP TABLE IF EXISTS ingest_state;")
     cur.executescript("""
-        CREATE TABLE IF NOT EXISTS abstracts (
+        CREATE TABLE IF NOT EXISTS summaries (
             patent_id TEXT PRIMARY KEY,
-            abstract  TEXT
+            summary   TEXT
         );
         CREATE TABLE IF NOT EXISTS ingest_state (
             id                   INTEGER PRIMARY KEY CHECK (id = 1),
@@ -38,7 +40,9 @@ def get_last_completed_year(cur: sqlite3.Cursor) -> Optional[int]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download USPTO patent abstracts from PatentsView.")
+    parser = argparse.ArgumentParser(description="Download USPTO patent brief summary text from PatentsView.")
+    parser.add_argument("--reset", action="store_true",
+                        help="Drop and recreate the summaries table before downloading")
     parser.add_argument("--db", default=DEFAULT_DB,
                         help=f"Path to SQLite database (default: {DEFAULT_DB})")
     parser.add_argument("--download-dir", default=DEFAULT_DOWNLOAD_DIR,
@@ -59,7 +63,7 @@ def main() -> None:
 
     con = sqlite3.connect(args.db)
     cur = con.cursor()
-    create_schema(cur)
+    create_schema(cur, reset=args.reset)
     con.commit()
 
     if args.year_from is not None:
@@ -73,7 +77,7 @@ def main() -> None:
     total_inserted = 0
 
     for year in range(year_from, args.year_to + 1):
-        url = f"https://patentsview.org/download/g_brf_sum_text_{year}.tsv.zip"
+        url = f"https://s3.amazonaws.com/data.patentsview.org/brief-summary-text/g_brf_sum_text_{year}.tsv.zip"
         zip_path = os.path.join(args.download_dir, f"g_brf_sum_text_{year}.tsv.zip")
         print(f"\n=== Year {year} ===")
         print(f"Downloading {url}...")
@@ -98,13 +102,15 @@ def main() -> None:
                     f.write(chunk)
         except OSError as e:
             print(f"  Failed to write zip: {e} — skipping")
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
             continue
 
         # Parse
         year_inserted = 0
         try:
             with zipfile.ZipFile(zip_path, "r") as z:
-                tsv_name = z.namelist()[0]
+                tsv_name = next(n for n in z.namelist() if n.endswith(".tsv"))
                 with z.open(tsv_name) as tsv_file:
                     reader = csv.DictReader(
                         io.TextIOWrapper(tsv_file, encoding="utf-8"),
@@ -112,18 +118,18 @@ def main() -> None:
                     )
                     for row in reader:
                         patent_id = (row.get("patent_id") or "").strip()
-                        abstract = (row.get("text") or "").strip()
+                        summary = (row.get("text") or "").strip()
 
-                        if not patent_id or not abstract:
+                        if not patent_id or not summary:
                             continue
 
                         cur.execute("""
-                            INSERT OR IGNORE INTO abstracts (patent_id, abstract)
+                            INSERT OR IGNORE INTO summaries (patent_id, summary)
                             VALUES (?, ?)
-                        """, (patent_id, abstract))
+                        """, (patent_id, summary))
                         year_inserted += cur.rowcount
 
-                        if year_inserted % 10000 == 0:
+                        if year_inserted > 0 and year_inserted % 10000 == 0:
                             con.commit()
                             print(f"  {year_inserted} records inserted for {year}...")
 
@@ -135,13 +141,13 @@ def main() -> None:
         con.commit()
         os.remove(zip_path)
         total_inserted += year_inserted
-        print(f"  Done — {year_inserted} abstracts inserted for {year}")
+        print(f"  Done — {year_inserted} summaries inserted for {year}")
 
         cur.execute("UPDATE ingest_state SET last_completed_year = ? WHERE id = 1", (year,))
         con.commit()
 
     con.close()
-    print(f"\nDone. Total abstracts inserted: {total_inserted}")
+    print(f"\nDone. Total summaries inserted: {total_inserted}")
 
 
 if __name__ == "__main__":
