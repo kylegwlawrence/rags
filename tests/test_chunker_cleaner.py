@@ -107,7 +107,10 @@ def test_chunk_markdown_handles_lead_text_without_heading() -> None:
     assert "Location" in joined
 
 
-def test_chunk_markdown_chunk_index_resets_per_section() -> None:
+def test_chunk_markdown_chunk_index_is_global_document_order() -> None:
+    # chunk_index runs 0..N-1 across the whole document (reading order), not
+    # per-section. A per-section reset made the doc-chunks inspector interleave
+    # sections when ordering by chunk_index.
     long_geo = "Location: somewhere. " * 100
     long_eco = "GDP: high. " * 100
     md = f"## Geography\n{long_geo}\n\n## Economy\n{long_eco}"
@@ -116,5 +119,8 @@ def test_chunk_markdown_chunk_index_resets_per_section() -> None:
     geo = [c for c in chunks if c["section"] == "Geography"]
     eco = [c for c in chunks if c["section"] == "Economy"]
     assert geo and eco
+    # Indices are a contiguous 0..N-1 sequence in list order...
+    assert [c["chunk_index"] for c in chunks] == list(range(len(chunks)))
+    # ...so Geography occupies the front and Economy starts after it.
     assert geo[0]["chunk_index"] == 0
-    assert eco[0]["chunk_index"] == 0
+    assert eco[0]["chunk_index"] == len(geo)

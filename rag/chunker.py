@@ -149,8 +149,8 @@ def chunk_markdown(
 
     Returns:
         List of dicts with `section` (str|None), `chunk_index` (int, 0-based
-        within section), `text` (str), `text_length` (int). Empty list if
-        every section ends up empty.
+        across the whole document, in reading order), `text` (str),
+        `text_length` (int). Empty list if every section ends up empty.
     """
     text = normalize_whitespace(doc.text or "")
     if not text:
@@ -171,7 +171,6 @@ def chunk_markdown(
         if not body:
             continue
         parts = _split_with_hard_cap(body, chunk_size, overlap, cap)
-        section_index = 0
         for part in parts:
             cleaned = normalize_whitespace(part)
             if not cleaned:
@@ -179,10 +178,14 @@ def chunk_markdown(
             chunks.append(
                 {
                     "section": section,
-                    "chunk_index": section_index,
+                    # Document-wide running index (like chunk_doc), NOT a
+                    # per-section counter. A per-section reset made the
+                    # doc-chunks inspector interleave sections when it ordered
+                    # by chunk_index; a global index keeps a document's chunks
+                    # in reading order.
+                    "chunk_index": len(chunks),
                     "text": cleaned,
                     "text_length": len(cleaned),
                 }
             )
-            section_index += 1
     return chunks

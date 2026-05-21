@@ -103,9 +103,12 @@ def add_doc_chunks_route(
 ) -> None:
     """Attach `GET /doc-chunks` to `router`.
 
-    Returns all stored chunks for a specific `doc_id`, ordered by
-    `chunk_index`. Intended for per-document inspection, not retrieval.
-    Empty result (doc not yet indexed) returns `[]`, not 404.
+    Returns all stored chunks for a specific `doc_id` in document order.
+    Orders by `chunk_id` (autoincrement insertion order) rather than
+    `chunk_index`: chunks are inserted in reading order, so `chunk_id` is the
+    reliable document-order key even for rows indexed before `chunk_markdown`
+    switched to a global `chunk_index`. Intended for per-document inspection,
+    not retrieval. Empty result (doc not yet indexed) returns `[]`, not 404.
 
     Args:
         router: The source's existing APIRouter.
@@ -128,7 +131,7 @@ def add_doc_chunks_route(
                 SELECT chunk_id, doc_id, section, chunk_index, text, text_length
                 FROM chunks
                 WHERE doc_id = ?
-                ORDER BY chunk_index
+                ORDER BY chunk_id
                 """,
                 (doc_id,),
             ).fetchall()
