@@ -1,0 +1,40 @@
+# Datasources
+
+Status of each datasource as of 2026-05-21.
+
+**FTS indexed** = a full-text search index exists in the primary DB so the API `/list` endpoint supports `?q=`.
+**Embedded** = a `*_rag.db` exists with chunk embeddings for the `/chunks` hybrid-search endpoint.
+
+---
+
+## Active sources (data downloaded)
+
+| Source | Fully downloaded? | On-disk size | Est. full download | FTS indexed? | Embedded? |
+|--------|-------------------|-------------|-------------------|--------------|-----------|
+| **arxiv** | Metadata: ✓ (760k papers, harvested through 2026-05-20)<br>HTML bodies: ✗ (8,722 / 760,377 = 1%) | 8.5 GB | Metadata: ~6 GB<br>All HTML bodies: est. 100s GB | ✓ | Partial — 11,201 / 760,377 papers (1.5%); covers HTML-downloaded papers + title/abstract fallback |
+| **openalex** | ✓ for target subset (268,153 works, top-cited) | 925 MB | Full dataset (250M+ works): terabytes | ✓ | Partial — 4,118 / 5,000 target (82%); target is top-5k by citation count |
+| **factbook** | ✓ (261 / 261 countries) | 55 MB | ~8 MB (complete) | ✗ (list/filter only; no text search endpoint) | ✓ (261 / 261 countries) |
+| **gutenberg** | ✓ (full rsync mirror, 50,521 texts indexed) | 61 GB | ~61 GB (complete) | ✗ (title/author/language filter only) | ✗ — 5 / 50,521 books (0.01%) |
+| **simplewiki** | ✓ (full dump, 394,559 main articles) | 1.3 GB | ~1.3 GB (complete) | ✓ | Partial — 2,810 / 394,559 articles (0.7%) |
+| **pydocs** | ✓ (513 pages, full Python 3.13 docs) | 34 MB | ~19 MB (complete) | ✓ | Partial — 14 / 513 pages (2.7%) |
+| **wikihow** | ✓ (214,613 guides / 1.58M steps from static CSV) | 3.3 GB | ~3.3 GB (CSV-based, complete) | ✓ | Partial — 262 / 214,613 guides (0.1%) |
+| **billstatus** | ✓ (169,862 bills, 2003-01-07 through 2026-05-20) | 269 MB | ~269 MB (complete) | ✗ | ✗ |
+| **ecfr** | Probably ✓ (50 CFR titles, 227,600 sections) | 648 MB | ~648 MB | ✗ | ✗ |
+| **uscode** | ✓ (54 active titles, 63,137 sections; release 119-90; Title 53 reserved/absent by design) | 451 MB | ~451 MB (complete) | ✗ | ✗ |
+| **github** | ✓ for target (15 awesome-lists; 10,712 fetched, 240 missing) | 130 MB | ~130 MB (complete for target) | ✗ | ✗ |
+| **loc** | ✗ (script run but 0 records downloaded) | 24 KB | Est. hundreds of MB (495k English manuscripts) | ✗ | ✗ |
+
+---
+
+## Not yet started (script exists, no data)
+
+| Source | Script | Notes |
+|--------|--------|-------|
+| **ceps** | `scripts/ceps/ceps_download.py` | — |
+| **federal_register** | `scripts/federal_register/federal_register_download.py` | US Federal Register |
+| **geonames** | `scripts/geonames/geonames_download.py` | Geographic names database |
+| **lib_congress_books** | `scripts/lib_congress_books/lib_congress_books_download.py` | LOC book catalog |
+| **lib_congress_manuscripts** | `scripts/lib_congress_manuscripts/lib_congress_manuscripts.py` | LOC manuscripts |
+| **lib_congress_newspapers** | `scripts/lib_congress_newspapers/lib_congress_newspapers_download.py` | LOC digitized newspapers |
+| **stackexchange** | `scripts/stackexchange/stackexchange_download.py` | Stack Exchange Q&A dumps |
+| **uspto** | `scripts/uspto/uspto_download.py` | US patent data |
