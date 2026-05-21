@@ -71,7 +71,7 @@ body {
 }
 
 .sidebar {
-  width: 280px;
+  width: 196px;
   flex-shrink: 0;
   background: var(--bg);
   border-right: 1px solid var(--border);
@@ -148,8 +148,8 @@ body {
 .source-nav__item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px var(--space-sm);
+  gap: 0;
+  padding: 2px var(--space-sm);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-xs);
   cursor: pointer;
@@ -171,11 +171,13 @@ body {
 
 .source-nav__label {
   font-size: 14px;
+  line-height: 1.3;
   color: var(--text-primary);
 }
 
 .source-nav__sub {
   font-size: 12px;
+  line-height: 1.3;
   color: var(--text-secondary);
 }
 
