@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
-from api._chunks import add_chunks_route
+from api._chunks import add_chunks_route, add_doc_chunks_route
 from api.models import CountryDetail, CountrySummary, Page
 
 router = APIRouter(prefix="/factbook", tags=["factbook"])
@@ -71,6 +71,12 @@ def get_country(
 
 
 add_chunks_route(
+    router,
+    opener=db.factbook_rag,
+    source_name="factbook",
+    indexer_script="factbook_index_rag.py",
+)
+add_doc_chunks_route(
     router,
     opener=db.factbook_rag,
     source_name="factbook",

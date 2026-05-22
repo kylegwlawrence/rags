@@ -90,6 +90,7 @@ export default defineComponent({
               @click="goBack"
             >Browse</button>
             <button
+              v-if="activeSource.chunksEndpoint"
               class="topbar__tab"
               :class="{ 'topbar__tab--active': activeView === 'chunks' }"
               @click="openChunks"

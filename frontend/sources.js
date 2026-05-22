@@ -139,6 +139,94 @@ export const SOURCES = {
       { key: 'language', label: 'Language', type: 'text', placeholder: 'e.g. en' },
     ],
   },
+
+  wikihow: {
+    key: 'wikihow',
+    label: 'wikiHow',
+    subtitle: 'How-to guides',
+    listEndpoint: '/wikihow/articles',
+    detailEndpoint: (id) => `/wikihow/articles/${id}`,
+    contentEndpoint: (id) => `/wikihow/articles/${id}/content`,
+    chunksEndpoint: '/wikihow/chunks',
+    docChunksEndpoint: '/wikihow/doc-chunks',
+    idField: 'id',
+    // RAG doc_id is the guide title (the indexer reassembles whole guides),
+    // not the per-step row id — so the per-doc chunk inspector keys on title.
+    docIdField: 'title',
+    titleField: 'title',
+    subtitle_fn: (item) => item.section_label || '',
+    meta_fn: (item) => item.section_label || '',
+    contentType: 'text',
+    metaFields: [
+      { label: 'ID',       value: (d) => d.id },
+      { label: 'Title',    value: (d) => d.title },
+      { label: 'Section',  value: (d) => d.section_label },
+      { label: 'Headline', value: (d) => d.headline },
+      { label: 'Size',     value: (d) => d.text_chars ? `${d.text_chars} chars` : '' },
+    ],
+    filters: [
+      { key: 'q',             label: 'Search',  type: 'text', placeholder: 'FTS5 query…' },
+      { key: 'title',         label: 'Title',   type: 'text', placeholder: 'substring' },
+      { key: 'section_label', label: 'Section', type: 'text', placeholder: 'exact match' },
+    ],
+  },
+
+  pydocs: {
+    key: 'pydocs',
+    label: 'Python Docs',
+    subtitle: 'Python documentation',
+    listEndpoint: '/pydocs/docs',
+    detailEndpoint: (id) => `/pydocs/docs/${id}`,
+    contentEndpoint: (id) => `/pydocs/docs/${id}/content`,
+    chunksEndpoint: '/pydocs/chunks',
+    docChunksEndpoint: '/pydocs/doc-chunks',
+    idField: 'doc_path',
+    titleField: 'title',
+    subtitle_fn: (item) => item.section || '',
+    meta_fn: (item) => item.section || '',
+    contentType: 'text',
+    metaFields: [
+      { label: 'Path',    value: (d) => d.doc_path },
+      { label: 'Section', value: (d) => d.section },
+      { label: 'Title',   value: (d) => d.title },
+      { label: 'Size',    value: (d) => d.content_chars ? `${d.content_chars} chars` : '' },
+    ],
+    filters: [
+      { key: 'q',       label: 'Search',  type: 'text', placeholder: 'FTS5 query…' },
+      { key: 'section', label: 'Section', type: 'text', placeholder: 'e.g. library' },
+      { key: 'title',   label: 'Title',   type: 'text', placeholder: 'substring' },
+    ],
+  },
+
+  factbook: {
+    key: 'factbook',
+    label: 'Factbook',
+    subtitle: 'CIA World Factbook',
+    listEndpoint: '/factbook/countries',
+    detailEndpoint: (id) => `/factbook/countries/${id}`,
+    contentEndpoint: null,
+    chunksEndpoint: '/factbook/chunks',
+    docChunksEndpoint: '/factbook/doc-chunks',
+    // The list row is slim (id/name/region); the country profile (`data`) only
+    // comes from the detail endpoint, so DocView must fetch it.
+    fetchDetail: true,
+    idField: 'id',
+    titleField: 'name',
+    subtitle_fn: (item) => item.region || '',
+    meta_fn: (item) => item.region || '',
+    contentType: 'none',
+    metaFields: [
+      { label: 'Code',   value: (d) => d.id },
+      { label: 'Name',   value: (d) => d.name },
+      { label: 'Region', value: (d) => d.region },
+    ],
+    filters: [
+      { key: 'region', label: 'Region', type: 'text', placeholder: 'exact match' },
+    ],
+  },
 };
 
-export const SOURCE_ORDER = ['arxiv', 'openalex', 'simplewiki', 'gutenberg'];
+export const SOURCE_ORDER = [
+  'arxiv', 'openalex', 'simplewiki', 'gutenberg',
+  'wikihow', 'pydocs', 'factbook',
+];

@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
-from api._chunks import add_chunks_route
+from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_fts_errors
 from api.models import Page, PydocsDoc
 
@@ -124,6 +124,13 @@ def get_doc(
 
 
 add_chunks_route(
+    router,
+    opener=db.pydocs_rag,
+    source_name="pydocs",
+    indexer_script="python_docs/python_docs_index_rag.py",
+    rag_db_path="data/pydocs/python_docs_rag.db",
+)
+add_doc_chunks_route(
     router,
     opener=db.pydocs_rag,
     source_name="pydocs",

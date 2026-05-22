@@ -1,5 +1,5 @@
 import { defineComponent, ref, computed, onMounted } from '/ui/vendor/vue.esm-browser.js';
-import { getContent, getDocChunks, embedDoc } from '/ui/api.js';
+import { getDoc, getContent, getDocChunks, embedDoc } from '/ui/api.js';
 
 export default defineComponent({
   name: 'DocView',
@@ -11,6 +11,12 @@ export default defineComponent({
 
   setup(props) {
     const activeTab = ref('content');
+
+    // The browse list emits a slim list row (e.g. factbook CountrySummary =
+    // id/name/region) that lacks the rich `data` blob the detail endpoint
+    // returns. When `source.fetchDetail` is set, pull the full detail so the
+    // sectioned profile below has something to render.
+    const detail = ref(props.doc);
 
     // Content tab state
     const content = ref(null);
@@ -37,6 +43,71 @@ export default defineComponent({
       if (embedding.value) return 'Embedding…';
       if (embedError.value) return 'Retry embed';
       return isEmbedded.value ? 'Re-embed' : 'Embed';
+    });
+
+    // ----- Nested-data profile rendering (contentType 'none' sources whose
+    // detail returns a `data` object, e.g. factbook). Builds sanitized HTML:
+    // every text leaf is escaped, only our own structural tags are injected.
+    function fbEscape(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    // Source values carry presentational HTML (<p>, <br>, <strong>); convert
+    // structural tags to newlines, drop the rest, collapse whitespace.
+    function fbClean(s) {
+      return String(s)
+        .replace(/<\s*br\s*\/?>/gi, '\n')
+        .replace(/<\/\s*p\s*>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]+/g, ' ')
+        .trim();
+    }
+
+    function fbRenderValue(v) {
+      if (v === null || v === undefined || v === '') return '';
+      if (Array.isArray(v)) {
+        const items = v.map((it) => fbRenderValue(it)).filter(Boolean);
+        if (!items.length) return '';
+        return '<ul class="profile__list">' +
+          items.map((it) => `<li>${it}</li>`).join('') + '</ul>';
+      }
+      if (typeof v === 'object') {
+        let rows = '';
+        for (const [k, val] of Object.entries(v)) {
+          const rendered = fbRenderValue(val);
+          if (!rendered) continue;
+          rows += `<dt class="profile__key">${fbEscape(k)}</dt>` +
+                  `<dd class="profile__val">${rendered}</dd>`;
+        }
+        return rows ? `<dl class="profile__grid">${rows}</dl>` : '';
+      }
+      return fbEscape(fbClean(v)).replace(/\n/g, '<br>');
+    }
+
+    async function loadDetail() {
+      if (!props.source.fetchDetail) return;
+      try {
+        detail.value = await getDoc(props.source, props.doc[props.source.idField]);
+      } catch (e) {
+        // Keep the slim list row; the profile just stays empty on failure.
+        console.error('Failed to fetch detail:', e);
+      }
+    }
+
+    const profileHtml = computed(() => {
+      const data = detail.value && detail.value.data;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
+      let out = '';
+      for (const [section, fields] of Object.entries(data)) {
+        const body = fbRenderValue(fields);
+        if (!body) continue;
+        out += `<section class="profile__section"><h3 class="profile__heading">${fbEscape(section)}</h3>${body}</section>`;
+      }
+      return out ? `<div class="profile">${out}</div>` : '';
     });
 
     function visibleMetaFields() {
@@ -106,6 +177,7 @@ export default defineComponent({
     }
 
     onMounted(() => {
+      loadDetail();
       if (props.source.contentType !== 'none') {
         loadContent();
       }
@@ -122,6 +194,7 @@ export default defineComponent({
       chunks, chunksLoading, chunksError, chunksLoaded,
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel,
+      profileHtml,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
     };
   },
@@ -151,6 +224,7 @@ export default defineComponent({
           @click="activeTab = 'content'"
         >Content</button>
         <button
+          v-if="source.docChunksEndpoint"
           class="doc-view__tab"
           :class="{ 'doc-view__tab--active': activeTab === 'chunks' }"
           @click="openChunksTab"
@@ -167,7 +241,8 @@ export default defineComponent({
         </dl>
 
         <div v-if="source.contentType === 'none'">
-          <p style="line-height: 1.65; margin: 0;">{{ doc.abstract }}</p>
+          <div v-if="profileHtml" class="profile-wrap" v-html="profileHtml" />
+          <p v-else style="line-height: 1.65; margin: 0;">{{ doc.abstract }}</p>
         </div>
         <div v-else-if="contentLoading" class="doc-content-state">Loading content…</div>
         <div v-else-if="contentError" class="doc-content-state doc-content-state--error">

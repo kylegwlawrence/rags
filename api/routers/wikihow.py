@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
-from api._chunks import add_chunks_route
+from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_fts_errors
 from api.models import Page, WikihowArticle
 
@@ -120,6 +120,12 @@ def get_article(
 
 
 add_chunks_route(
+    router,
+    opener=db.wikihow_rag,
+    source_name="wikihow",
+    indexer_script="wikihow/wikihow_index_rag.py",
+)
+add_doc_chunks_route(
     router,
     opener=db.wikihow_rag,
     source_name="wikihow",
