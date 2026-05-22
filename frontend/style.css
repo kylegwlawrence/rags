@@ -539,6 +539,38 @@ body {
   color: var(--accent-on);
 }
 
+/* "Download full filing" — a primary action mirroring the embed button. */
+.doc-view__download {
+  flex-shrink: 0;
+  align-self: center;
+  width: auto;
+  margin: 0;
+  white-space: nowrap;
+  background: var(--accent);
+  color: var(--accent-on);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.doc-view__download:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.doc-view__download:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.doc-view__download--error {
+  background: var(--danger);
+  color: var(--accent-on);
+}
+
 .doc-view__tabs {
   display: flex;
   padding: 0 var(--space-xl);

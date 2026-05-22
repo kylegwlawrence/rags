@@ -160,6 +160,19 @@ class SecEdgarFiling(BaseModel):
     body_chars: int | None
 
 
+class DownloadResult(BaseModel):
+    """Result of an on-demand filing body download (`POST .../{accession}/download`).
+
+    `status` is the row's new status: 'fetched' when text was stored, 'missing'
+    when the submission held no extractable body, 'error' when it couldn't be
+    fetched. `body_chars` is the stored body length (0 unless status='fetched').
+    """
+
+    accession_number: str
+    status: str
+    body_chars: int
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

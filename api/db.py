@@ -86,6 +86,29 @@ def connect_rag_rw(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def connect_rw(path: Path) -> sqlite3.Connection:
+    """Open a plain read-write connection to a source DB for one narrow live write.
+
+    Used by the SEC "Download full filing" route to write a freshly-fetched body
+    onto its `filings` row. Returns a FRESH connection the caller must close;
+    the cached read-only connection sees the committed UPDATE on its next query
+    because it's an in-place single-row write to the same file (no inode swap),
+    so no uvicorn restart is needed — unlike a full indexer rebuild that
+    replaces the file. `busy_timeout` lets the write wait briefly for the lock
+    rather than erroring if a read query is in flight.
+    """
+    try:
+        conn = sqlite3.connect(path)
+    except sqlite3.OperationalError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"{path.name} not available for writing: {e}",
+        ) from e
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 10000")
+    return conn
+
+
 def _connect_ro_with_vec(path: Path) -> sqlite3.Connection:
     """Open `path` read-only with the sqlite-vec extension loaded.
 

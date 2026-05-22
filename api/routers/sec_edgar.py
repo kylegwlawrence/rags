@@ -1,3 +1,4 @@
+import os
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -5,9 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_fts_errors
-from api.models import Page, SecEdgarFiling
+from api.models import DownloadResult, Page, SecEdgarFiling
+from rag.sec_filing import download_filing_body
 
 router = APIRouter(prefix="/sec_edgar", tags=["sec_edgar"])
+
+# Contact address advertised to SEC when downloading a filing on demand.
+_SEC_EMAIL = os.environ.get("SEC_EMAIL", "kylegwlawrence@gmail.com")
 
 
 def _row_to_filing(row: sqlite3.Row) -> SecEdgarFiling:
@@ -23,10 +28,12 @@ def _row_to_filing(row: sqlite3.Row) -> SecEdgarFiling:
 
 
 def _lookup(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row:
+    # No status filter: metadata-only filings (body not yet downloaded) are
+    # reachable here so the detail view can show them and offer a download.
     row = conn.execute(
         "SELECT accession_number, company_name, cik, form_type, date_filed, "
-        "       filing_url, body, length(body) AS body_chars "
-        "FROM filings WHERE accession_number = ? AND status = 'fetched'",
+        "       filing_url, body, status, length(body) AS body_chars "
+        "FROM filings WHERE accession_number = ?",
         [accession_number],
     ).fetchone()
     if row is None:
@@ -55,6 +62,14 @@ def list_filings(
         None,
         description="Filter to filings filed in this year.",
     ),
+    downloaded: bool | None = Query(
+        None,
+        description=(
+            "Filter by body-download state: true = only filings whose body has "
+            "been downloaded, false = only those not yet downloaded. Omit to "
+            "list all harvested filings (the default)."
+        ),
+    ),
     sort: str | None = Query(
         None,
         description="Sort order: 'newest' (default), 'oldest', or 'relevance' (requires q).",
@@ -63,15 +78,26 @@ def list_filings(
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.sec_edgar),
 ) -> Page[SecEdgarFiling]:
-    """List fetched SEC EDGAR filings with optional full-text, company, CIK, and year filters."""
+    """List SEC EDGAR filings with optional full-text, company, CIK, year, and download-state filters.
+
+    Lists every harvested filing by default, including metadata-only rows whose
+    body hasn't been downloaded yet (use the `downloaded` filter to narrow).
+    `q` matches only downloaded filings — `filings_fts` indexes fetched bodies.
+    """
     from_clause = "filings"
-    clauses: list[str] = ["filings.status = 'fetched'"]
+    clauses: list[str] = []
     params: list = []
 
     if q is not None:
         from_clause = "filings JOIN filings_fts ON filings_fts.rowid = filings.rowid"
         clauses.append("filings_fts MATCH ?")
         params.append(q)
+    # `IS` / `IS NOT` are null-safe here: a never-attempted row has status NULL,
+    # which `status IS NOT 'fetched'` correctly treats as "not downloaded".
+    if downloaded is True:
+        clauses.append("filings.status IS 'fetched'")
+    elif downloaded is False:
+        clauses.append("filings.status IS NOT 'fetched'")
     if company is not None:
         clauses.append("filings.company_name LIKE ?")
         params.append(f"%{company}%")
@@ -82,7 +108,7 @@ def list_filings(
         clauses.append("strftime('%Y', filings.date_filed) = ?")
         params.append(str(year))
 
-    where = "WHERE " + " AND ".join(clauses)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
     if sort == "relevance" and q is None:
         raise HTTPException(status_code=400, detail="sort=relevance requires q")
@@ -128,6 +154,72 @@ def get_filing_content(
     if not row["body"]:
         raise HTTPException(status_code=404, detail="filing has no text content")
     return Response(content=row["body"], media_type="text/plain; charset=utf-8")
+
+
+@router.post("/filings/{accession_number}/download", response_model=DownloadResult)
+def download_filing(
+    accession_number: str,
+    conn: sqlite3.Connection = Depends(db.sec_edgar),
+) -> DownloadResult:
+    """Download one filing's body from SEC on demand and store it (synchronous).
+
+    `sec_edgar_download.py` records only filing metadata + a `filing_url`. This
+    fetches that submission, extracts the primary document, and writes the
+    cleaned text onto the row's `body` column (status -> 'fetched'), so the
+    Content tab and `/content` start serving it. It mirrors the standalone
+    `sec_edgar_fetch_bodies.py --accession` path but runs in-process, sharing
+    the same extractor (`rag.sec_filing`).
+
+    The write goes through a fresh read-write connection; the cached read-only
+    connection picks up the committed row on its next query — an in-place
+    single-row UPDATE to the same file, so no uvicorn restart is needed (unlike
+    a full re-index that replaces the file). A filing whose submission 404s or
+    keeps failing returns 502; one with no extractable text returns 422. In
+    both cases the row's `status` is recorded so the failure is visible.
+    Building the FTS / RAG search indexes over the new body stays a separate
+    batch step (`sec_edgar_index_fts.py` / `sec_edgar_index_rag.py`).
+    """
+    row = _lookup(conn, accession_number)
+    filing_url = row["filing_url"]
+    if not filing_url:
+        raise HTTPException(
+            status_code=422, detail="filing has no filing_url to download from"
+        )
+
+    body = download_filing_body(filing_url, row["form_type"] or "", _SEC_EMAIL)
+    if body is None:
+        status, stored = "error", None
+    elif body.strip():
+        status, stored = "fetched", body
+    else:
+        status, stored = "missing", None
+
+    rw = db.connect_rw(db.SEC_EDGAR_DB)
+    try:
+        rw.execute(
+            "UPDATE filings SET body = ?, status = ? WHERE accession_number = ?",
+            (stored, status, accession_number),
+        )
+        rw.commit()
+    finally:
+        rw.close()
+
+    if status == "error":
+        raise HTTPException(
+            status_code=502,
+            detail="could not download filing from SEC (404 or repeated fetch failure)",
+        )
+    if status == "missing":
+        raise HTTPException(
+            status_code=422,
+            detail="filing submission contained no extractable text",
+        )
+
+    return DownloadResult(
+        accession_number=accession_number,
+        status=status,
+        body_chars=len(stored) if stored else 0,
+    )
 
 
 @router.get("/filings/{accession_number}", response_model=SecEdgarFiling)

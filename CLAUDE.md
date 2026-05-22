@@ -55,7 +55,7 @@ uvicorn api.main:app --host 0.0.0.0 --port 8002
 
 Port 8002 is fixed (8000/8001 occupied). Tailscale ACLs gate access; no app-level auth. `GET /health` returns per-DB status (503 if any DB broken).
 
-**Reload:** after any indexer/downloader run, restart uvicorn — connections are cached at module load. Exception: `POST /simplewiki/articles/{page_id}/embed` writes via a fresh RW connection; WAL mode makes the committed rows visible to the cached reader immediately.
+**Reload:** after any indexer/downloader run, restart uvicorn — connections are cached at module load. Exceptions (live write paths, no restart needed): `POST /simplewiki/articles/{page_id}/embed` writes via a fresh RW connection (WAL mode makes the committed rows visible to the cached reader immediately); `POST /sec_edgar/filings/{accession_number}/download` does an in-place single-row UPDATE on `sec_edgar.db` via `db.connect_rw` — the cached read-only connection sees the committed row on its next query even though that DB isn't WAL (same file, no inode swap).
 
 ## API routes
 
@@ -68,10 +68,10 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `/simplewiki/articles`, `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks`
 - `/pydocs/docs`, `/{doc_path:path}`, `/{doc_path:path}/content`, `/pydocs/chunks`
 - `/wikihow/articles`, `/{id}`, `/{id}/content`, `/wikihow/chunks`
-- `/sec_edgar/filings`, `/{accession_number}`, `/{accession_number}/content`, `/sec_edgar/chunks`
+- `/sec_edgar/filings` (`?downloaded=` true/false), `/{accession_number}`, `/{accession_number}/content`, `POST /{accession_number}/download`, `/sec_edgar/chunks`
 - `/worldbank/indicators` (`?q=`, `?topic=`), `/indicators/{id}`, `/indicators/{id}/values` (`?country=`, `?year=`), `/worldbank/countries`, `/countries/{id}/data` (`?topic=`, `?year=`)
 
-`/wikihow/articles` rows are per-step (not whole guides); `/wikihow/chunks` reassembles whole guides. `POST /simplewiki/.../embed` is the only write path in the API.
+`/wikihow/articles` rows are per-step (not whole guides); `/wikihow/chunks` reassembles whole guides. The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings whose body hasn't been downloaded — `?downloaded=` narrows to fetched/unfetched. `POST /simplewiki/.../embed` and `POST /sec_edgar/.../download` are the only write paths in the API.
 
 ## Script notes
 
@@ -119,7 +119,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 
 **sec_edgar**
 - `sec_edgar_download.py` — Quarterly full-index harvester (1993–present). Stores filing **metadata + URLs only**, no body text. Flags: `--db`, `--start-year`, `--end-year`, `--email` (`SEC_EMAIL` env), `--reset`. Resumes via `ingest_state`.
-- `sec_edgar_fetch_bodies.py` — **Standalone** body fetcher: downloads filing `.txt` from `filing_url`, extracts the primary document, strips HTML, stores it in a new `body` column (`status` tracks fetched/missing/error). Does **not** build any index. Defaults to 10-K, newest first, `--limit 200`. Flags: `--db`, `--accession` (fetch one filing by accession number, ignoring form-type/limit/status — always refetches), `--form-type`, `--limit`, `--email`, `--delay`, `--reset-status`.
+- `sec_edgar_fetch_bodies.py` — **Standalone** body fetcher: downloads filing `.txt` from `filing_url`, extracts the primary document, strips HTML, stores it in a new `body` column (`status` tracks fetched/missing/error). Does **not** build any index. Defaults to 10-K, newest first, `--limit 200`. Flags: `--db`, `--accession` (fetch one filing by accession number, ignoring form-type/limit/status — always refetches), `--form-type`, `--limit`, `--email`, `--delay`, `--reset-status`. The fetch + extraction logic lives in `rag/sec_filing.py`; the API's `POST /sec_edgar/.../download` route reuses it in-process to fetch a single filing on demand (the "Download full filing" button).
 - `sec_edgar_index_fts.py` — Rebuilds `filings_fts` (company_name + body, fetched rows only). Required for `?q=`.
 - `sec_edgar_index_rag.py` — `sec_edgar_rag.db` over fetched bodies (`chunk_doc`, flat prose). Same flags as other RAG indexers. Restart after.
 
@@ -145,12 +145,12 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 ## API layout
 
 - `api/main.py` — mounts routers, `/health`.
-- `api/db.py` — read-only module-level SQLite connections; `connect_rag_rw` for live embed writes.
+- `api/db.py` — read-only module-level SQLite connections; `connect_rag_rw` for live embed writes; `connect_rw` for the SEC live body-download write.
 - `api/models.py` — `Page[T]` for list endpoints; `ChunksResponse` for RAG.
 - `api/routers/` — one thin router per source; SQL inline.
 - `api/_chunks.py` — shared chunks factory (400 empty `q`, 503 missing rag.db, sparse fallback when Ollama down).
 - `api/_fts.py` — `translate_fts_errors`: missing table → 503, bad FTS5 syntax → 400.
-- `rag/` — `chunker.py` (`chunk_doc` / `chunk_markdown`), `cleaner.py` (`CLEANER_VERSION`), `embedder.py` (nomic-embed-text:v1.5 768d, `OLLAMA_URL`), `render.py` (arxiv HTML→md), `wikitext.py`, `retriever.py` (RRF), `retry.py`, `schema.py`, `indexer.py`.
+- `rag/` — `chunker.py` (`chunk_doc` / `chunk_markdown`), `cleaner.py` (`CLEANER_VERSION`), `embedder.py` (nomic-embed-text:v1.5 768d, `OLLAMA_URL`), `render.py` (arxiv HTML→md), `wikitext.py`, `sec_filing.py` (SEC submission fetch + primary-document extraction, shared by the fetch-bodies script and the API download route), `retriever.py` (RRF), `retry.py`, `schema.py`, `indexer.py`.
 - `tests/` — pytest smoke suite; run with `pytest`.
 
 Indexes are created by downloader/indexer scripts (API is read-only). Add `CREATE INDEX IF NOT EXISTS` to the relevant script when adding new filters.

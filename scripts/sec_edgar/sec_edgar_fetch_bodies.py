@@ -21,49 +21,22 @@ requests (and beautifulsoup4 via rag.cleaner.strip_html).
 
 import argparse
 import os
-import re
 import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import Optional
-
-import requests
-from bs4 import BeautifulSoup
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from rag.cleaner import normalize_whitespace  # noqa: E402
+from rag.sec_filing import (  # noqa: E402
+    DEFAULT_DELAY,
+    build_session,
+    extract_primary_document,
+    fetch_submission,
+)
 
 DEFAULT_DB = "data/sec_edgar/sec_edgar.db"
-DELAY = 0.15   # SEC rate limit: 10 req/sec max; 0.15s gives headroom
-MAX_RETRIES = 3
-
-_DOCUMENT_RE = re.compile(r"<DOCUMENT>(.*?)</DOCUMENT>", re.DOTALL | re.IGNORECASE)
-_TYPE_RE = re.compile(r"<TYPE>\s*([^\n<]+)", re.IGNORECASE)
-_TEXT_RE = re.compile(r"<TEXT>(.*?)</TEXT>", re.DOTALL | re.IGNORECASE)
-_HEADER_END_RE = re.compile(r"</(?:SEC|IMS)-HEADER>", re.IGNORECASE)
-_DISPLAY_NONE_RE = re.compile(r"display\s*:\s*none", re.IGNORECASE)
-
-
-def _html_to_text(payload: str) -> str:
-    """Convert a filing's primary-document payload to plain text.
-
-    Modern 10-Ks are inline XBRL (iXBRL): the visible document is preceded by
-    an `<ix:header>` block (and/or `display:none` containers) holding thousands
-    of machine-readable tagging facts. `get_text()` would surface all of that
-    as leading noise. We decompose the hidden metadata first, then extract
-    text — leaving the *visible* `<ix:nonFraction>` / `<ix:nonNumeric>` figures
-    embedded in the narrative intact. Plain-text legacy filings pass through
-    unchanged.
-    """
-    soup = BeautifulSoup(payload, "html.parser")
-    for tag in soup.find_all(["script", "style", "ix:header"]):
-        tag.decompose()
-    for tag in soup.find_all(style=_DISPLAY_NONE_RE):
-        tag.decompose()
-    return soup.get_text(separator=" ")
 
 
 def ensure_columns(cur: sqlite3.Cursor) -> None:
@@ -78,69 +51,6 @@ def ensure_columns(cur: sqlite3.Cursor) -> None:
     if "status" not in cols:
         cur.execute("ALTER TABLE filings ADD COLUMN status TEXT")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_status ON filings(status)")
-
-
-def extract_primary_document(text: str, form_type: str) -> str:
-    """Return the cleaned text of a filing's primary document.
-
-    SEC full-submission `.txt` files are SGML: a `<SEC-HEADER>` block followed
-    by one or more `<DOCUMENT>` blocks, each carrying a `<TYPE>` and a
-    `<TEXT>` payload (HTML for modern filings, plain text for older ones).
-    We pick the `<DOCUMENT>` whose `<TYPE>` matches the form (e.g. `10-K`),
-    falling back to the first document, then to everything after the header
-    for pre-`<DOCUMENT>` legacy filings. The chosen payload is HTML-stripped
-    and whitespace-normalised.
-    """
-    blocks = _DOCUMENT_RE.findall(text)
-    payload: Optional[str] = None
-
-    if blocks:
-        target = form_type.strip().upper()
-        for block in blocks:
-            type_match = _TYPE_RE.search(block)
-            doc_type = type_match.group(1).strip().upper() if type_match else ""
-            if doc_type == target:
-                text_match = _TEXT_RE.search(block)
-                payload = text_match.group(1) if text_match else block
-                break
-        if payload is None:
-            # No type match — use the first document's TEXT payload.
-            first = blocks[0]
-            text_match = _TEXT_RE.search(first)
-            payload = text_match.group(1) if text_match else first
-    else:
-        # Legacy filing with no <DOCUMENT> tags: take everything after the header.
-        header_end = _HEADER_END_RE.search(text)
-        payload = text[header_end.end():] if header_end else text
-
-    return normalize_whitespace(_html_to_text(payload or ""))
-
-
-def fetch_body(session: requests.Session, url: str) -> Optional[str]:
-    """Fetch one filing's raw submission text, honouring SEC rate limits.
-
-    Returns None on a 404 (treated as a permanent miss) or after exhausting
-    retries on transient errors.
-    """
-    for attempt in range(MAX_RETRIES):
-        try:
-            r = session.get(url, timeout=60)
-            if r.status_code == 404:
-                return None
-            if r.status_code == 429:
-                wait = int(r.headers.get("Retry-After", 60))
-                print(f"  Rate limited — sleeping {wait}s")
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            return r.text
-        except requests.RequestException as exc:
-            if attempt < MAX_RETRIES - 1:
-                print(f"  Request error: {exc}, retrying...")
-                time.sleep(5)
-            else:
-                print(f"  Failed after {MAX_RETRIES} attempts: {exc}")
-    return None
 
 
 def main() -> int:
@@ -163,8 +73,8 @@ def main() -> int:
     parser.add_argument("--email",
                         default=os.environ.get("SEC_EMAIL", "kylegwlawrence@gmail.com"),
                         help="Contact email for SEC User-Agent header (or set SEC_EMAIL env var)")
-    parser.add_argument("--delay", type=float, default=DELAY,
-                        help=f"Seconds between requests (default: {DELAY})")
+    parser.add_argument("--delay", type=float, default=DEFAULT_DELAY,
+                        help=f"Seconds between requests (default: {DEFAULT_DELAY})")
     parser.add_argument("--reset-status", action="store_true",
                         help="Clear status/body for the chosen form type before fetching, "
                              "forcing a refetch.")
@@ -218,12 +128,11 @@ def main() -> int:
             con.close()
             return 0
 
-    session = requests.Session()
-    session.headers.update({"User-Agent": f"sec-edgar-fetcher {args.email}"})
+    session = build_session(args.email)
 
     fetched = missing = errored = 0
     for i, (accession_number, form_type, filing_url) in enumerate(rows, 1):
-        text = fetch_body(session, filing_url)
+        text = fetch_submission(session, filing_url)
         if text is None:
             cur.execute(
                 "UPDATE filings SET status = 'error' WHERE accession_number = ?",

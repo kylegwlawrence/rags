@@ -1,5 +1,5 @@
 import { defineComponent, ref, computed, onMounted, inject } from '/ui/vendor/vue.esm-browser.js';
-import { getDoc, getContent, getDocChunks, embedDoc } from '/ui/api.js';
+import { getDoc, getContent, getDocChunks, embedDoc, downloadDoc } from '/ui/api.js';
 
 export default defineComponent({
   name: 'DocView',
@@ -39,6 +39,33 @@ export default defineComponent({
     // On-demand embed state (only for sources with an embedEndpoint).
     const embedding = ref(false);
     const embedError = ref(null);
+
+    // On-demand body download state (only for sources with a downloadEndpoint,
+    // e.g. SEC EDGAR). `downloaded` flips true after a successful fetch so the
+    // button hides and the freshly-stored body can be loaded into Content.
+    const downloading = ref(false);
+    const downloadError = ref(null);
+    const downloaded = ref(false);
+
+    // True once the open document has body text — either it already had some
+    // (the list row's bodyField is set) or we just downloaded it.
+    const hasBody = computed(() => {
+      if (downloaded.value) return true;
+      const field = props.source.bodyField;
+      return !!(field && props.doc[field]);
+    });
+
+    // Show the download button only for download-capable sources whose open
+    // document has no body yet.
+    const showDownload = computed(
+      () => !!props.source.downloadEndpoint && !hasBody.value,
+    );
+
+    const downloadLabel = computed(() => {
+      if (downloading.value) return 'Downloading…';
+      if (downloadError.value) return 'Retry download';
+      return 'Download full filing';
+    });
 
     // "Embedded" means we've confirmed (via the doc-chunks fetch) that the RAG
     // DB holds chunks for this doc. Until that fetch lands, status is unknown
@@ -172,6 +199,22 @@ export default defineComponent({
       }
     }
 
+    async function downloadFiling() {
+      downloading.value = true;
+      downloadError.value = null;
+      try {
+        await downloadDoc(props.source, props.doc[props.source.idField]);
+        downloaded.value = true;
+        // The body now exists — (re)load the Content tab so it shows up.
+        content.value = null;
+        await loadContent();
+      } catch (e) {
+        downloadError.value = e.message || 'Download failed';
+      } finally {
+        downloading.value = false;
+      }
+    }
+
     function toggleExpand(chunkId) {
       if (expandedChunks.value.has(chunkId)) {
         expandedChunks.value.delete(chunkId);
@@ -221,6 +264,7 @@ export default defineComponent({
       chunks, chunksLoading, chunksError, chunksLoaded,
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel,
+      downloading, downloadError, showDownload, downloadLabel, downloadFiling,
       profileHtml,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
     };
@@ -242,6 +286,14 @@ export default defineComponent({
           :title="embedError || (isEmbedded ? 'Already embedded — click to re-embed into semantic search' : 'Embed this article into semantic search')"
           @click="embedArticle"
         >{{ embedLabel }}</button>
+        <button
+          v-if="showDownload"
+          class="doc-view__download"
+          :class="{ 'doc-view__download--error': downloadError && !downloading }"
+          :disabled="downloading"
+          :title="downloadError || 'Download the full filing text from SEC EDGAR'"
+          @click="downloadFiling"
+        >{{ downloadLabel }}</button>
       </div>
 
       <div class="doc-view__tabs">

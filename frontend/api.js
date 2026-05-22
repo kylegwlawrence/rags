@@ -92,3 +92,17 @@ export async function embedDoc(source, id) {
   const resp = await _fetch(source.embedEndpoint(id), { method: 'POST' });
   return resp.json();
 }
+
+/**
+ * Download a single document's full body on demand (live, synchronous).
+ * Only available for sources whose config defines `downloadEndpoint`
+ * (e.g. SEC EDGAR, where filing bodies are fetched from SEC on click).
+ *
+ * @param {object} source
+ * @param {string|number} id - the document's primary key
+ * @returns {Promise<{accession_number: string, status: string, body_chars: number}>}
+ */
+export async function downloadDoc(source, id) {
+  const resp = await _fetch(source.downloadEndpoint(id), { method: 'POST' });
+  return resp.json();
+}

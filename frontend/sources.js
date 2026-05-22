@@ -303,6 +303,11 @@ export const SOURCES = {
     contentEndpoint: (id) => `/sec_edgar/filings/${id}/content`,
     chunksEndpoint: '/sec_edgar/chunks',
     docChunksEndpoint: '/sec_edgar/doc-chunks',
+    // On-demand body fetch: filings are harvested as metadata only; the
+    // "Download full filing" button pulls the body from SEC. The button shows
+    // only when the open filing has no body yet (body_chars falsy).
+    downloadEndpoint: (id) => `/sec_edgar/filings/${id}/download`,
+    bodyField: 'body_chars',
     idField: 'accession_number',
     titleField: 'company_name',
     subtitle_fn: (item) => item.form_type || '',
@@ -322,6 +327,11 @@ export const SOURCES = {
       { key: 'company', label: 'Company', type: 'text',   placeholder: 'substring' },
       { key: 'cik',     label: 'CIK',     type: 'text',   placeholder: 'exact match' },
       { key: 'year',    label: 'Year',    type: 'number', placeholder: '2024' },
+      { key: 'downloaded', label: 'Body', type: 'select', options: [
+        { value: '',      label: 'All filings' },
+        { value: 'true',  label: 'Downloaded only' },
+        { value: 'false', label: 'Not downloaded' },
+      ]},
       { key: 'sort', label: 'Sort', type: 'select', options: [
         { value: '',          label: 'Newest first' },
         { value: 'oldest',    label: 'Oldest first' },
