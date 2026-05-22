@@ -39,6 +39,10 @@ PYDOCS_DB = DATA_DIR / "pydocs" / "python_docs.db"
 PYDOCS_RAG_DB = DATA_DIR / "pydocs" / "python_docs_rag.db"
 WIKIHOW_DB = DATA_DIR / "wikihow" / "wikihow.db"
 WIKIHOW_RAG_DB = DATA_DIR / "wikihow" / "wikihow_rag.db"
+FEDERAL_REGISTER_DB = DATA_DIR / "federal_register" / "federal_register.db"
+FEDERAL_REGISTER_RAG_DB = DATA_DIR / "federal_register" / "federal_register_rag.db"
+GITHUB_DB = DATA_DIR / "github" / "readmes.db"
+GITHUB_RAG_DB = DATA_DIR / "github" / "github_readmes_rag.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -101,6 +105,10 @@ def _connect_ro_with_vec(path: Path) -> sqlite3.Connection:
 
 
 _arxiv: sqlite3.Connection | None = None
+_federal_register: sqlite3.Connection | None = None
+_federal_register_rag: sqlite3.Connection | None = None
+_github: sqlite3.Connection | None = None
+_github_rag: sqlite3.Connection | None = None
 _arxiv_rag: sqlite3.Connection | None = None
 _factbook: sqlite3.Connection | None = None
 _factbook_rag: sqlite3.Connection | None = None
@@ -226,3 +234,35 @@ def wikihow_rag() -> sqlite3.Connection:
     if _wikihow_rag is None:
         _wikihow_rag = _connect_ro_with_vec(WIKIHOW_RAG_DB)
     return _wikihow_rag
+
+
+def federal_register() -> sqlite3.Connection:
+    """Cached read-only connection to federal_register.db (FTS built by scripts/federal_register/federal_register_index_fts.py)."""
+    global _federal_register
+    if _federal_register is None:
+        _federal_register = _connect_ro(FEDERAL_REGISTER_DB)
+    return _federal_register
+
+
+def federal_register_rag() -> sqlite3.Connection:
+    """Cached read-only connection to federal_register_rag.db (built by scripts/federal_register/federal_register_index_rag.py)."""
+    global _federal_register_rag
+    if _federal_register_rag is None:
+        _federal_register_rag = _connect_ro_with_vec(FEDERAL_REGISTER_RAG_DB)
+    return _federal_register_rag
+
+
+def github() -> sqlite3.Connection:
+    """Cached read-only connection to readmes.db (FTS built by scripts/github_readmes/github_readmes_index_fts.py)."""
+    global _github
+    if _github is None:
+        _github = _connect_ro(GITHUB_DB)
+    return _github
+
+
+def github_rag() -> sqlite3.Connection:
+    """Cached read-only connection to github_readmes_rag.db (built by scripts/github_readmes/github_readmes_index_rag.py)."""
+    global _github_rag
+    if _github_rag is None:
+        _github_rag = _connect_ro_with_vec(GITHUB_RAG_DB)
+    return _github_rag

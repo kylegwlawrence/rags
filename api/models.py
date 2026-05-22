@@ -122,6 +122,29 @@ class EmbedResult(BaseModel):
     embedded: bool
 
 
+class FederalRegisterDoc(BaseModel):
+    document_number: str
+    title: str | None
+    abstract: str | None
+    type: str | None
+    publication_date: str | None
+    agencies: str | None
+    action: str | None
+    effective_date: str | None
+    html_url: str | None
+    pdf_url: str | None
+
+
+class GithubReadme(BaseModel):
+    """One row from `readmes` with `status = 'fetched'`. Raw README body at /content."""
+
+    repo: str
+    owner: str | None
+    name: str | None
+    source_list: str | None
+    readme_chars: int | None
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

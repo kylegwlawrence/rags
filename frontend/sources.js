@@ -198,6 +198,71 @@ export const SOURCES = {
     ],
   },
 
+  federal_register: {
+    key: 'federal_register',
+    label: 'Federal Register',
+    subtitle: 'U.S. federal rules & notices',
+    listEndpoint: '/federal_register/documents',
+    detailEndpoint: (id) => `/federal_register/documents/${id}`,
+    contentEndpoint: (id) => `/federal_register/documents/${id}/content`,
+    chunksEndpoint: '/federal_register/chunks',
+    docChunksEndpoint: '/federal_register/doc-chunks',
+    idField: 'document_number',
+    titleField: 'title',
+    subtitle_fn: (item) => item.agencies || '',
+    meta_fn: (item) => item.publication_date || '',
+    contentType: 'text',
+    metaFields: [
+      { label: 'Number',         value: (d) => d.document_number },
+      { label: 'Type',           value: (d) => d.type },
+      { label: 'Published',      value: (d) => d.publication_date },
+      { label: 'Agencies',       value: (d) => d.agencies },
+      { label: 'Action',         value: (d) => d.action },
+      { label: 'Effective date', value: (d) => d.effective_date },
+      { label: 'HTML',           value: (d) => d.html_url },
+      { label: 'PDF',            value: (d) => d.pdf_url },
+    ],
+    filters: [
+      { key: 'q',                label: 'Search',   type: 'text',   placeholder: 'FTS5 query…' },
+      { key: 'type',             label: 'Type',     type: 'text',   placeholder: 'e.g. Rule' },
+      { key: 'agencies',         label: 'Agency',   type: 'text',   placeholder: 'substring' },
+      { key: 'publication_year', label: 'Year',     type: 'number', placeholder: '2024' },
+      { key: 'sort', label: 'Sort', type: 'select', options: [
+        { value: '',          label: 'Newest first' },
+        { value: 'oldest',    label: 'Oldest first' },
+        { value: 'relevance', label: 'Relevance' },
+      ]},
+    ],
+  },
+
+  github_readmes: {
+    key: 'github_readmes',
+    label: 'GitHub READMEs',
+    subtitle: 'Open-source project READMEs',
+    listEndpoint: '/github/readmes',
+    detailEndpoint: (id) => `/github/readmes/${id}`,
+    contentEndpoint: (id) => `/github/readmes/${id}/content`,
+    chunksEndpoint: '/github/chunks',
+    docChunksEndpoint: '/github/doc-chunks',
+    idField: 'repo',
+    titleField: 'repo',
+    subtitle_fn: (item) => item.name || '',
+    meta_fn: (item) => item.source_list || '',
+    contentType: 'text',
+    metaFields: [
+      { label: 'Repo',        value: (d) => d.repo },
+      { label: 'Name',        value: (d) => d.name },
+      { label: 'Owner',       value: (d) => d.owner },
+      { label: 'Source list', value: (d) => d.source_list },
+      { label: 'Size',        value: (d) => d.readme_chars ? `${d.readme_chars.toLocaleString()} chars` : '' },
+    ],
+    filters: [
+      { key: 'q',           label: 'Search',      type: 'text', placeholder: 'FTS5 query…' },
+      { key: 'owner',       label: 'Owner',       type: 'text', placeholder: 'substring' },
+      { key: 'source_list', label: 'Source list', type: 'text', placeholder: 'exact match' },
+    ],
+  },
+
   factbook: {
     key: 'factbook',
     label: 'Factbook',
@@ -229,4 +294,5 @@ export const SOURCES = {
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'gutenberg',
   'wikihow', 'pydocs', 'factbook',
+  'federal_register', 'github_readmes',
 ];

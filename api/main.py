@@ -5,6 +5,8 @@ from api import db
 from api.routers import (
     arxiv,
     factbook,
+    federal_register,
+    github_readmes,
     gutenberg,
     openalex,
     python_docs,
@@ -20,6 +22,8 @@ app.include_router(gutenberg.router)
 app.include_router(simplewiki.router)
 app.include_router(python_docs.router)
 app.include_router(wikihow.router)
+app.include_router(federal_register.router)
+app.include_router(github_readmes.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -47,6 +51,10 @@ def health(response: Response) -> dict:
         ("pydocs_rag", db.pydocs_rag),
         ("wikihow", db.wikihow),
         ("wikihow_rag", db.wikihow_rag),
+        ("federal_register", db.federal_register),
+        ("federal_register_rag", db.federal_register_rag),
+        ("github", db.github),
+        ("github_rag", db.github_rag),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

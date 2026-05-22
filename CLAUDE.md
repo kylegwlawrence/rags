@@ -4,162 +4,152 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Purpose
 
-Personal collection of one-shot downloader scripts that fetch public datasets into local SQLite databases or plain files under `data/<source>/`, plus a small read-only FastAPI app (`api/`) that exposes them over the Tailscale network. Each downloader script is independent — there is no shared library, build system, or test suite. The `data/` directory is gitignored; only the scripts and the API are tracked.
+Personal collection of one-shot downloader scripts that fetch public datasets into local SQLite databases under `data/<source>/`, plus a read-only FastAPI app (`api/`) exposed over the Tailscale network. Each script is independent — no shared library, build system, or test suite. `data/` is gitignored.
 
 ## Running scripts
 
-A Python venv lives at `.venv/`. Activate before running Python scripts:
+Activate the venv first; run all scripts from the repo root:
 
 ```bash
 source .venv/bin/activate
-python scripts/arxiv/arxiv_ingest.py                # harvests metadata via OAI-PMH into data/arxiv/arxiv.db
-python scripts/arxiv/arxiv_download.py              # fetches HTML bodies for papers in arxiv.db
-python scripts/arxiv/arxiv_normalize_authors.py     # backfills authors + paper_authors from legacy JSON (one-shot)
-python scripts/arxiv/arxiv_index_fts.py             # builds the papers_fts FTS5 index
-python scripts/arxiv/arxiv_index_rag.py             # builds data/arxiv/arxiv_rag.db (chunks + FTS + sqlite-vec)
+python scripts/arxiv/arxiv_ingest.py                # OAI-PMH metadata → data/arxiv/arxiv.db
+python scripts/arxiv/arxiv_download.py              # HTML bodies for papers
+python scripts/arxiv/arxiv_normalize_authors.py     # one-shot backfill for legacy DBs only
+python scripts/arxiv/arxiv_index_fts.py             # papers_fts FTS5 index
+python scripts/arxiv/arxiv_index_rag.py             # data/arxiv/arxiv_rag.db
 python scripts/factbook/factbook_download.py
-python scripts/factbook/factbook_index_rag.py       # builds data/factbook/factbook_rag.db from countries JSON
+python scripts/factbook/factbook_index_rag.py       # data/factbook/factbook_rag.db
 python scripts/openalex/openalex_download.py
-python scripts/openalex/openalex_normalize_authors.py  # backfills authors + work_authors tables
-python scripts/openalex/openalex_index_fts.py       # builds the works_fts FTS5 index
-python scripts/openalex/openalex_index_rag.py       # builds data/openalex/openalex_rag.db (top-5k by citation count)
-python scripts/gutenberg/gutenberg_index.py         # builds data/gutenberg/gutenberg.db from mirror + PG catalog
-python scripts/gutenberg/gutenberg_index_rag.py     # builds data/gutenberg/gutenberg_rag.db (chunks + FTS + sqlite-vec)
+python scripts/openalex/openalex_normalize_authors.py  # required for ?author= filter
+python scripts/openalex/openalex_index_fts.py       # works_fts FTS5 index
+python scripts/openalex/openalex_index_rag.py       # data/openalex/openalex_rag.db (top-5k)
+python scripts/gutenberg/gutenberg_index.py         # data/gutenberg/gutenberg.db
+python scripts/gutenberg/gutenberg_index_rag.py     # data/gutenberg/gutenberg_rag.db
 bash   scripts/gutenberg/gutenberg_download.sh
-python scripts/simplewiki/simplewiki_download.py    # fetches simplewiki-latest dump + index from dumps.wikimedia.org
-python scripts/simplewiki/simplewiki_parse.py       # streams bz2 XML → data/simplewiki/simplewiki.db
-python scripts/simplewiki/simplewiki_index_rag.py   # builds data/simplewiki/simplewiki_rag.db (chunks + FTS + sqlite-vec)
-python scripts/python_docs/python_docs_download.py  # fetches Python docs plain-text archive into data/pydocs/python_docs.db
-python scripts/python_docs/python_docs_index_fts.py # builds the docs_fts FTS5 index
-python scripts/python_docs/python_docs_index_rag.py # builds data/pydocs/python_docs_rag.db (chunks + FTS + sqlite-vec)
-python scripts/wikihow/wikihow_loader.py            # loads data/wikihow/wikihowSep.csv into data/wikihow/wikihow.db
-python scripts/wikihow/wikihow_index_fts.py         # builds the articles_fts FTS5 index
-python scripts/wikihow/wikihow_index_rag.py         # builds data/wikihow/wikihow_rag.db (chunks + FTS + sqlite-vec)
-python scripts/loc/loc_download.py                  # downloads LOC items via search API into data/loc/loc_<format>.db
-python scripts/loc/loc_newspapers_download.py       # downloads Chronicling America metadata into data/loc/loc_newspapers.db
-python scripts/loc/loc_books_marc.py                # parses local MARC bulk files into data/loc/loc_books.db
+python scripts/simplewiki/simplewiki_download.py
+python scripts/simplewiki/simplewiki_parse.py
+python scripts/simplewiki/simplewiki_index_rag.py   # data/simplewiki/simplewiki_rag.db
+python scripts/python_docs/python_docs_download.py
+python scripts/python_docs/python_docs_index_fts.py
+python scripts/python_docs/python_docs_index_rag.py # data/pydocs/python_docs_rag.db
+python scripts/wikihow/wikihow_loader.py
+python scripts/wikihow/wikihow_index_fts.py
+python scripts/wikihow/wikihow_index_rag.py
+python scripts/loc/loc_download.py
+python scripts/loc/loc_newspapers_download.py
+python scripts/loc/loc_books_marc.py
 ```
-
-The arxiv ingest pipeline is self-contained in this repo (Phase 3 ported it
-from `local_wikipedia/arxiv/`). Typical workflow on a fresh checkout:
-`arxiv_ingest.py` (OAI metadata) → `arxiv_download.py` (HTML bodies) →
-`arxiv_index_fts.py` (FTS) → `arxiv_index_rag.py` (chunks + embeddings).
-`arxiv_normalize_authors.py` is only needed for older arxiv.db files that
-still carry the legacy JSON authors column; freshly-ingested DBs already
-have the structured authors / paper_authors tables populated.
-
-Scripts assume they are run from the repo root — they use relative paths like `./data/<source>/<source>.db` or `data/<source>/<source>.db`. `cd` to the repo root first.
 
 ## Running the API
 
 ```bash
 source .venv/bin/activate
-pip install -r requirements.txt          # first time only
+pip install -r requirements.txt   # first time only
 uvicorn api.main:app --host 0.0.0.0 --port 8002
 ```
 
-Listens on `0.0.0.0:8002` so the Tailscale interface picks it up; access is gated by Tailscale ACLs (no app-level auth). Other local uvicorn apps already occupy 8000 and 8001 — keep this on 8002.
+Port 8002 is fixed (8000/8001 occupied). Tailscale ACLs gate access; no app-level auth. `GET /health` returns per-DB status (503 if any DB broken).
 
-`GET /health` returns per-database status. HTTP 503 if any database is broken; 200 otherwise. Routers:
+**Reload:** after any indexer/downloader run, restart uvicorn — connections are cached at module load. Exception: `POST /simplewiki/articles/{page_id}/embed` writes via a fresh RW connection; WAL mode makes the committed rows visible to the cached reader immediately.
 
-- `/arxiv/papers`, `/arxiv/papers/{paper_id:path}`, `/arxiv/papers/{paper_id:path}/content` — list (filter by `primary_category` exact, `category` substring, `submitted_year`, `submitted_from`/`submitted_to` ISO dates, `author` substring, `has_html`, `q` full-text on title+abstract; sort by `submitted_desc` / `submitted_asc` / `updated_desc` / `relevance`), metadata, and raw HTML body. `q` joins through the `papers_fts` FTS5 table (same FTS5 syntax as openalex). `:path` converter handles old-style ids like `cond-mat/0204015`. Missing `papers_fts` or unreadable `arxiv.db` returns 503 with the script name to run; only bad FTS syntax returns 400.
-- `/arxiv/chunks` — hybrid (FTS5 + sqlite-vec) chunk search over `arxiv_rag.db`. Params: `q` (required), `top_k` (default 20, max 100), `candidate_k` (default 50, max 200). Response: `{items, used_dense, top_k, candidate_k}` — **not** `Page[T]`; RRF doesn't paginate. `used_dense=false` means Ollama was unreachable and the body is sparse-only. 400 on empty `q`; 503 when `arxiv_rag.db` or its `chunks_fts`/`chunks_vec` tables are missing.
-- `/openalex/chunks` — same shape as `/arxiv/chunks` but over `openalex_rag.db` (sampled to the top-5000 most-cited works by `cited_by_count`; embedding the full 268k is deferred — see `docs/retros/2026-05-18-openalex-phase-2b-rag.md` for the scope decision).
-- `/factbook/chunks` — same shape, over `factbook_rag.db`. Each country's nested JSON is rendered as section-tagged markdown (one `##` heading per top-level section: Introduction, Geography, Economy, etc.) and chunked with `rag.chunker.chunk_markdown` so chunks carry their section name. `doc_id` is the factbook country code (`us`, `af`, …).
-- `/gutenberg/chunks` — same shape, over `gutenberg_rag.db`. Books are read from disk (`GUTENBERG_ROOT / texts.path`), Project Gutenberg start/end banners stripped, then paragraph-chunked with `rag.chunker.chunk_doc` at `chunk_size=2000`. `doc_id` is the Gutenberg integer id (as a string). Section is always None — `.txt` corpus has no markdown structure.
-- `/factbook/countries`, `/factbook/countries/{id}` — list + detail (filter by `region`)
-- `/openalex/works`, `/openalex/works/{short_id}` — list (filter by `year`, `cited_by_min`, `cited_by_max`, `venue`, `author` substring, `q` full-text on title+abstract; sort by `cited_by_count_desc` / `year_desc` / `year_asc` / `relevance`) + detail. `author` joins through the normalized `work_authors` / `authors` tables. `q` joins through the `works_fts` FTS5 table and accepts FTS5 syntax (`"phrase"`, `term*`, `a OR b`, `a NOT b`); when `q` is set the default sort becomes `relevance` (bm25). Missing `works_fts` or unreadable `openalex.db` returns 503 with the script name to run; only bad FTS syntax returns 400. `short_id` is the `W…` suffix; the full `https://openalex.org/<id>` URL is reconstructed server-side.
-- `/gutenberg/texts`, `/gutenberg/texts/{id}`, `/gutenberg/texts/{id}/content` — list (filter by `title` / `author` substring, `language` exact), metadata, and streamed raw `.txt`.
-- `/simplewiki/articles`, `/simplewiki/articles/{page_id}`, `/simplewiki/articles/{page_id}/content` — list (filter by `title` substring, `q` FTS5 trigram on title, `namespace` exact (default 0)), metadata, and raw wikitext (`text/plain`). `q` uses an `IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH ?)` subquery rather than a JOIN — at 394k articles the JOIN form makes the planner drive from `articles WHERE namespace=0` and probe FTS per row (158 s for a typical query); the subquery form materialises the ~hundreds-of-FTS-hits first and probes the namespace+rowid covering index (2 ms). No body rendering: wikitext is served as-is, and the chunker (`rag.wikitext.wikitext_to_markdown` → `chunk_markdown`) is what the `/simplewiki/chunks` endpoint reads from.
-- `POST /simplewiki/articles/{page_id}/embed` — embed one article into `simplewiki_rag.db` on demand (synchronous, the "Embed this article" button in the frontend). Renders the article's wikitext to markdown the same way `simplewiki_index_rag.py` does and replaces any chunks already stored for it; the article is searchable via `/simplewiki/chunks` immediately (no uvicorn restart — see Reload model). Returns `{doc_id, title, chunk_count, embedded}`; `embedded=false` with `chunk_count=0` for redirects / empty bodies (prior chunks still removed). 404 if the article doesn't exist; 503 if Ollama is unreachable (existing chunks left untouched). This is the **only write path in the API** — the in-process write uses a short-lived read-write connection (`api.db.connect_rag_rw` → `rag.embed_one.embed_doc`); everything else is read-only. The live-embed chunk settings in `api/routers/simplewiki.py` (`_CHUNK_SIZE` / `_MAX_CHUNK_SIZE` / `_OVERLAP`) must stay in sync with the indexer script's argparse defaults so a button-embedded article chunks identically to a batch-indexed one.
-- `/simplewiki/chunks` — same shape as `/arxiv/chunks` but over `simplewiki_rag.db`. Wikitext is rendered to section-headered markdown (`## Heading` / `### Subheading`) before chunking, so each chunk's `section` column carries the article section (History, Geography, References, …). File:/Image:/Category: wikilinks are dropped before rendering. Template content (e.g. `{{cite|...}}`) is dropped wholesale — `mwparserfromhell.strip_code` doesn't render templates. `doc_id` is the `page_id` (as a string).
-- `/pydocs/docs`, `/pydocs/docs/{doc_path:path}`, `/pydocs/docs/{doc_path:path}/content` — list (filter by `section` exact (e.g. `library`, `tutorial`, `howto`), `title` substring, `q` full-text on title + content with FTS5 syntax; bm25 sort when `q` is set, alphabetical doc_path otherwise), metadata, and raw Sphinx-text body (`text/plain`). `q` joins through the `docs_fts` FTS5 table. Missing `docs_fts` or unreadable `python_docs.db` returns 503 with the script name to run; bad FTS syntax returns 400. `{doc_path:path}` handles slash-separated paths like `library/os` or `library/asyncio-task`.
-- `/pydocs/chunks` — same shape as `/arxiv/chunks` but over `python_docs_rag.db`. Sphinx text-builder output is rendered to markdown by `python_docs_rag_extract.sphinx_text_to_markdown` (underline-style `===`/`---`/`~~~`/`^^^`/`"""` headings → `##` / `###` / `####` / `#####` / `######`) before chunking, so per-chunk `section` carries the page's real section name (e.g. `Process Parameters`, `Built-in Constants`, PEP titles in whatsnew docs). RST emphasis (`**bold**`, `*italic*`) is unwrapped; `+---+---+` table borders pass through unchanged. The h1 page title is dropped because `docs.title` is already prepended by the embedder. `doc_id` is the `doc_path` (e.g. `library/os`).
+## API routes
 
-- `/wikihow/articles`, `/wikihow/articles/{id}`, `/wikihow/articles/{id}/content` — list (filter by `title` substring, `section_label` exact, `q` full-text on title+headline+text with FTS5 syntax; bm25 sort when `q` set, `id` order otherwise), metadata, and raw step `text` (`text/plain`). **Rows are per-step** — `wikihowSep.csv` stores one row per how-to step, several rows sharing a guide `title`, so the relational list serves steps, not whole guides. `q` joins through the `articles_fts` FTS5 table. Missing `articles_fts` or unreadable `wikihow.db` returns 503 naming the indexer script; bad FTS syntax returns 400.
-- `/wikihow/chunks` — same shape as `/arxiv/chunks` but over `wikihow_rag.db`. Unlike the per-step list endpoint, the RAG indexer **reassembles whole guides**: it groups `articles` rows by `title` (ordered by `id` = step order) and renders each guide as section-headered markdown (`## Overview` lead from the guide `overview`, then one `##` per `sectionLabel`, each step's `headline`+`text` as the body), so each chunk's `section` carries the real wikiHow section name (Overview / "Using Home Remedies" / ...). `doc_id` is the guide title.
+All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total, limit, offset}`. Chunk endpoints: `q` (required), `top_k`, `candidate_k` → `{items, used_dense, top_k, candidate_k}` (RRF, not paginated). Missing FTS table → 503 with script name; bad FTS syntax → 400; Ollama down → sparse-only (`used_dense=false`).
 
-All list endpoints paginate with `limit` (default 50, max 200) and `offset`, returning `{items, total, limit, offset}`. The API is read-only with one narrow exception: `POST /simplewiki/articles/{page_id}/embed` writes a single article's chunks into `simplewiki_rag.db` (see the simplewiki router notes above). Everything else is read-only — downloader / indexer scripts remain the bulk write path.
+- `/arxiv/papers`, `/{id:path}`, `/{id:path}/content`, `/arxiv/chunks`
+- `/openalex/works`, `/{short_id}`, `/openalex/chunks`
+- `/factbook/countries`, `/{id}`, `/factbook/chunks`
+- `/gutenberg/texts`, `/{id}`, `/{id}/content`, `/gutenberg/chunks`
+- `/simplewiki/articles`, `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks`
+- `/pydocs/docs`, `/{doc_path:path}`, `/{doc_path:path}/content`, `/pydocs/chunks`
+- `/wikihow/articles`, `/{id}`, `/{id}/content`, `/wikihow/chunks`
 
-## Reload model
+`/wikihow/articles` rows are per-step (not whole guides); `/wikihow/chunks` reassembles whole guides. `POST /simplewiki/.../embed` is the only write path in the API.
 
-The API caches read-only SQLite connections at module load (`api/db.py`). After any downloader or indexer rewrites a `data/<source>/*.db` file, restart `uvicorn` for the cached handles to reopen against the new file. **This is the supported reload mechanism.** Per-script notes below repeat the reminder where it matters. Other approaches considered (per-request watermark invalidation in `_meta`; an admin `POST /admin/reload` endpoint) were rejected — both have higher cost than benefit for a personal hobbyist API. See `docs/retros/2026-05-18-phase-2-overall-retro.md` for the disposition decision.
+## Script notes
 
-**Exception — the live embed button.** `POST /simplewiki/articles/{page_id}/embed` writes through a fresh read-write connection (`api.db.connect_rag_rw`) while the cached read-only `simplewiki_rag()` connection stays open. Because the RAG DBs run in `journal_mode=WAL`, the read-only connection sees the committed rows on its next query, so a button-embedded article is searchable with **no restart**. This in-process write is deliberately scoped to one document at a time; full-corpus (re)builds still go through the indexer scripts + restart.
+**arxiv**
+- `arxiv_ingest.py` — OAI-PMH harvester. Rate: 3 s/req. Set `ARXIV_EMAIL`. Flags: `--from`, `--until`, `--db`, `--from-cache`, `--reset`. Restart after.
+- `arxiv_download.py` — HTML body fetcher. Flags: `--db`, `--limit`, `--force`. Restart after.
+- `arxiv_normalize_authors.py` — Backfill only for arxiv.db files predating Phase 3; idempotent.
+- `arxiv_index_fts.py` — Rebuilds `papers_fts` (porter, external-content). Required for `?q=`.
+- `arxiv_index_rag.py` — `arxiv_rag.db`. Falls back to title+abstract when HTML unavailable. Flags: `--limit`, `--reset`, `--batch`, `--chunk-size` (1500), `--max-chunk-size` (1800), `--overlap` (150). Restart after.
 
-## Per-script notes
+**factbook**
+- `factbook_download.py` — Clones `github.com/factbook/factbook.json` → `factbook.db`.
+- `factbook_index_rag.py` — `factbook_rag.db`. Flags: `--chunk-size` (1000), `--max-chunk-size` (1200), `--overlap` (100). Restart after.
 
-- **`arxiv_ingest.py`** — OAI-PMH metadata harvester. Walks `oaipmh.arxiv.org/oai` from `--from YYYY-MM-DD` (default: `ingest_state.last_harvested_date`, else `2021-01-01`) up to `--until` (default: today). Writes `papers` rows plus normalized `authors` / `paper_authors` rows (structured `<keyname>` / `<forenames>` / `<affiliation>` preserved per WORK.md §2.1). Idempotent: papers with unchanged `oai_datestamp` are skipped; updated papers get their `paper_authors` rebuilt. Watermark in `ingest_state` advances only on network harvests, not `--from-cache` replays. Rate-limited at 3 s per request with a `mailto:` User-Agent overridable via `ARXIV_EMAIL`. CLI flags: `--from`, `--until`, `--db`, `--cache-dir`, `--from-cache`, `--reset`. Restart uvicorn after.
-- **`arxiv_download.py`** — HTML body fetcher. Reads `papers` for rows with NULL or `'retry'` `download_status`, newest-first by `submitted_date`. GETs `arxiv.org/html/{id}` (3 s rate limit) and writes `html_content` + `download_status='downloaded'` on 200, `'no_html'` on 404. Transient errors leave `download_status` unchanged so the next run retries. Honors `Retry-After` on 429 / 5xx. CLI flags: `--db`, `--limit`, `--force`. Restart uvicorn after.
-- **`arxiv_normalize_authors.py`** — One-shot backfill that populates `authors` / `paper_authors` from the legacy JSON `papers.authors` column. Only needed for arxiv.db files that predate the Phase 3 ingest port (which writes structured authors directly). Heuristic split: last whitespace-delimited token is the surname. `affiliation` is always NULL in the backfill output. Idempotent. Becomes obsolete after a fresh `arxiv_ingest.py` re-harvest.
-- **`arxiv_index_fts.py`** — Builds the `papers_fts` FTS5 virtual table over `papers.title` + `papers.abstract` with the `porter unicode61` tokenizer (matches openalex's choice). External-content table — the index lives in `papers_fts` but the original text stays in `papers` (no duplication). Drop+rebuild on each run (~0.1 s at the current ~1.2k-row scale, adds <1 MB to the DB file). Required after every ingest run for `/arxiv/papers?q=` to return anything. No `CREATE INDEX` calls — the two indexes on `papers` (`idx_papers_primary_cat`, `idx_papers_submitted`) are created by `arxiv_ingest.create_schema`.
-- **`arxiv_index_rag.py`** — Builds `data/arxiv/arxiv_rag.db` (chunks + FTS5 + sqlite-vec) by rendering each paper's downloaded HTML body to markdown via `rag.render.html_to_markdown` and chunking with `chunk_markdown` so per-chunk `section` labels (Abstract / Introduction / Methods / Results / ...) populate. Papers without downloaded HTML (`papers.download_status != 'downloaded'`) fall back to title+abstract via the existing `strip_html` + `normalize_whitespace` path. Re-runnable: version key is `{oai_datestamp or content_hash}-{html_body_hash_prefix or 'no-html'}-{CLEANER_VERSION}`, so a paper that gets HTML downloaded later re-embeds on the next run even when its OAI datestamp didn't move. Detects legacy upstream schema (`paper_chunks*` from `local_wikipedia`) or embed model/dim mismatch and rebuilds from scratch. CLI flags: `--limit`, `--reset`, `--batch`, `--ollama-url`, `--chunk-size` (default 1500), `--max-chunk-size` (default 1800), `--overlap` (default 150 = 10%; within-section only). **Re-measure chunks-per-doc after the next full run** — full-body chunking will produce several more chunks per paper than the title+abstract-only path did; the prior `~25-40 min` estimate is for title+abstract only. **Restart uvicorn after this runs** — the cached connection in `api/db.py` still points at the previous file.
-- **`openalex_index_rag.py`** — Builds `data/openalex/openalex_rag.db` over the top-N most-cited OpenAlex works (default 5000 via `--limit`). Title and abstract are HTML-stripped and entity-decoded by `rag.cleaner` before chunking (the inverted-index reconstruction in `openalex_download.py` leaves `&amp;` / `<a>` in raw text). Same shared `rag/` machinery as the arxiv indexer; same embed model + 768d; same incremental version-hash skip (now suffixed with `CLEANER_VERSION`); same `--reset`/`--batch`/`--ollama-url` flags plus `--chunk-size` (default 1500), `--max-chunk-size` (default 1800), and `--overlap` (default 150 = 10%). Version key is a content hash of `(title, abstract)` since OpenAlex doesn't expose per-work `updated_at` in the current schema. Embed runtime depends on the chunker — re-measure before quoting an estimate (see WORK.md §1.10). Restart uvicorn after.
-- **`factbook_index_rag.py`** — Builds `data/factbook/factbook_rag.db` from the nested `countries.data` JSON. Each country becomes one Doc; the JSON is rendered as section-tagged markdown (one `##` per top-level section). Every JSON leaf string is HTML-stripped and whitespace-normalised by `rag.cleaner` during the walk — the source JSON has embedded `<br>` and `<p>` tags that previously leaked into 26.8% of chunks. Chunked with `rag.chunker.chunk_markdown` (passed via `chunk_fn` to the shared indexer) so chunks preserve `Geography` / `Economy` / etc. labels in the `section` column (the `##` marker never reaches the chunk body). Version key is a SHA-256 of the JSON blob plus `CLEANER_VERSION`. CLI: `--chunk-size` (default 1000 — factbook is dense key:value), `--max-chunk-size` (default 1200), `--overlap` (default 100 = 10%; within-section only), plus the standard `--limit`/`--reset`/`--batch`/`--ollama-url`. **Source-data caveat:** some factbook keys repeat themselves in their text values (e.g. key `"improved: urban"` with text `"urban: 99% ..."`); this produces `"improved: urban: urban: 99% ..."` lines and is left as-is.
-- **`gutenberg_index_rag.py`** — Builds `data/gutenberg/gutenberg_rag.db` by reading `.txt` book bodies from `data/gutenberg/<path>`, stripping Project Gutenberg start/end banners (now covering the canonical `*** START/END OF ... ***` plus older Small-Print variants and bare-prose footers, with a defensive line-level scrub for any remaining "Project Gutenberg" mention) and inline markdown emphasis (`**`), then chunking with the default `chunk_doc`. CLI: `--language` (default `en`), `--limit` (default 100), `--chunk-size` (default 2000 — narrative prose is dense), `--max-chunk-size` (default 2400), `--overlap` (default 300 = 15%). Version key is `{size_bytes}-{sha256_prefix_of_first_4kb_and_last_4kb}-{CLEANER_VERSION}` — mtime is unreliable because the gutenberg rsync mirror can touch every file. Embed runtime depends on the corpus selected — re-measure before quoting an estimate.
-- **`factbook_download.py`** — Clones `github.com/factbook/factbook.json` to `/tmp/factbook_json`, walks the per-region directories, and inserts each country as one row (with the full JSON blob in a `data` column) into a `countries` table at `data/factbook/factbook.db`. Temp clone is removed on success.
-- **`openalex_download.py`** — Paginates the OpenAlex `/works` API filtering by `cited_by_count` and reconstructs abstracts from the inverted-index format the API returns. Uses the OpenAlex "polite pool" (`mailto=` param) — set `OPENALEX_EMAIL` to override the hardcoded default; rate-limit favoritism depends on it being a real address. Cursor pagination, ~10 req/sec. Retries via `rag.retry.with_retry`. Author display names are joined with `", "` into the `works.authors` column — the normalized author tables are built by `openalex_normalize_authors.py`.
-- **`openalex_normalize_authors.py`** — One-shot backfill: creates `authors(id, display_name)` and `work_authors(work_id, author_id, position)` in `data/openalex/openalex.db` by splitting `works.authors` on `", "`. Re-runnable: clears `work_authors` first; keeps the `authors` table to avoid churning IDs. Required after `openalex_download.py` for `/openalex/works?author=` to return anything. **Known low-impact limitation (~0.08%, ~220 of 268k works):** credentialed-suffix names like `"Smith, Jr."`, `"Jones, M.D."`, `"Doe, PhD"`, `"Foo, III"` get fragmented into 2–3 phantom rows. The proper fix is a re-download using OpenAlex's authorship IDs, deferred.
-- **`openalex_index_fts.py`** — Builds the `works_fts` FTS5 virtual table over `works.title` + `works.abstract` with the `porter unicode61` tokenizer. External-content table — the index lives in `works_fts` but the original text stays in `works` (no duplication). Drop+rebuild on each run (~20 s, ~150 MB added to the DB). Required after `openalex_download.py` for `/openalex/works?q=` to return anything.
-- **`gutenberg_download.sh`** — Single rsync line that runs on a remote host (`pop-os`) via SSH and pulls `.txt` files from the ibiblio Gutenberg mirror. Not self-contained — requires that SSH alias to resolve.
-- **`gutenberg_index.py`** — Walks `data/gutenberg/` for canonical `<id>-0.txt` files, joins them against the official Project Gutenberg catalog CSV (`gutenberg.org/cache/epub/feeds/pg_catalog.csv`) for title/author/language/release-date metadata, and writes `data/gutenberg/gutenberg.db`. Indexes on `author`, `title`, `language`. Re-runnable (`INSERT OR REPLACE`); skips `old/` retired versions. Required before the `/gutenberg` API routes work.
-- **`simplewiki_download.py`** — Pulls `simplewiki-latest-pages-articles-multistream.xml.bz2` plus its index from `dumps.wikimedia.org/simplewiki/latest/`, SHA-1 verifies against the published `sha1sums.txt` manifest, and writes both files to `data/simplewiki/dumps/`. Streams to a `.tmp` sibling first and atomically renames only after the hash matches, so a failed transfer can never leave a corrupt file under the canonical name. Re-runs skip files already in place that verify. No CLI flags. Simplewiki-only (no `--wiki enwiki`).
-- **`simplewiki_parse.py`** — Streams the `.xml.bz2` dump into `data/simplewiki/simplewiki.db`. Writes to `simplewiki.db.tmp` first, then `os.replace` onto the destination so an interrupted parse never corrupts the API's read target. Schema matches the local_wikipedia parse output (`articles` with full MediaWiki contributor/comment columns + `articles_fts` trigram index over title + `parse_metadata` + `articles_archive` + `db_metadata`). Default namespace filter is 0 (main articles); pass `--all-namespaces` to include Talk / User / Wikipedia / File / etc. CLI: `--dump`, `--db`, `--all-namespaces`. Restart uvicorn after. **One-shot, not generic for enwiki** — enwiki's larger multi-part dumps are out of scope per the Phase 4 scope decision.
-- **`simplewiki_index_rag.py`** — Builds `data/simplewiki/simplewiki_rag.db` by rendering each main-namespace article's wikitext to markdown via `rag.wikitext.wikitext_to_markdown` and chunking with `chunk_markdown` so per-chunk `section` labels populate (History / Geography / References / …). File:/Image:/Category: wikilinks are stripped before rendering; templates are dropped wholesale (`mwparserfromhell.strip_code` doesn't expand them) — `{{cite|...}}` / `{{infobox ...}}` content does not survive into chunks, which is fine for retrieval but worth knowing. Redirect stubs (`#REDIRECT [[...]]`) and articles whose rendered body is empty are skipped silently. Version key is `{revision_id}-{CLEANER_VERSION}`: simplewiki revision_ids are monotonic, so re-runs only re-embed articles that have actually changed (or every article when `CLEANER_VERSION` bumps). **Default `--limit 100`** mirrors gutenberg's safety-default — the full simplewiki corpus is ~394k articles and would take many hours on local Ollama; raise `--limit` explicitly when you're ready. CLI: `--limit`, `--reset`, `--batch`, `--ollama-url`, `--chunk-size` (default 800 ≈ 200 tokens), `--max-chunk-size` (default 1000), `--overlap` (default 100 ≈ 12%; within-section only). Defaults were lowered from 1500/1800/150 for tighter single-idea chunks — more accurate retrieval on small Ollama embed/reader models. The live-embed constants in `api/routers/simplewiki.py` (`_CHUNK_SIZE` / `_MAX_CHUNK_SIZE` / `_OVERLAP`) mirror these. Restart uvicorn after.
-- **`python_docs_download.py`** — Fetches the Python plain-text docs archive (`docs.python.org/<version>/archives/python-<version>-docs-text.tar.bz2`) into `data/pydocs/raw/`, extracts every `.txt` file, and inserts one row per page into the `docs` table at `data/pydocs/python_docs.db`. Each row has `doc_path` (e.g. `library/os`), `section` (the top-level directory: `library`, `tutorial`, `howto`, `c-api`, `whatsnew`, `reference`, etc.), `title` (first non-blank line), and `content` (the raw Sphinx text-builder output). Uses `INSERT OR IGNORE`. CLI: `--db`, `--download-dir`, `--python-version` (default `3` — the generic redirect doesn't resolve to a `.tar.bz2`, so pass a pinned version like `3.13`). On 404 it points the user at `docs.python.org/3/download.html` to find the exact URL. Note: data dir is `pydocs/` but the DB filename uses the verbose `python_docs.db` form — the indexer and API expect this.
-- **`python_docs_index_fts.py`** — Builds the `docs_fts` FTS5 virtual table over `docs.title` + `docs.content` with the `porter unicode61` tokenizer. External-content table (`content='docs'`, `content_rowid='id'`). Drop+rebuild on each run (~0.3 s, adds ~7 MB to the DB at the current 513-row scale). Required after every `python_docs_download.py` run for `/pydocs/docs?q=` to return anything.
-- **`python_docs_index_rag.py`** — Builds `data/pydocs/python_docs_rag.db` from `python_docs.docs`. Each page's Sphinx text-builder body is converted to markdown by `python_docs_rag_extract.sphinx_text_to_markdown` (underline `===`/`---`/`~~~`/`^^^`/`"""` → `##`/`###`/`####`/`#####`/`######`; `**bold**` and `*italic*` unwrapped; `+---+---+` table borders preserved; h1 page title dropped because `docs.title` is already in the embedder prompt), then chunked with `chunk_markdown` (passed via `chunk_fn`) so per-chunk `section` carries the real section name. Version key is `sha256(content)[:32]-CLEANER_VERSION` — the source DB has no per-row updated_at, so a content hash is the only edit-detection signal. CLI: `--limit` (default None = full ~513 pages), `--reset`, `--batch`, `--ollama-url`, `--chunk-size` (default 1500), `--max-chunk-size` (default 1800), `--overlap` (default 150 = 10%; within-section only). **Re-measure chunk-per-doc after a full run** — the 2-doc sample (`whatsnew/3.2` + `whatsnew/3.3`) produced 111 chunks/doc, but whatsnew docs are unusually long; the library/* pages will skew the median. Restart uvicorn after.
-- **`wikihow_loader.py`** — Loads `data/wikihow/wikihowSep.csv` (the per-step "separated" form of the wikiHow corpus) into the `articles` table at `data/wikihow/wikihow.db`. One row per step; columns `title`, `section_label` (`sectionLabel` in the CSV, e.g. "Using Home Remedies"), `headline` (the step's bolded summary), `overview` (guide-level intro, repeated on every step of the guide), `text` (the step body). The autoincrement `id` preserves CSV order = step order within a guide. `INSERT OR IGNORE` on `UNIQUE (title, section_label, headline)`; also creates `idx_articles_section_label` (the UNIQUE index is keyed leftmost on `title`, so it can't serve the `/wikihow/articles?section_label=` filter). Rows with neither text nor headline are skipped. CLI: `--db`, `--csv` (default `wikihowSep.csv`). Required before `/wikihow` routes work; run `wikihow_index_fts.py` after for `?q=`.
-- **`wikihow_index_fts.py`** — Builds the `articles_fts` FTS5 virtual table over `articles.title` + `headline` + `text` with the `porter unicode61` tokenizer. External-content table (`content='articles'`, `content_rowid='id'`). Drop+rebuild on each run. Required after every `wikihow_loader.py` run for `/wikihow/articles?q=` to return anything.
-- **`wikihow_index_rag.py`** — Builds `data/wikihow/wikihow_rag.db`. The extractor (`wikihow_rag_extract.iter_docs`) **reassembles whole guides** — it groups `articles` rows by `title` (ordered by `id` = step order) and renders each guide as section-headered markdown (`## Overview` lead from the guide `overview`, then one `##` per `sectionLabel`, each step's `headline`+`text` as the body) so `chunk_markdown` tags per-chunk `section` with the real wikiHow section name. Every leaf is HTML-stripped + whitespace-normalised by `rag.cleaner`. `doc_id` is the guide title. Version key is `content_hash(overview, *steps)-CLEANER_VERSION` — wikihow.db has no per-row updated_at. **Default `--limit 100`** caps *guides* (not step rows), mirroring gutenberg's / simplewiki's safety default — the full corpus is large; pass a large value for the whole thing. CLI: `--limit`, `--reset`, `--batch`, `--ollama-url`, `--chunk-size` (default 1500), `--max-chunk-size` (default 1800), `--overlap` (default 150 = 10%; within-section only). **Chunks-per-guide not yet measured on a representative sample** — measure before quoting a runtime estimate. Restart uvicorn after.
-- **`loc_download.py`** — General LOC downloader via the `loc.gov/search/` API. Filters by `--format` (default `manuscript/mixed material`) and `--language` (default `english`; pass `""` for all languages). Output DB is `data/loc/loc_<format_slug>.db` (override with `--db`); slugification replaces non-alphanumeric characters with underscores (e.g. `manuscript/mixed material` → `loc_manuscript_mixed_material.db`). Table: `items(item_id, title, date, format, creator, subject, description, language, collection, url)`. Resumes from the last completed page via `ingest_state`. Rate: 3 s between pages. **Encoding note:** the LOC search API requires literal colons in `fa` filter values — `requests` encodes them as `%3A` which breaks the filter; `_encode_fa()` builds the `fa` query string fragment manually, keeping colons literal. Valid `--format` values include: `newspaper`, `book`, `periodical`, `manuscript/mixed material`, `legislation`, `map`, `photo, print, drawing`, `notated music`, `film, video`, `sound recording` — omit `--format` entirely to download all 7 M+ items.
-- **`loc_newspapers_download.py`** — Downloads Chronicling America newspaper metadata via the LOC collection API (`loc.gov/collections/chronicling-america/`). English only. CLI: `--date-from` / `--date-to` (default: full 1770-01-01 to 1963-12-31 coverage), `--db` (default `data/loc/loc_newspapers.db`). Table: `newspapers(item_id, title, date, newspaper_title, state, city, language, url, snippet)`. Resumes from last completed page. Rate: 7 s between pages (LOC bulk collection API is stricter than the search API — ~10 req/10 min).
-- **`loc_books_marc.py`** — Parses LOC MARC bulk files into `data/loc/loc_books.db`. MARC files must be downloaded manually from `loc.gov/cds/products/marcDist.php` (filenames like `BooksAll.2014.part01.utf8.gz`) and placed in `--download-dir` (default `data/loc/raw`). Requires `pymarc` (`pip install pymarc`). Accepts `.mrc`, `.utf8`, and `.gz` files; decompresses `.gz` via a temp file to avoid loading multi-GB files into memory. Filters English records only (MARC 041$a `eng`/`en`). Table: `books(lccn, title, author, publication_date, publisher, subject, summary, language, item_type)`. Not resumable — re-run processes all files in `--download-dir` from scratch (`INSERT OR IGNORE` makes it safe to re-run).
+**openalex**
+- `openalex_download.py` — OpenAlex `/works` API. Set `OPENALEX_EMAIL` for polite-pool rate limit.
+- `openalex_normalize_authors.py` — Builds `authors` / `work_authors`. Required for `?author=`. Re-runnable.
+- `openalex_index_fts.py` — Rebuilds `works_fts` (~20 s, ~150 MB). Required for `?q=`.
+- `openalex_index_rag.py` — `openalex_rag.db` (top-5k by citation count). Same flags as arxiv rag. Restart after.
 
-### Re-indexing after chunker setting changes
+**gutenberg**
+- `gutenberg_download.sh` — rsync via SSH to `pop-os`; requires that alias.
+- `gutenberg_index.py` — Walks `.txt` files, joins PG catalog CSV → `gutenberg.db`.
+- `gutenberg_index_rag.py` — `gutenberg_rag.db`. Flags: `--language` (en), `--limit` (100), `--chunk-size` (2000), `--max-chunk-size` (2400), `--overlap` (300). Restart after.
 
-Changing `--overlap`, `--chunk-size`, or `--max-chunk-size` does **not** automatically re-index existing docs — the version key is content-based, so docs whose source content hasn't changed are skipped even if the chunker settings differ. Pass `--reset` to wipe and rebuild from scratch whenever you change these settings; otherwise you get a mixed database where old docs carry the previous settings and only new/updated docs use the new ones.
+**simplewiki**
+- `simplewiki_download.py` — Downloads + SHA-1 verifies dump to `data/simplewiki/dumps/`.
+- `simplewiki_parse.py` — Streams bz2 XML → `simplewiki.db`. Flags: `--all-namespaces`. Restart after.
+- `simplewiki_index_rag.py` — `simplewiki_rag.db`. Default `--limit 100`; full 394k-article corpus ≈ 700 h. Flags: `--chunk-size` (800), `--max-chunk-size` (1000), `--overlap` (100). **Keep chunk settings in sync with `api/routers/simplewiki.py` `_CHUNK_SIZE`/`_MAX_CHUNK_SIZE`/`_OVERLAP`.** Restart after.
 
-### Re-indexing after a CLEANER_VERSION bump
+**python_docs**
+- `python_docs_download.py` — Python docs text archive. Pass a pinned `--python-version` (e.g. `3.13`); the generic `3` redirect doesn't work for `.tar.bz2`.
+- `python_docs_index_fts.py` — Rebuilds `docs_fts`. Required for `?q=`.
+- `python_docs_index_rag.py` — `python_docs_rag.db`. Full run ≈ 513 pages; runtime not yet measured. Restart after.
 
-Every per-source `Doc.version` ends with `-vN` where `N` is `rag.cleaner.CLEANER_VERSION` (currently `v2` after the arxiv full-HTML wire-up). Bumping that constant (or any change to the cleaning / rendering behaviour that warrants invalidation) makes every previously-stored `docs_meta.version` mismatch on the next indexer run, so every doc gets re-chunked and re-embedded. The `*_index_rag.py` scripts are idempotent and resumable — interrupted runs pick up cleanly. Restart uvicorn after each.
+**wikihow**
+- `wikihow_loader.py` — Loads `wikihowSep.csv` → `wikihow.db` (one row per step). Required before `/wikihow` routes work.
+- `wikihow_index_fts.py` — Rebuilds `articles_fts`. Required for `?q=`.
+- `wikihow_index_rag.py` — `wikihow_rag.db`. Default `--limit 100` caps guides (not step rows). Restart after.
 
-**Measured runtimes (v1 cleaner, 2026-05-19, local Ollama, nomic-embed-text:v1.5):** sampled chunks-per-doc on 30 docs (5 for gutenberg) and timed three 32-batch embed calls at realistic ~1600-char content. Per-chunk latency averaged ~1.4 s (range 1.0-1.9 s) — cold-start trials are slower.
+**loc**
+- `loc_download.py` — LOC search API. Flags: `--format`, `--language`. Resumes via `ingest_state`.
+- `loc_newspapers_download.py` — Chronicling America metadata. Flags: `--date-from`, `--date-to`.
+- `loc_books_marc.py` — MARC bulk files from `data/loc/raw/`. Requires `pymarc`. Not resumable.
 
-- `arxiv_index_rag.py` — ~1.3 chunks/doc × 1238 papers = ~1.6k chunks → **~25-40 min**
-- `openalex_index_rag.py` (`--limit 5000`) — ~1.7 chunks/doc × 5000 = ~8.5k chunks → **~2.5-3 h**
-- `factbook_index_rag.py` — ~40 chunks/country × 261 = ~10k chunks → **~3-4 h**
-- `gutenberg_index_rag.py` (`--limit 100`) — median ~136 chunks/book × 100 = ~14k chunks → **~4-5 h** (median anchor; mean is skewed by mega-corpora like the Bible at 2,354 chunks)
-- `simplewiki_index_rag.py` (full corpus, no `--limit` cap) — rough estimate ~5 chunks/article × 394k articles = ~2M chunks → **~700 h**. Re-measure after a representative sample (the "Earth" article alone produced 43 chunks; per-doc chunk count varies widely). The default `--limit 100` covers ~hundreds of chunks → ~10 min.
-- `python_docs_index_rag.py` (full corpus, no `--limit` cap) — **not yet measured on a representative sample.** The 2-doc whatsnew probe gave 111 chunks/doc (~0.8 s/chunk) but whatsnew pages are outliers; library/* reference pages dominate the 513-doc corpus. Run a ~30-doc mixed sample (some `library/*`, some `tutorial/*`, some `howto/*`) before quoting an estimate.
+### Re-indexing notes
 
-These numbers come from a 30-doc per-source sample on the current chunker — re-measure on a representative sample before quoting a new estimate after any chunker change (WORK.md §1.10).
+- **Chunker setting changes** (`--overlap`, `--chunk-size`, `--max-chunk-size`): version key is content-based, so changed settings don't trigger re-index. Pass `--reset` to rebuild from scratch.
+- **`CLEANER_VERSION` bump:** forces re-embed of all docs on next run. Scripts are idempotent and resumable.
 
-## API layout (`api/`)
+**Measured runtimes** (local Ollama, nomic-embed-text:v1.5, ~1.4 s/chunk):
 
-- `api/main.py` — FastAPI app, mounts the six routers, exposes `/health`.
-- `api/db.py` — opens each SQLite DB read-only via the `file:...?mode=ro` URI form. Connections are module-level singletons and shared across threads (read-only, so safe). `GUTENBERG_ROOT` is the on-disk root the gutenberg content endpoint streams from. `_connect_ro_with_vec` additionally loads sqlite-vec for the per-source `_rag.db` files.
-- `api/models.py` — Pydantic response models, plus a generic `Page[T]` wrapper used by every list endpoint. `Chunk` and `ChunksResponse` are the RAG-specific shapes (not paginated).
-- `api/routers/{arxiv,factbook,openalex,gutenberg,simplewiki,python_docs}.py` — one router per datasource. SQL is inline; the routers are intentionally thin.
-- `api/_chunks.py` — shared `/chunks` route factory used by all six routers. Wraps `rag.retriever.retrieve` with the empty-`q` → 400, missing-rag.db → 503, Ollama-down → `used_dense=False` dispatch. Takes an optional `rag_db_path` override for the 503 restore hint (pydocs uses it because its file is `python_docs_rag.db`, not `pydocs_rag.db`).
-- `api/_fts.py` — `translate_fts_errors` context manager that wraps the inline FTS5-joined queries in the arxiv/openalex/simplewiki/pydocs list endpoints; maps missing-table → 503 (naming the indexer script), bad FTS5 syntax → 400.
-- `rag/` — shared RAG primitives used by both the API and the indexer scripts. `chunker.py` (recursive boundary-aware splitting via `langchain-text-splitters` with a hard-cap post-pass; `chunk_doc` for prose, `chunk_markdown` for sections), `cleaner.py` (HTML stripping via `beautifulsoup4`, markdown-syntax stripping that preserves heading text, whitespace normalisation; exposes `CLEANER_VERSION` which every extractor appends to its `Doc.version`), `embedder.py` (Ollama HTTP, locked to `nomic-embed-text:v1.5` at 768d; `OLLAMA_URL` env var, default `http://localhost:11434`; batch timeout 600 s to ride out Ollama stalls under memory pressure), `render.py` (LaTeXML HTML → markdown converter for arxiv body chunking; preserves math `alttext`, drops chrome and inline images), `wikitext.py` (MediaWiki wikitext → markdown via `mwparserfromhell.strip_code` with section heading preservation; used by `simplewiki_index_rag.py`), `retriever.py` (RRF over FTS5 + sqlite-vec with sparse-only fallback when Ollama is down), `retry.py` (library-agnostic `with_retry(fn, exc)` helper shared by embedder.py and openalex_download.py), `schema.py` (uniform DDL for `chunks`/`chunks_fts`/`chunks_vec`/`docs_meta`/`_meta` and the `connect_rag` writer-side opener), `indexer.py` (shared `run_indexer` skeleton used by every per-source `*_index_rag.py` script).
-- `tests/` — pytest smoke suite. One happy-path per route + 400/503/used_dense=false cases for each `/<source>/chunks` endpoint. Run with `pytest`.
+| Source | Chunks | Estimate |
+|--------|--------|----------|
+| arxiv (1.2k papers) | ~1.6k | ~25-40 min |
+| openalex (limit 5k) | ~8.5k | ~2.5-3 h |
+| factbook (261 countries) | ~10k | ~3-4 h |
+| gutenberg (limit 100) | ~14k | ~4-5 h |
+| simplewiki limit 100 | ~hundreds | ~10 min |
+| simplewiki full 394k | ~2M | ~700 h |
 
-Indexes that the list endpoints rely on are created by the **downloader / indexer scripts**, not the API (read-only mode forbids `CREATE INDEX`). If you add a new filter that needs an index, add the `CREATE INDEX IF NOT EXISTS` to the relevant downloader and re-run it (or apply it once by hand to the existing DB file).
+## API layout
+
+- `api/main.py` — mounts routers, `/health`.
+- `api/db.py` — read-only module-level SQLite connections; `connect_rag_rw` for live embed writes.
+- `api/models.py` — `Page[T]` for list endpoints; `ChunksResponse` for RAG.
+- `api/routers/` — one thin router per source; SQL inline.
+- `api/_chunks.py` — shared chunks factory (400 empty `q`, 503 missing rag.db, sparse fallback when Ollama down).
+- `api/_fts.py` — `translate_fts_errors`: missing table → 503, bad FTS5 syntax → 400.
+- `rag/` — `chunker.py` (`chunk_doc` / `chunk_markdown`), `cleaner.py` (`CLEANER_VERSION`), `embedder.py` (nomic-embed-text:v1.5 768d, `OLLAMA_URL`), `render.py` (arxiv HTML→md), `wikitext.py`, `retriever.py` (RRF), `retry.py`, `schema.py`, `indexer.py`.
+- `tests/` — pytest smoke suite; run with `pytest`.
+
+Indexes are created by downloader/indexer scripts (API is read-only). Add `CREATE INDEX IF NOT EXISTS` to the relevant script when adding new filters.
 
 ## Conventions
 
-- Each new source gets its own script in `scripts/` and writes to `data/<source>/`.
-- SQLite tables use `INSERT OR REPLACE` / `INSERT OR IGNORE` so scripts are safe to re-run incrementally.
+- Each new source: script in `scripts/`, data in `data/<source>/`.
+- SQLite: `INSERT OR REPLACE` / `INSERT OR IGNORE` for idempotent re-runs.
 
 ## Working rules
 
 - Always ask clarifying questions before starting a coding task.
 - Always pause and confirm before committing to git.
 - Speak simply in plain terms — avoid unnecessary software jargon.
-- Python code follows PEP 8, with docstrings, code comments, and type hints.
-- Prefer the standard library over third-party packages whenever practical. Three intentional deviations live in `rag/`: `langchain-text-splitters` for the chunker (a stdlib regex chunker was previously producing 8-38% mid-word cuts across sources), `beautifulsoup4` for HTML stripping (the factbook JSON had embedded HTML in 26.8% of leaves), and `mwparserfromhell` for wikitext parsing (a regex-only stripper would leave templates / file links / categories in chunk text, polluting embeddings).
-- Structure code in small, modular pieces with clear responsibilities.
-- Follow the DRY principle — factor out repetition rather than copy-pasting.
-- Think about security at both the planning and implementation stages (secrets handling, input validation, safe file/network use).
+- Python: PEP 8, docstrings, code comments, type hints.
+- Prefer stdlib; exceptions in `rag/`: `langchain-text-splitters` (chunker), `beautifulsoup4` (HTML stripping), `mwparserfromhell` (wikitext parsing).
+- Small, modular pieces with clear responsibilities. DRY.
+- Security: secrets handling, input validation, safe file/network use.
