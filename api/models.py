@@ -145,6 +145,18 @@ class GithubReadme(BaseModel):
     readme_chars: int | None
 
 
+class SecEdgarFiling(BaseModel):
+    """One fetched SEC EDGAR filing. Extracted body text served at /content."""
+
+    accession_number: str
+    company_name: str | None
+    cik: str | None
+    form_type: str | None
+    date_filed: str | None
+    filing_url: str | None
+    body_chars: int | None
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

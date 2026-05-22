@@ -289,10 +289,46 @@ export const SOURCES = {
       { key: 'region', label: 'Region', type: 'text', placeholder: 'exact match' },
     ],
   },
+
+  sec_edgar: {
+    key: 'sec_edgar',
+    label: 'SEC EDGAR',
+    subtitle: 'U.S. company filings (10-K)',
+    listEndpoint: '/sec_edgar/filings',
+    detailEndpoint: (id) => `/sec_edgar/filings/${id}`,
+    contentEndpoint: (id) => `/sec_edgar/filings/${id}/content`,
+    chunksEndpoint: '/sec_edgar/chunks',
+    docChunksEndpoint: '/sec_edgar/doc-chunks',
+    idField: 'accession_number',
+    titleField: 'company_name',
+    subtitle_fn: (item) => item.form_type || '',
+    meta_fn: (item) => item.date_filed || '',
+    contentType: 'text',
+    metaFields: [
+      { label: 'Company',   value: (d) => d.company_name },
+      { label: 'CIK',       value: (d) => d.cik },
+      { label: 'Form',      value: (d) => d.form_type },
+      { label: 'Filed',     value: (d) => d.date_filed },
+      { label: 'Accession', value: (d) => d.accession_number },
+      { label: 'Size',      value: (d) => d.body_chars ? `${d.body_chars.toLocaleString()} chars` : '' },
+      { label: 'URL',       value: (d) => d.filing_url },
+    ],
+    filters: [
+      { key: 'q',       label: 'Search',  type: 'text',   placeholder: 'FTS5 query…' },
+      { key: 'company', label: 'Company', type: 'text',   placeholder: 'substring' },
+      { key: 'cik',     label: 'CIK',     type: 'text',   placeholder: 'exact match' },
+      { key: 'year',    label: 'Year',    type: 'number', placeholder: '2024' },
+      { key: 'sort', label: 'Sort', type: 'select', options: [
+        { value: '',          label: 'Newest first' },
+        { value: 'oldest',    label: 'Oldest first' },
+        { value: 'relevance', label: 'Relevance' },
+      ]},
+    ],
+  },
 };
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'gutenberg',
   'wikihow', 'pydocs', 'factbook',
-  'federal_register', 'github_readmes',
+  'federal_register', 'github_readmes', 'sec_edgar',
 ];

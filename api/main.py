@@ -10,6 +10,7 @@ from api.routers import (
     gutenberg,
     openalex,
     python_docs,
+    sec_edgar,
     simplewiki,
     wikihow,
 )
@@ -24,6 +25,7 @@ app.include_router(python_docs.router)
 app.include_router(wikihow.router)
 app.include_router(federal_register.router)
 app.include_router(github_readmes.router)
+app.include_router(sec_edgar.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -55,6 +57,8 @@ def health(response: Response) -> dict:
         ("federal_register_rag", db.federal_register_rag),
         ("github", db.github),
         ("github_rag", db.github_rag),
+        ("sec_edgar", db.sec_edgar),
+        ("sec_edgar_rag", db.sec_edgar_rag),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

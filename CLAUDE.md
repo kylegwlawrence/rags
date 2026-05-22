@@ -38,6 +38,10 @@ python scripts/wikihow/wikihow_index_rag.py
 python scripts/loc/loc_download.py
 python scripts/loc/loc_newspapers_download.py
 python scripts/loc/loc_books_marc.py
+python scripts/sec_edgar/sec_edgar_download.py        # filing metadata → data/sec_edgar/sec_edgar.db
+python scripts/sec_edgar/sec_edgar_fetch_bodies.py    # fetch 10-K bodies (standalone; no indexing)
+python scripts/sec_edgar/sec_edgar_index_fts.py       # filings_fts FTS5 index
+python scripts/sec_edgar/sec_edgar_index_rag.py       # data/sec_edgar/sec_edgar_rag.db
 ```
 
 ## Running the API
@@ -63,6 +67,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `/simplewiki/articles`, `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks`
 - `/pydocs/docs`, `/{doc_path:path}`, `/{doc_path:path}/content`, `/pydocs/chunks`
 - `/wikihow/articles`, `/{id}`, `/{id}/content`, `/wikihow/chunks`
+- `/sec_edgar/filings`, `/{accession_number}`, `/{accession_number}/content`, `/sec_edgar/chunks`
 
 `/wikihow/articles` rows are per-step (not whole guides); `/wikihow/chunks` reassembles whole guides. `POST /simplewiki/.../embed` is the only write path in the API.
 
@@ -109,6 +114,12 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `loc_download.py` — LOC search API. Flags: `--format`, `--language`. Resumes via `ingest_state`.
 - `loc_newspapers_download.py` — Chronicling America metadata. Flags: `--date-from`, `--date-to`.
 - `loc_books_marc.py` — MARC bulk files from `data/loc/raw/`. Requires `pymarc`. Not resumable.
+
+**sec_edgar**
+- `sec_edgar_download.py` — Quarterly full-index harvester (1993–present). Stores filing **metadata + URLs only**, no body text. Flags: `--db`, `--start-year`, `--end-year`, `--email` (`SEC_EMAIL` env), `--reset`. Resumes via `ingest_state`.
+- `sec_edgar_fetch_bodies.py` — **Standalone** body fetcher: downloads filing `.txt` from `filing_url`, extracts the primary document, strips HTML, stores it in a new `body` column (`status` tracks fetched/missing/error). Does **not** build any index. Defaults to 10-K, newest first, `--limit 200`. Flags: `--db`, `--form-type`, `--limit`, `--email`, `--delay`, `--reset-status`.
+- `sec_edgar_index_fts.py` — Rebuilds `filings_fts` (company_name + body, fetched rows only). Required for `?q=`.
+- `sec_edgar_index_rag.py` — `sec_edgar_rag.db` over fetched bodies (`chunk_doc`, flat prose). Same flags as other RAG indexers. Restart after.
 
 ### Re-indexing notes
 

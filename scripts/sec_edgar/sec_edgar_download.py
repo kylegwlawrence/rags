@@ -11,6 +11,7 @@ Requires: requests
 import argparse
 import datetime
 import os
+import re
 import sqlite3
 import time
 from typing import Optional
@@ -85,29 +86,35 @@ def fetch_index(session: requests.Session, year: int, quarter: int) -> Optional[
     return None
 
 
+# The header advertises fixed columns (form @62, cik @74, date @86, file @98)
+# but the data rows don't actually align to those positions — the date and
+# filename sit several columns to the right, so naive slicing splits the date
+# (`2025-02-13` → `2025-02` + `-13`) and corrupts the filename. Parse by
+# structure instead: form type has no spaces, CIK is digits, date is
+# YYYY-MM-DD, and the filename is the trailing `edgar/...txt` path. The leading
+# `.+?` soaks up company names that contain spaces.
+_ROW_RE = re.compile(
+    r"^(?P<company>.+?)\s+(?P<form>\S+)\s+(?P<cik>\d+)\s+"
+    r"(?P<date>\d{4}-\d{2}-\d{2})\s+(?P<filename>edgar/\S+\.txt)\s*$"
+)
+
+
 def parse_index(text: str) -> list[tuple]:
-    """
-    Parse company.idx fixed-width format.
-    Column layout (0-indexed chars):
-      0–61:  company_name
-      62–73: form_type
-      74–85: cik
-      86–97: date_filed
-      98+:   filename
-    """
+    """Parse a company.idx file into rows, keeping only the form types we want."""
     rows = []
     lines = text.splitlines()
     # First 9 lines are the EDGAR full-index header
     for line in lines[9:]:
-        if len(line) < 98:
+        match = _ROW_RE.match(line)
+        if match is None:
             continue
-        form_type = line[62:74].strip()
+        form_type = match.group("form")
         if form_type not in FORM_TYPES:
             continue
-        company_name = line[0:62].strip()
-        cik          = line[74:86].strip()
-        date_filed   = line[86:98].strip()
-        filename     = line[98:].strip()
+        company_name = match.group("company").strip()
+        cik          = match.group("cik")
+        date_filed   = match.group("date")
+        filename     = match.group("filename")
 
         # Canonical accession number: basename without extension
         # e.g. "edgar/data/1234567/0001234567-94-000001.txt" → "0001234567-94-000001"
