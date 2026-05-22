@@ -145,6 +145,55 @@ def test_simplewiki_detail_404(client):
     assert r.status_code == 404
 
 
+def _redirect_fixture_conn():
+    """In-memory `articles` table exercising the redirect resolver in isolation.
+
+    Mirrors only the columns `_resolve_redirect` / `_find_by_title` touch, so it
+    runs without a real simplewiki.db. Titles are stored MediaWiki-style (spaces,
+    first letter upper); redirect bodies use varied casing on purpose.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE articles (page_id INTEGER PRIMARY KEY, title TEXT, "
+        "namespace INTEGER, text_content TEXT)"
+    )
+    rows = [
+        (1, "Animal", 0, "Animals are living things."),          # real target
+        (2, "Animalia", 0, "#redirect [[animal]]"),              # lowercase target
+        (3, "Critter", 0, "#REDIRECT [[Animalia]]"),             # chains 3->2->1
+        (4, "Loop A", 0, "#REDIRECT [[Loop B]]"),                # cycle
+        (5, "Loop B", 0, "#REDIRECT [[Loop A]]"),
+        (6, "Broken", 0, "#REDIRECT [[Nonexistent Page]]"),      # missing target
+    ]
+    conn.executemany(
+        "INSERT INTO articles (page_id, title, namespace, text_content) VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    return conn
+
+
+def test_resolve_redirect_chain_and_edge_cases():
+    """`_resolve_redirect` follows chains, normalises casing, and bails on cycles."""
+    from api.routers.simplewiki import _resolve_redirect
+
+    conn = _redirect_fixture_conn()
+
+    def resolve(page_id):
+        text = conn.execute(
+            "SELECT text_content FROM articles WHERE page_id = ?", [page_id]
+        ).fetchone()["text_content"]
+        return _resolve_redirect(conn, text, page_id)
+
+    assert resolve(2) == 1  # lowercase [[animal]] -> Animal
+    assert resolve(3) == 1  # Critter -> Animalia -> Animal
+    assert resolve(1) is None  # real article isn't a redirect
+    assert resolve(4) is None  # A<->B cycle bails out
+    assert resolve(6) is None  # target title not present
+
+
 def test_simplewiki_content_returns_wikitext(client):
     """/simplewiki/articles/{id}/content returns raw wikitext as text/plain."""
     r = client.get("/simplewiki/articles?limit=1")

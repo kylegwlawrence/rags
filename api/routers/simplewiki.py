@@ -11,7 +11,7 @@ from rag import Doc
 from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION
 from rag.embed_one import embed_doc
-from rag.wikitext import wikitext_to_markdown
+from rag.wikitext import redirect_target, wikitext_to_markdown
 
 router = APIRouter(prefix="/simplewiki", tags=["simplewiki"])
 
@@ -47,6 +47,65 @@ def _lookup(conn: sqlite3.Connection, page_id: int) -> sqlite3.Row:
     if row is None:
         raise HTTPException(status_code=404, detail=f"article {page_id} not found")
     return row
+
+
+# Cap redirect-chain length. MediaWiki disallows double redirects, but dumps
+# still contain a few, plus the occasional A→B→A cycle — bound the walk so a
+# bad chain can't loop forever or fan out into many queries.
+_MAX_REDIRECT_HOPS = 10
+
+
+def _find_by_title(conn: sqlite3.Connection, title: str) -> sqlite3.Row | None:
+    """Look up a namespace-0 article by exact title, then first-letter-capitalised.
+
+    Redirect targets in wikitext use varied casing (``[[animal]]``,
+    ``[[boot]]``); MediaWiki canonicalises the first character to upper case
+    while keeping the rest verbatim. Both lookups hit ``idx_articles_title``
+    (BINARY collation), so each is a fast index probe rather than a scan. Only
+    ``head`` (a prefix of the body) is selected so chain-following never loads a
+    multi-megabyte article body just to test whether the target is itself a
+    redirect.
+    """
+    sql = (
+        "SELECT page_id, substr(text_content, 1, 300) AS head "
+        "FROM articles WHERE namespace = 0 AND title = ? LIMIT 1"
+    )
+    row = conn.execute(sql, [title]).fetchone()
+    if row is None and title:
+        capitalised = title[0].upper() + title[1:]
+        if capitalised != title:
+            row = conn.execute(sql, [capitalised]).fetchone()
+    return row
+
+
+def _resolve_redirect(
+    conn: sqlite3.Connection, start_text: str, start_page_id: int
+) -> int | None:
+    """Follow ``start_text``'s redirect chain to the final target page_id.
+
+    Returns None when the article isn't a redirect, the target title can't be
+    matched (broken redirect), or the chain cycles / exceeds the hop cap — in
+    every "can't resolve" case the caller falls back to showing the raw stub.
+    """
+    target = redirect_target(start_text)
+    if target is None:
+        return None
+
+    visited = {start_page_id}
+    for _ in range(_MAX_REDIRECT_HOPS):
+        # Titles are stored with spaces; wikitext targets may use underscores.
+        row = _find_by_title(conn, target.replace("_", " ").strip())
+        if row is None:
+            return None
+        page_id = row["page_id"]
+        if page_id in visited:
+            return None  # cycle
+        visited.add(page_id)
+        next_target = redirect_target(row["head"])
+        if next_target is None:
+            return page_id  # reached a real article
+        target = next_target
+    return None  # chain too long
 
 
 @router.get("/articles", response_model=Page[Article])
@@ -139,8 +198,16 @@ def get_article(
     page_id: int,
     conn: sqlite3.Connection = Depends(db.simplewiki),
 ) -> Article:
-    """Return metadata for one article by page_id."""
-    return _row_to_article(_lookup(conn, page_id))
+    """Return metadata for one article by page_id.
+
+    When the article is a ``#REDIRECT`` stub, ``redirect_to`` carries the final
+    resolved target's page_id so the UI can navigate straight there. It stays
+    None for normal articles and for redirects whose target can't be resolved.
+    """
+    row = _lookup(conn, page_id)
+    article = _row_to_article(row)
+    article.redirect_to = _resolve_redirect(conn, row["text_content"] or "", page_id)
+    return article
 
 
 @router.post("/articles/{page_id}/embed", response_model=EmbedResult)

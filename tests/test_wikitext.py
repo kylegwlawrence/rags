@@ -6,7 +6,7 @@ output shape, the redirect-skip behaviour, and the File:/Image:/Category:
 wikilink stripping that the chunker depends on.
 """
 
-from rag.wikitext import is_redirect, wikitext_to_markdown
+from rag.wikitext import is_redirect, redirect_target, wikitext_to_markdown
 
 
 def test_redirect_returns_empty():
@@ -15,6 +15,27 @@ def test_redirect_returns_empty():
     assert wikitext_to_markdown("  #REDIRECT  [[Other]]") == ""
     assert is_redirect("#REDIRECT [[Other]]")
     assert not is_redirect("Just a normal paragraph.")
+
+
+def test_redirect_target_extracts_title():
+    assert redirect_target("#REDIRECT [[Catharism]]") == "Catharism"
+    assert redirect_target("#redirect [[animal]]") == "animal"
+    assert redirect_target("#REDIRECT [[Boot]]\n") == "Boot"
+    assert redirect_target("  #REDIRECT  [[ Other ]]") == "Other"
+
+
+def test_redirect_target_strips_anchor_and_display():
+    # A #section anchor and a |display suffix are both dropped, leaving the
+    # bare target title for normalisation against stored article titles.
+    assert redirect_target("#REDIRECT [[Target#Section]]") == "Target"
+    assert redirect_target("#REDIRECT [[Target|display text]]") == "Target"
+    assert redirect_target("#REDIRECT [[Target#Sec|display]]") == "Target"
+
+
+def test_redirect_target_none_for_non_redirect():
+    assert redirect_target("Just a normal paragraph.") is None
+    assert redirect_target("") is None
+    assert redirect_target(None) is None  # type: ignore[arg-type]
 
 
 def test_empty_returns_empty():

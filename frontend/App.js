@@ -55,9 +55,24 @@ export default defineComponent({
       localStorage.setItem('theme', next);
     }
 
+    // Navigate to a redirect's resolved target, tagging the target doc with the
+    // title we came from so DocView can show a "Redirected from …" note. The
+    // backend fully resolves the chain, so `targetId` is always a real article.
+    async function followRedirect(targetId, fromTitle) {
+      try {
+        const doc = await getDoc(activeSource.value, String(targetId));
+        doc.redirectedFrom = fromTitle;
+        openDoc(doc);
+      } catch (e) {
+        console.error('Failed to follow redirect:', e);
+      }
+    }
+
     // Provide openDocById so ChunksView (nested inside DocView) can call it
-    // without prop-drilling event emits through multiple levels.
+    // without prop-drilling event emits through multiple levels. followRedirect
+    // is consumed by DocView for the same reason.
     provide('openDocById', openDocById);
+    provide('followRedirect', followRedirect);
 
     return {
       activeSourceKey, activeSource, activeView, selectedDoc, theme,

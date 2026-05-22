@@ -52,6 +52,9 @@ class Article(BaseModel):
     revision_id: int
     timestamp: str
     text_bytes: int | None
+    # Final target page_id when this article is a #REDIRECT stub, else None.
+    # Only the detail endpoint resolves this; list rows leave it None.
+    redirect_to: int | None = None
 
 
 class Paper(BaseModel):

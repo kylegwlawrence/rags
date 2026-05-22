@@ -94,6 +94,10 @@ export const SOURCES = {
     chunksEndpoint: '/simplewiki/chunks',
     docChunksEndpoint: '/simplewiki/doc-chunks',
     embedEndpoint: (id) => `/simplewiki/articles/${id}/embed`,
+    // Opening a #REDIRECT stub auto-navigates to its resolved target (the
+    // detail endpoint returns `redirect_to`); the target shows a "Redirected
+    // from …" note. See DocView's checkRedirect.
+    followsRedirects: true,
     idField: 'page_id',
     titleField: 'title',
     subtitle_fn: () => '',

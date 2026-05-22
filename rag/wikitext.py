@@ -35,6 +35,9 @@ import mwparserfromhell
 
 _SECTION_RE = re.compile(r"^(={2,6})\s*(.+?)\s*\1\s*$", re.MULTILINE)
 _REDIRECT_RE = re.compile(r"^\s*#\s*REDIRECT\s*\[\[", re.IGNORECASE)
+# Captures the target title only: stops at the section anchor (#), the
+# display-text pipe (|), or the closing brackets (]).
+_REDIRECT_TARGET_RE = re.compile(r"^\s*#\s*REDIRECT\s*\[\[\s*([^\]|#]+)", re.IGNORECASE)
 _FILE_PREFIXES = ("file:", "image:", "media:")
 _CATEGORY_PREFIX = "category:"
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
@@ -53,6 +56,19 @@ _NAV_SECTIONS = frozenset({
 def is_redirect(wikitext: str) -> bool:
     """Return True if this article is a #REDIRECT stub."""
     return bool(_REDIRECT_RE.match(wikitext or ""))
+
+
+def redirect_target(wikitext: str) -> str | None:
+    """Return the target article title of a ``#REDIRECT``, or None if not one.
+
+    Drops any ``#section`` anchor and ``|display`` suffix, leaving the bare
+    target title. Whitespace and underscores are left as-is for the caller to
+    normalise against stored titles.
+    """
+    m = _REDIRECT_TARGET_RE.match(wikitext or "")
+    if m is None:
+        return None
+    return m.group(1).strip()
 
 
 def wikitext_to_markdown(wikitext: str) -> str:

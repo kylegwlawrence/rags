@@ -1,4 +1,4 @@
-import { defineComponent, ref, computed, onMounted } from '/ui/vendor/vue.esm-browser.js';
+import { defineComponent, ref, computed, onMounted, inject } from '/ui/vendor/vue.esm-browser.js';
 import { getDoc, getContent, getDocChunks, embedDoc } from '/ui/api.js';
 
 export default defineComponent({
@@ -11,6 +11,12 @@ export default defineComponent({
 
   setup(props) {
     const activeTab = ref('content');
+
+    // followsRedirects sources resolve #REDIRECT stubs to their target via the
+    // detail endpoint, then navigate there. `resolving` hides the (raw stub)
+    // content while that check is in flight so the redirect text never flashes.
+    const followRedirect = inject('followRedirect', null);
+    const resolving = ref(false);
 
     // The browse list emits a slim list row (e.g. factbook CountrySummary =
     // id/name/region) that lacks the rich `data` blob the detail endpoint
@@ -176,7 +182,28 @@ export default defineComponent({
       expandedChunks.value = new Set(expandedChunks.value);
     }
 
-    onMounted(() => {
+    // For redirect-aware sources, fetch the detail (which carries `redirect_to`)
+    // and, if this article is a resolvable redirect, hand off to the target.
+    // Returns true when a navigation was kicked off so onMounted can skip the
+    // content/chunks loads that would otherwise render the stub momentarily.
+    async function checkRedirect() {
+      if (!props.source.followsRedirects || !followRedirect) return false;
+      resolving.value = true;
+      try {
+        const d = await getDoc(props.source, props.doc[props.source.idField]);
+        if (d && d.redirect_to != null) {
+          followRedirect(d.redirect_to, d.title || props.doc[props.source.titleField]);
+          return true; // stay in resolving state; this view unmounts on nav
+        }
+      } catch (e) {
+        console.error('Redirect check failed:', e);
+      }
+      resolving.value = false;
+      return false;
+    }
+
+    onMounted(async () => {
+      if (await checkRedirect()) return;
       loadDetail();
       if (props.source.contentType !== 'none') {
         loadContent();
@@ -190,7 +217,7 @@ export default defineComponent({
     });
 
     return {
-      activeTab, content, contentLoading, contentError,
+      activeTab, resolving, content, contentLoading, contentError,
       chunks, chunksLoading, chunksError, chunksLoaded,
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel,
@@ -233,6 +260,11 @@ export default defineComponent({
 
       <!-- Content tab -->
       <div v-if="activeTab === 'content'" class="doc-view__content">
+        <div v-if="resolving" class="doc-content-state">Following redirect…</div>
+        <template v-else>
+        <p v-if="doc.redirectedFrom" class="redirect-note">
+          Redirected from "{{ doc.redirectedFrom }}"
+        </p>
         <dl class="meta-grid">
           <template v-for="f in visibleMetaFields()" :key="f.label">
             <dt class="meta-grid__key">{{ f.label }}</dt>
@@ -250,6 +282,7 @@ export default defineComponent({
         </div>
         <div v-else-if="source.contentType === 'html' && content" class="prose" v-html="content" />
         <pre v-else-if="source.contentType === 'text' && content" class="content-pre">{{ content }}</pre>
+        </template>
       </div>
 
       <!-- Chunks tab — stored chunk inspector -->

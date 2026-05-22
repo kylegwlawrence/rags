@@ -589,6 +589,13 @@ body {
   color: var(--danger);
 }
 
+.redirect-note {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-style: italic;
+  margin: 0 0 var(--space-md);
+}
+
 /* ===== Metadata grid ===================================================== */
 
 .meta-grid {
