@@ -33,11 +33,14 @@ def create_schema(cur: sqlite3.Cursor) -> None:
             form_type        TEXT,
             date_filed       TEXT,
             filename         TEXT,
-            filing_url       TEXT
+            filing_url       TEXT,
+            body             TEXT,
+            status           TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_form ON filings(form_type);
-        CREATE INDEX IF NOT EXISTS idx_date ON filings(date_filed);
-        CREATE INDEX IF NOT EXISTS idx_cik  ON filings(cik);
+        CREATE INDEX IF NOT EXISTS idx_form   ON filings(form_type);
+        CREATE INDEX IF NOT EXISTS idx_date   ON filings(date_filed);
+        CREATE INDEX IF NOT EXISTS idx_cik    ON filings(cik);
+        CREATE INDEX IF NOT EXISTS idx_status ON filings(status);
         CREATE TABLE IF NOT EXISTS ingest_state (
             id                  INTEGER PRIMARY KEY CHECK (id = 1),
             last_completed_year INTEGER,
