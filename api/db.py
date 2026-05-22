@@ -45,6 +45,7 @@ GITHUB_DB = DATA_DIR / "github" / "readmes.db"
 GITHUB_RAG_DB = DATA_DIR / "github" / "github_readmes_rag.db"
 SEC_EDGAR_DB = DATA_DIR / "sec_edgar" / "sec_edgar.db"
 SEC_EDGAR_RAG_DB = DATA_DIR / "sec_edgar" / "sec_edgar_rag.db"
+WORLDBANK_DB = DATA_DIR / "worldbank" / "worldbank.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -126,6 +127,7 @@ _wikihow: sqlite3.Connection | None = None
 _wikihow_rag: sqlite3.Connection | None = None
 _sec_edgar: sqlite3.Connection | None = None
 _sec_edgar_rag: sqlite3.Connection | None = None
+_worldbank: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -286,3 +288,11 @@ def sec_edgar_rag() -> sqlite3.Connection:
     if _sec_edgar_rag is None:
         _sec_edgar_rag = _connect_ro_with_vec(SEC_EDGAR_RAG_DB)
     return _sec_edgar_rag
+
+
+def worldbank() -> sqlite3.Connection:
+    """Cached read-only connection to worldbank.db (built by scripts/worldbank/worldbank_download.py)."""
+    global _worldbank
+    if _worldbank is None:
+        _worldbank = _connect_ro(WORLDBANK_DB)
+    return _worldbank

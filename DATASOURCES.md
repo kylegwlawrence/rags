@@ -49,4 +49,4 @@ Status of each datasource as of 2026-05-22.
 | **stackexchange** | `scripts/stackexchange/stackexchange_download.py` | Stack Exchange Q&A dumps |
 | **taxcourt** | `scripts/taxcourt/taxcourt_download.py` | US Tax Court opinions |
 | **un_treaties** | `scripts/un_treaties/un_treaties_download.py` | UN treaty collection |
-| **worldbank** | `scripts/worldbank/worldbank_data360_download.py` | World Bank Data360 indicators |
+| **worldbank** | `scripts/worldbank/worldbank_download.py` | World Bank Indicators API v2 — all 21 topic-tagged indicator groups, observations from 2021 |

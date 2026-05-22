@@ -13,6 +13,7 @@ from api.routers import (
     sec_edgar,
     simplewiki,
     wikihow,
+    worldbank,
 )
 
 app = FastAPI(title="datasets API", version="0.1.0")
@@ -26,6 +27,7 @@ app.include_router(wikihow.router)
 app.include_router(federal_register.router)
 app.include_router(github_readmes.router)
 app.include_router(sec_edgar.router)
+app.include_router(worldbank.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -59,6 +61,7 @@ def health(response: Response) -> dict:
         ("github_rag", db.github_rag),
         ("sec_edgar", db.sec_edgar),
         ("sec_edgar_rag", db.sec_edgar_rag),
+        ("worldbank", db.worldbank),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

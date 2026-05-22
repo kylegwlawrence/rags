@@ -180,3 +180,41 @@ class ChunksResponse(BaseModel):
     used_dense: bool
     top_k: int
     candidate_k: int
+
+
+class WBIndicator(BaseModel):
+    """One World Bank indicator with its topic memberships."""
+
+    id: str
+    name: str
+    unit: str | None
+    source_note: str | None
+    source_org: str | None
+    topics: list[str]
+
+
+class WBObservation(BaseModel):
+    """One observed value for an indicator in a country/year."""
+
+    country_id: str
+    country_name: str | None
+    year: int
+    value: float
+
+
+class WBCountry(BaseModel):
+    """One economy (country or regional/income aggregate) from the World Bank."""
+
+    id: str
+    name: str
+    region: str | None
+    income_level: str | None
+
+
+class WBDataPoint(BaseModel):
+    """One indicator observation returned by the country data endpoint."""
+
+    indicator_id: str
+    indicator_name: str
+    year: int
+    value: float
