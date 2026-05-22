@@ -117,7 +117,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 
 **sec_edgar**
 - `sec_edgar_download.py` — Quarterly full-index harvester (1993–present). Stores filing **metadata + URLs only**, no body text. Flags: `--db`, `--start-year`, `--end-year`, `--email` (`SEC_EMAIL` env), `--reset`. Resumes via `ingest_state`.
-- `sec_edgar_fetch_bodies.py` — **Standalone** body fetcher: downloads filing `.txt` from `filing_url`, extracts the primary document, strips HTML, stores it in a new `body` column (`status` tracks fetched/missing/error). Does **not** build any index. Defaults to 10-K, newest first, `--limit 200`. Flags: `--db`, `--form-type`, `--limit`, `--email`, `--delay`, `--reset-status`.
+- `sec_edgar_fetch_bodies.py` — **Standalone** body fetcher: downloads filing `.txt` from `filing_url`, extracts the primary document, strips HTML, stores it in a new `body` column (`status` tracks fetched/missing/error). Does **not** build any index. Defaults to 10-K, newest first, `--limit 200`. Flags: `--db`, `--accession` (fetch one filing by accession number, ignoring form-type/limit/status — always refetches), `--form-type`, `--limit`, `--email`, `--delay`, `--reset-status`.
 - `sec_edgar_index_fts.py` — Rebuilds `filings_fts` (company_name + body, fetched rows only). Required for `?q=`.
 - `sec_edgar_index_rag.py` — `sec_edgar_rag.db` over fetched bodies (`chunk_doc`, flat prose). Same flags as other RAG indexers. Restart after.
 

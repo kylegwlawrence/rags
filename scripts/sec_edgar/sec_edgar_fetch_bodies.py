@@ -150,8 +150,13 @@ def main() -> int:
     )
     parser.add_argument("--db", default=DEFAULT_DB,
                         help=f"SQLite database path (default: {DEFAULT_DB})")
+    parser.add_argument("--accession",
+                        help="Fetch a single filing by accession number (e.g. "
+                             "0000912057-94-000263), ignoring --form-type / --limit / "
+                             "status. Always refetches, even if already fetched.")
     parser.add_argument("--form-type", default="10-K",
-                        help="Only fetch filings of this form type (default: 10-K)")
+                        help="Only fetch filings of this form type (default: 10-K). "
+                             "Ignored when --accession is given.")
     parser.add_argument("--limit", type=int, default=200,
                         help="Max number of filings to fetch this run (default: 200). "
                              "Rows that already have a status are skipped.")
@@ -178,25 +183,40 @@ def main() -> int:
     ensure_columns(cur)
     con.commit()
 
-    if args.reset_status:
-        cur.execute(
-            "UPDATE filings SET status = NULL, body = NULL WHERE form_type = ?",
-            (args.form_type,),
-        )
-        con.commit()
-        print(f"Cleared status/body for {cur.rowcount} {args.form_type} filings.")
+    if args.accession:
+        # Targeted single fetch: select by unique key, ignore status so an
+        # already-fetched row is refetched on demand.
+        rows = cur.execute(
+            "SELECT accession_number, form_type, filing_url FROM filings "
+            "WHERE accession_number = ?",
+            (args.accession,),
+        ).fetchall()
+        if not rows:
+            print(f"No filing with accession number {args.accession} found "
+                  "(run sec_edgar_download.py to harvest its metadata first).",
+                  file=sys.stderr)
+            con.close()
+            return 1
+    else:
+        if args.reset_status:
+            cur.execute(
+                "UPDATE filings SET status = NULL, body = NULL WHERE form_type = ?",
+                (args.form_type,),
+            )
+            con.commit()
+            print(f"Cleared status/body for {cur.rowcount} {args.form_type} filings.")
 
-    rows = cur.execute(
-        "SELECT accession_number, form_type, filing_url FROM filings "
-        "WHERE form_type = ? AND status IS NULL "
-        "ORDER BY date_filed DESC LIMIT ?",
-        (args.form_type, args.limit),
-    ).fetchall()
+        rows = cur.execute(
+            "SELECT accession_number, form_type, filing_url FROM filings "
+            "WHERE form_type = ? AND status IS NULL "
+            "ORDER BY date_filed DESC LIMIT ?",
+            (args.form_type, args.limit),
+        ).fetchall()
 
-    if not rows:
-        print(f"No unfetched {args.form_type} filings found.")
-        con.close()
-        return 0
+        if not rows:
+            print(f"No unfetched {args.form_type} filings found.")
+            con.close()
+            return 0
 
     session = requests.Session()
     session.headers.update({"User-Agent": f"sec-edgar-fetcher {args.email}"})
