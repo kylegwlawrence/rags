@@ -17,7 +17,7 @@ import sqlite3
 from collections.abc import Iterator
 
 from rag import Doc, content_hash
-from rag.cleaner import CLEANER_VERSION
+from rag.cleaner import CLEANER_VERSION, strip_html
 
 
 def iter_docs(
@@ -48,6 +48,6 @@ def iter_docs(
             doc_id=row["repo"],
             title=row["name"] or row["repo"],
             version=f"{version}-{CLEANER_VERSION}",
-            text=readme,
+            text=strip_html(readme),
             section=None,
         )
