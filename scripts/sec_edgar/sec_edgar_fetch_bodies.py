@@ -29,11 +29,12 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from bs4 import BeautifulSoup
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from rag.cleaner import normalize_whitespace, strip_html  # noqa: E402
+from rag.cleaner import normalize_whitespace  # noqa: E402
 
 DEFAULT_DB = "data/sec_edgar/sec_edgar.db"
 DELAY = 0.15   # SEC rate limit: 10 req/sec max; 0.15s gives headroom
@@ -43,6 +44,26 @@ _DOCUMENT_RE = re.compile(r"<DOCUMENT>(.*?)</DOCUMENT>", re.DOTALL | re.IGNORECA
 _TYPE_RE = re.compile(r"<TYPE>\s*([^\n<]+)", re.IGNORECASE)
 _TEXT_RE = re.compile(r"<TEXT>(.*?)</TEXT>", re.DOTALL | re.IGNORECASE)
 _HEADER_END_RE = re.compile(r"</(?:SEC|IMS)-HEADER>", re.IGNORECASE)
+_DISPLAY_NONE_RE = re.compile(r"display\s*:\s*none", re.IGNORECASE)
+
+
+def _html_to_text(payload: str) -> str:
+    """Convert a filing's primary-document payload to plain text.
+
+    Modern 10-Ks are inline XBRL (iXBRL): the visible document is preceded by
+    an `<ix:header>` block (and/or `display:none` containers) holding thousands
+    of machine-readable tagging facts. `get_text()` would surface all of that
+    as leading noise. We decompose the hidden metadata first, then extract
+    text — leaving the *visible* `<ix:nonFraction>` / `<ix:nonNumeric>` figures
+    embedded in the narrative intact. Plain-text legacy filings pass through
+    unchanged.
+    """
+    soup = BeautifulSoup(payload, "html.parser")
+    for tag in soup.find_all(["script", "style", "ix:header"]):
+        tag.decompose()
+    for tag in soup.find_all(style=_DISPLAY_NONE_RE):
+        tag.decompose()
+    return soup.get_text(separator=" ")
 
 
 def ensure_columns(cur: sqlite3.Cursor) -> None:
@@ -92,7 +113,7 @@ def extract_primary_document(text: str, form_type: str) -> str:
         header_end = _HEADER_END_RE.search(text)
         payload = text[header_end.end():] if header_end else text
 
-    return normalize_whitespace(strip_html(payload or ""))
+    return normalize_whitespace(_html_to_text(payload or ""))
 
 
 def fetch_body(session: requests.Session, url: str) -> Optional[str]:
