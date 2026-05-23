@@ -116,6 +116,34 @@ export const SOURCES = {
     ],
   },
 
+  enwiki: {
+    key: 'enwiki',
+    label: 'enwiki',
+    subtitle: 'Full English Wikipedia (served from raspberrypi6)',
+    listEndpoint: '/enwiki/articles',
+    detailEndpoint: (id) => `/enwiki/articles/${id}`,
+    contentEndpoint: (id) => `/enwiki/articles/${id}/content`,
+    // No chunksEndpoint / embedEndpoint / followsRedirects in v1 — RAG, the
+    // live embed button, and #REDIRECT resolution are deferred. The frontend
+    // hides those UI affordances when the keys are absent.
+    idField: 'page_id',
+    titleField: 'title',
+    subtitle_fn: () => '',
+    meta_fn: (item) => item.text_bytes ? `${Math.round(item.text_bytes / 1024)} KB` : '',
+    contentType: 'text',
+    metaFields: [
+      { label: 'Page ID',   value: (d) => d.page_id },
+      { label: 'Namespace', value: (d) => d.namespace },
+      { label: 'Revision',  value: (d) => d.revision_id },
+      { label: 'Timestamp', value: (d) => d.timestamp },
+      { label: 'Size',      value: (d) => d.text_bytes ? `${Math.round(d.text_bytes / 1024)} KB` : '' },
+    ],
+    filters: [
+      { key: 'q',     label: 'Search',        type: 'text', placeholder: 'Title FTS5 (3+ chars)…' },
+      { key: 'title', label: 'Title contains', type: 'text', placeholder: 'substring' },
+    ],
+  },
+
   gutenberg: {
     key: 'gutenberg',
     label: 'Gutenberg',
@@ -342,7 +370,7 @@ export const SOURCES = {
 };
 
 export const SOURCE_ORDER = [
-  'arxiv', 'openalex', 'simplewiki', 'gutenberg',
+  'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
   'wikihow', 'pydocs', 'factbook',
   'federal_register', 'github_readmes', 'sec_edgar',
 ];
