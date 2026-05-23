@@ -1,9 +1,16 @@
+import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 
-from api import db
-from api.routers import (
+# Load .env before any router module reads its env vars at import time
+# (e.g. api.routers.enwiki reads ENWIKI_REMOTE_URL when it's imported).
+load_dotenv()
+
+from api import db  # noqa: E402
+from api.routers import (  # noqa: E402
     arxiv,
+    enwiki,
     factbook,
     federal_register,
     github_readmes,
@@ -22,6 +29,7 @@ app.include_router(factbook.router)
 app.include_router(openalex.router)
 app.include_router(gutenberg.router)
 app.include_router(simplewiki.router)
+app.include_router(enwiki.router)
 app.include_router(python_docs.router)
 app.include_router(wikihow.router)
 app.include_router(federal_register.router)
@@ -68,7 +76,23 @@ def health(response: Response) -> dict:
             status[name] = "ok"
         except Exception as e:
             status[name] = f"error: {e.__class__.__name__}: {e}"
-    ok = all(v == "ok" for v in status.values())
+
+    # enwiki lives on a remote host, not a local DB file — probe its /health
+    # over HTTP with a tight timeout so this endpoint stays snappy. Treat
+    # "not configured" as "skip" rather than "error" since the env var is
+    # optional and a developer without Tailscale shouldn't get a red /health.
+    if enwiki.REMOTE_URL:
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                r = client.get(f"{enwiki.REMOTE_URL}/health")
+            r.raise_for_status()
+            status["enwiki"] = "ok" if r.json().get("ok") else f"error: {r.json()}"
+        except Exception as e:
+            status["enwiki"] = f"error: {e.__class__.__name__}: {e}"
+    else:
+        status["enwiki"] = "skipped: ENWIKI_REMOTE_URL not set"
+
+    ok = all(v == "ok" or v.startswith("skipped") for v in status.values())
     if not ok:
         response.status_code = 503
     return {"ok": ok, "databases": status}
