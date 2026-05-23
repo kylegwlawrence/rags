@@ -119,7 +119,7 @@ export const SOURCES = {
   enwiki: {
     key: 'enwiki',
     label: 'enwiki',
-    subtitle: 'Full English Wikipedia (served from raspberrypi6)',
+    subtitle: 'Full English Wikipedia',
     listEndpoint: '/enwiki/articles',
     detailEndpoint: (id) => `/enwiki/articles/${id}`,
     contentEndpoint: (id) => `/enwiki/articles/${id}/content`,
