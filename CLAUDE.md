@@ -172,6 +172,11 @@ Indexes are created by downloader/indexer scripts (API is read-only). Add `CREAT
 
 - Always ask clarifying questions before starting a coding task.
 - Always pause and confirm before committing to git.
+- Never run any indexer with `--reset` (or any other DB-wiping flag) without first
+  describing what it will destroy and getting an explicit "yes" — rebuilds take
+  hours on local Ollama and the data is gitignored. This applies to all the
+  `scripts/*_index_*.py` scripts, the worldbank downloader's `--reset`, and any
+  similar destructive flag elsewhere.
 - Speak simply in plain terms — avoid unnecessary software jargon.
 - Python: PEP 8, docstrings, code comments, type hints.
 - Prefer stdlib; exceptions in `rag/`: `langchain-text-splitters` (chunker), `beautifulsoup4` (HTML stripping), `mwparserfromhell` (wikitext parsing).
