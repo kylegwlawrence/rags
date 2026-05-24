@@ -27,6 +27,7 @@ from pathlib import Path
 
 from rag import Doc, embedder, schema
 from rag.chunker import chunk_doc
+from rag.schema import delete_doc_chunks
 
 
 def run_indexer(
@@ -161,16 +162,9 @@ def _run(
             )
         v_iter = iter(vectors)
         for doc, chunks in batch_docs:
-            # Order matters: chunks_vec is a sqlite-vec virtual table and FK
-            # cascade doesn't reach it, so its rows must be cleared explicitly
-            # before the chunks rows that reference them go away.
-            rag_conn.execute(
-                "DELETE FROM chunks_vec WHERE chunk_id IN "
-                "(SELECT chunk_id FROM chunks WHERE doc_id = ?)",
-                (doc.doc_id,),
-            )
-            rag_conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc.doc_id,))
-            rag_conn.execute("DELETE FROM docs_meta WHERE doc_id = ?", (doc.doc_id,))
+            # No FTS sync here — the batch indexer rebuilds chunks_fts once
+            # at end of run, so per-doc FTS deletes would just be wasted work.
+            delete_doc_chunks(rag_conn, doc.doc_id, sync_fts=False)
             rag_conn.execute(
                 "INSERT INTO docs_meta(doc_id, version, title, chunk_count, indexed_at) "
                 "VALUES (?, ?, ?, ?, datetime('now'))",

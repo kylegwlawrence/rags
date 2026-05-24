@@ -100,3 +100,56 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
         "INSERT OR REPLACE INTO _meta(key, value) VALUES (?, ?)",
         (key, value),
     )
+
+
+def delete_doc_chunks(
+    conn: sqlite3.Connection,
+    doc_id: str,
+    *,
+    sync_fts: bool = False,
+) -> None:
+    """Remove a doc's chunks, vectors, optional FTS entries, and docs_meta row.
+
+    Two callers, two FTS strategies:
+
+    * `rag.embed_one.embed_doc` calls with ``sync_fts=True`` so a live single-
+      doc embed keeps the FTS index current — it issues per-chunk
+      ``chunks_fts('delete', rowid, text)`` rows before dropping the
+      backing ``chunks`` rows.
+    * `rag.indexer._run.flush()` calls with ``sync_fts=False`` because the
+      batch indexer does one ``chunks_fts('rebuild')`` at the end of the run;
+      per-doc FTS deletes would just be wasted work.
+
+    Order matters: ``chunks_vec`` is a sqlite-vec virtual table whose rows
+    aren't reached by the ``chunks.doc_id`` foreign-key cascade, so they
+    must be cleared explicitly *before* the backing chunks rows go away.
+    Caller is responsible for ``commit()``.
+    """
+    if sync_fts:
+        rows = conn.execute(
+            "SELECT chunk_id, text FROM chunks WHERE doc_id = ?", (doc_id,)
+        ).fetchall()
+        if rows:
+            ids = [r["chunk_id"] for r in rows]
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"DELETE FROM chunks_vec WHERE chunk_id IN ({placeholders})", ids
+            )
+            for r in rows:
+                conn.execute(
+                    "INSERT INTO chunks_fts(chunks_fts, rowid, text) "
+                    "VALUES('delete', ?, ?)",
+                    (r["chunk_id"], r["text"]),
+                )
+            conn.execute(
+                f"DELETE FROM chunks WHERE chunk_id IN ({placeholders})", ids
+            )
+    else:
+        # Subquery form skips the SELECT round-trip the batch indexer doesn't need.
+        conn.execute(
+            "DELETE FROM chunks_vec WHERE chunk_id IN "
+            "(SELECT chunk_id FROM chunks WHERE doc_id = ?)",
+            (doc_id,),
+        )
+        conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+    conn.execute("DELETE FROM docs_meta WHERE doc_id = ?", (doc_id,))

@@ -16,36 +16,7 @@ from collections.abc import Callable
 
 from rag import Doc, embedder
 from rag.chunker import chunk_doc
-
-
-def _delete_doc(rag_conn: sqlite3.Connection, doc_id: str) -> None:
-    """Remove a doc's chunks, vectors, FTS entries, and meta row.
-
-    `chunks_vec` (a sqlite-vec virtual table) and `chunks_fts` (an
-    external-content FTS5 table) are not reached by the `chunks.doc_id` foreign
-    key cascade, so both are cleared explicitly before the `chunks` rows they
-    mirror. FTS deletions use the `'delete'` command form, which needs the
-    original text to locate the index entry.
-    """
-    rows = rag_conn.execute(
-        "SELECT chunk_id, text FROM chunks WHERE doc_id = ?", (doc_id,)
-    ).fetchall()
-    if rows:
-        ids = [r["chunk_id"] for r in rows]
-        placeholders = ",".join("?" * len(ids))
-        rag_conn.execute(
-            f"DELETE FROM chunks_vec WHERE chunk_id IN ({placeholders})", ids
-        )
-        for r in rows:
-            rag_conn.execute(
-                "INSERT INTO chunks_fts(chunks_fts, rowid, text) "
-                "VALUES('delete', ?, ?)",
-                (r["chunk_id"], r["text"]),
-            )
-        rag_conn.execute(
-            f"DELETE FROM chunks WHERE chunk_id IN ({placeholders})", ids
-        )
-    rag_conn.execute("DELETE FROM docs_meta WHERE doc_id = ?", (doc_id,))
+from rag.schema import delete_doc_chunks
 
 
 def embed_doc(
@@ -92,7 +63,7 @@ def embed_doc(
     )
 
     if not chunks:
-        _delete_doc(rag_conn, doc.doc_id)
+        delete_doc_chunks(rag_conn, doc.doc_id, sync_fts=True)
         rag_conn.commit()
         return 0
 
@@ -106,7 +77,7 @@ def embed_doc(
         )
 
     # Embedding succeeded — now it's safe to mutate the DB.
-    _delete_doc(rag_conn, doc.doc_id)
+    delete_doc_chunks(rag_conn, doc.doc_id, sync_fts=True)
     rag_conn.execute(
         "INSERT INTO docs_meta(doc_id, version, title, chunk_count, indexed_at) "
         "VALUES (?, ?, ?, ?, datetime('now'))",
