@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import Page, Paper
 
 router = APIRouter(prefix="/arxiv", tags=["arxiv"])
@@ -207,7 +207,7 @@ def list_papers(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 
-    with translate_fts_errors("arxiv", "arxiv_index_fts.py", "data/arxiv/arxiv.db"):
+    with translate_table_errors("arxiv", "arxiv_index_fts.py", "data/arxiv/arxiv.db"):
         total = conn.execute(
             f"SELECT COUNT(*) FROM {from_clause} {where}", params
         ).fetchone()[0]
@@ -215,20 +215,20 @@ def list_papers(
             f"SELECT papers.id, papers.title, papers.abstract, "
             f"       papers.primary_category, papers.categories, "
             f"       papers.submitted_date, papers.updated_date, papers.doi, "
-            f"       papers.journal_ref, papers.comments, papers.download_status, "
-            f"       papers.html_content "
+            f"       papers.journal_ref, papers.comments, papers.download_status "
             f"FROM {from_clause} {where} ORDER BY {order} LIMIT ? OFFSET ?",
             [*params, limit, offset],
         ).fetchall()
 
-    # translate_fts_errors maps missing-table errors to 503; it's generic
-    # over the operational-vs-syntax distinction, so re-use it here for the
-    # paper_authors / authors join too. If the user shipped this commit
-    # without running arxiv_normalize_authors.py (legacy DB) or
-    # arxiv_ingest.py (fresh DB), the tables don't exist and we want a
-    # 503 with the right hint, not a generic 500.
-    with translate_fts_errors(
-        "arxiv", "arxiv_normalize_authors.py", "data/arxiv/arxiv.db"
+    # Re-use translate_table_errors for the paper_authors / authors join: if a
+    # legacy DB predates Phase-3 normalization, the tables don't exist and we
+    # want a 503 with the right hint. sql_error_is_user_input=False because a
+    # malformed-SQL error here is the codebase's bug, not the caller's.
+    with translate_table_errors(
+        "arxiv",
+        "arxiv_normalize_authors.py",
+        "data/arxiv/arxiv.db",
+        sql_error_is_user_input=False,
     ):
         authors_by_paper = _fetch_authors_many(conn, [r["id"] for r in rows])
     return Page[Paper](
@@ -269,8 +269,11 @@ def get_paper(
     `cond-mat/0204015`) match cleanly.
     """
     row = _lookup_meta(conn, paper_id)
-    with translate_fts_errors(
-        "arxiv", "arxiv_normalize_authors.py", "data/arxiv/arxiv.db"
+    with translate_table_errors(
+        "arxiv",
+        "arxiv_normalize_authors.py",
+        "data/arxiv/arxiv.db",
+        sql_error_is_user_input=False,
     ):
         authors = _fetch_authors_one(conn, paper_id)
     return _row_to_paper(row, authors)

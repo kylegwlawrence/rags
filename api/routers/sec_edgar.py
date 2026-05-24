@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import DownloadResult, Page, SecEdgarFiling
 from rag.sec_filing import download_filing_body
 
@@ -155,7 +155,7 @@ def list_filings(
     else:
         order = "filings.date_filed DESC, filings.accession_number DESC"
 
-    with translate_fts_errors(
+    with translate_table_errors(
         "sec_edgar",
         "sec_edgar/sec_edgar_index_fts.py",
         "data/sec_edgar/sec_edgar.db",

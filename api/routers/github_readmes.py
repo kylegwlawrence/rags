@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import GithubReadme, Page
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -86,7 +86,7 @@ def list_readmes(
     where = "WHERE " + " AND ".join(clauses)
     order = "bm25(readmes_fts) ASC" if q is not None else "readmes.repo ASC"
 
-    with translate_fts_errors(
+    with translate_table_errors(
         "github",
         "github_readmes/github_readmes_index_fts.py",
         "data/github/readmes.db",

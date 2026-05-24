@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import Page, WikihowArticle
 
 router = APIRouter(prefix="/wikihow", tags=["wikihow"])
@@ -90,7 +90,7 @@ def list_articles(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = "bm25(articles_fts) ASC" if q is not None else "articles.id ASC"
 
-    with translate_fts_errors("wikihow", "wikihow/wikihow_index_fts.py", "data/wikihow/wikihow.db"):
+    with translate_table_errors("wikihow", "wikihow/wikihow_index_fts.py", "data/wikihow/wikihow.db"):
         total = conn.execute(
             f"SELECT COUNT(*) FROM {from_clause} {where}", params
         ).fetchone()[0]

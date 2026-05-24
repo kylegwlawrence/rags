@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import Page, Work
 
 router = APIRouter(prefix="/openalex", tags=["openalex"])
@@ -94,7 +94,7 @@ def get_work(
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"work {short_id!r} not found")
-    with translate_fts_errors(
+    with translate_table_errors(
         "openalex", "openalex_normalize_authors.py", "data/openalex/openalex.db"
     ):
         authors = _fetch_authors_one(conn, full)
@@ -166,7 +166,7 @@ def list_works(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 
-    with translate_fts_errors(
+    with translate_table_errors(
         "openalex", "openalex_index_fts.py", "data/openalex/openalex.db"
     ):
         total = conn.execute(
@@ -179,7 +179,7 @@ def list_works(
             [*params, limit, offset],
         ).fetchall()
 
-    with translate_fts_errors(
+    with translate_table_errors(
         "openalex", "openalex_normalize_authors.py", "data/openalex/openalex.db"
     ):
         authors_by_work = _fetch_authors_many(conn, [r["id"] for r in rows])

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import Page, PydocsDoc
 
 router = APIRouter(prefix="/pydocs", tags=["pydocs"])
@@ -84,7 +84,7 @@ def list_docs(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = "bm25(docs_fts) ASC" if q is not None else "docs.doc_path ASC"
 
-    with translate_fts_errors("pydocs", "python_docs/python_docs_index_fts.py", "data/pydocs/python_docs.db"):
+    with translate_table_errors("pydocs", "python_docs/python_docs_index_fts.py", "data/pydocs/python_docs.db"):
         total = conn.execute(
             f"SELECT COUNT(*) FROM {from_clause} {where}", params
         ).fetchone()[0]

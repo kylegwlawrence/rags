@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import FederalRegisterDoc, Page
 
 router = APIRouter(prefix="/federal_register", tags=["federal_register"])
@@ -98,7 +98,7 @@ def list_documents(
     else:
         order = "documents.publication_date DESC, documents.document_number DESC"
 
-    with translate_fts_errors(
+    with translate_table_errors(
         "federal_register",
         "federal_register/federal_register_index_fts.py",
         "data/federal_register/federal_register.db",

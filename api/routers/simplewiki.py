@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api._fts import translate_fts_errors
+from api._fts import translate_table_errors
 from api.models import Article, EmbedResult, Page
 from rag import Doc
 from rag.chunker import chunk_markdown
@@ -177,7 +177,7 @@ def list_articles(
         params.append(f"%{title}%")
     where = "WHERE " + " AND ".join(clauses)
 
-    with translate_fts_errors("simplewiki", "simplewiki_parse.py", "data/simplewiki/simplewiki.db"):
+    with translate_table_errors("simplewiki", "simplewiki_parse.py", "data/simplewiki/simplewiki.db"):
         total = conn.execute(
             f"SELECT COUNT(*) FROM articles {where}", params
         ).fetchone()[0]

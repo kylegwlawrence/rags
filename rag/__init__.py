@@ -1,9 +1,18 @@
-"""Shared RAG primitives: chunking, embedding, hybrid retrieval.
+"""Shared RAG primitives plus any source-specific code reused by the API.
 
+Mostly generic: chunking, embedding, hybrid retrieval, the rag-DB schema.
 Each datasource has its own `data/<source>/<source>_rag.db` with a uniform
-schema (chunks, chunks_fts, chunks_vec, docs_meta, _meta). The reader API and
-the indexer scripts both import this package; per-source "extractor" code
-lives next to its indexer script under `scripts/`.
+schema (chunks, chunks_fts, chunks_vec, docs_meta, _meta). The reader API
+and the indexer scripts both import this package; most per-source "extractor"
+code lives next to its indexer script under `scripts/`.
+
+A few modules here are source-specific extractors that live in `rag/` only
+because both a script and the API need to import them — keeping them under
+`scripts/<source>/` would force the API to sys.path-mangle to reach them:
+
+- `rag.wikitext`   — simplewiki / enwiki wikitext → markdown
+- `rag.render`     — arxiv LaTeXML HTML → markdown
+- `rag.sec_filing` — SEC EDGAR submission fetch + primary-document extraction
 
 The embedding model is locked to `nomic-embed-text:v1.5` at 768 dimensions.
 Changing the model means rebuilding every `<source>_rag.db` from scratch.
