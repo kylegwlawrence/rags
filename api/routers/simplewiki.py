@@ -11,18 +11,15 @@ from rag import Doc
 from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION
 from rag.embed_one import embed_doc
+from rag.profiles import SIMPLEWIKI as _PROFILE
 from rag.wikitext import redirect_target, wikitext_to_markdown
 
 router = APIRouter(prefix="/simplewiki", tags=["simplewiki"])
 
-# Live-embed chunk settings. Keep in sync with the argparse defaults in
-# scripts/simplewiki/simplewiki_index_rag.py so an article embedded via the
-# button chunks identically to one embedded by a full batch indexer run.
-# Tuned smaller than the 1500 baseline for tighter, single-idea chunks — more
-# accurate retrieval with small Ollama embed/reader models (~200 tokens/chunk).
-_CHUNK_SIZE = 800
-_MAX_CHUNK_SIZE = 1000
-_OVERLAP = 100
+# Live-embed chunk settings come from `rag.profiles.SIMPLEWIKI` — the same
+# profile that `scripts/simplewiki/simplewiki_index_rag.py` uses, so an
+# article embedded via the button chunks identically to one embedded by a
+# full batch indexer run.
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:
@@ -271,9 +268,9 @@ def embed_article(
             rag_conn,
             doc,
             chunk_fn=chunk_markdown,
-            chunk_size=_CHUNK_SIZE,
-            overlap=_OVERLAP,
-            max_chunk_size=_MAX_CHUNK_SIZE,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
         )
     except httpx.HTTPError as e:
         raise HTTPException(
