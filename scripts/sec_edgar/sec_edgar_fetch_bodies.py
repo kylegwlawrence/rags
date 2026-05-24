@@ -71,8 +71,8 @@ def main() -> int:
                         help="Max number of filings to fetch this run (default: 200). "
                              "Rows that already have a status are skipped.")
     parser.add_argument("--email",
-                        default=os.environ.get("SEC_EMAIL", "kylegwlawrence@gmail.com"),
-                        help="Contact email for SEC User-Agent header (or set SEC_EMAIL env var)")
+                        default=os.environ.get("SEC_EMAIL"),
+                        help="Contact email for SEC User-Agent header. Required (or set SEC_EMAIL env var).")
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                         help=f"Seconds between requests (default: {DEFAULT_DELAY})")
     parser.add_argument("--reset-status", action="store_true",
@@ -82,6 +82,8 @@ def main() -> int:
 
     if args.limit < 1:
         parser.error("--limit must be a positive integer")
+    if not args.email:
+        parser.error("--email is required (or set SEC_EMAIL env var)")
 
     db_path = Path(args.db)
     if not db_path.is_file():

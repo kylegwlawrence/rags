@@ -54,7 +54,6 @@ export const SOURCES = {
     chunksEndpoint: '/openalex/chunks',
     docChunksEndpoint: '/openalex/doc-chunks',
     idField: 'id',
-    docIdField: 'openalex_url',
     titleField: 'title',
     subtitle_fn: (item) => (item.authors || []).slice(0, 3).join(', '),
     meta_fn: (item) => [item.year, item.venue].filter(Boolean).join(' · '),
@@ -322,6 +321,34 @@ export const SOURCES = {
     ],
   },
 
+  worldbank: {
+    key: 'worldbank',
+    label: 'World Bank',
+    subtitle: 'Indicator data',
+    listEndpoint: '/worldbank/indicators',
+    detailEndpoint: (id) => `/worldbank/indicators/${id}`,
+    // No content endpoint; the indicator's "body" is the values table fetched
+    // separately via valuesEndpoint and rendered as a table by DocView.
+    contentEndpoint: null,
+    valuesEndpoint: (id) => `/worldbank/indicators/${id}/values`,
+    idField: 'id',
+    titleField: 'name',
+    subtitle_fn: (item) => item.unit || '',
+    meta_fn: (item) => (item.topics || []).slice(0, 2).join(' · '),
+    contentType: 'values',
+    metaFields: [
+      { label: 'ID',          value: (d) => d.id },
+      { label: 'Unit',        value: (d) => d.unit },
+      { label: 'Source',      value: (d) => d.source_org },
+      { label: 'Topics',      value: (d) => (d.topics || []).join(', ') },
+      { label: 'Description', value: (d) => d.source_note },
+    ],
+    filters: [
+      { key: 'q',     label: 'Search', type: 'text',   placeholder: 'substring of indicator name' },
+      { key: 'topic', label: 'Topic',  type: 'number', placeholder: 'topic id 1–21' },
+    ],
+  },
+
   sec_edgar: {
     key: 'sec_edgar',
     label: 'SEC EDGAR',
@@ -371,6 +398,6 @@ export const SOURCES = {
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
-  'wikihow', 'pydocs', 'factbook',
+  'wikihow', 'pydocs', 'factbook', 'worldbank',
   'federal_register', 'github_readmes', 'sec_edgar',
 ];

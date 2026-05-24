@@ -106,3 +106,20 @@ export async function downloadDoc(source, id) {
   const resp = await _fetch(source.downloadEndpoint(id), { method: 'POST' });
   return resp.json();
 }
+
+/**
+ * Fetch the values/observations associated with a document.
+ * Only available for sources whose config defines `valuesEndpoint`
+ * (e.g. World Bank indicators, where the document is metadata and the data
+ * lives in a separate table).
+ *
+ * @param {object} source
+ * @param {string|number} id
+ * @param {number} limit
+ * @returns {Promise<{items: any[], total: number, limit: number, offset: number}>}
+ */
+export async function getValues(source, id, limit = 200) {
+  const params = new URLSearchParams({ limit });
+  const resp = await _fetch(`${source.valuesEndpoint(id)}?${params}`);
+  return resp.json();
+}

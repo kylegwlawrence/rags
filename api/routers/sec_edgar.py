@@ -11,8 +11,24 @@ from rag.sec_filing import download_filing_body
 
 router = APIRouter(prefix="/sec_edgar", tags=["sec_edgar"])
 
-# Contact address advertised to SEC when downloading a filing on demand.
-_SEC_EMAIL = os.environ.get("SEC_EMAIL", "kylegwlawrence@gmail.com")
+# Contact address advertised to SEC when downloading a filing on demand. SEC
+# rejects requests without an identifying User-Agent, so this is required —
+# resolved at request time rather than import so an unset env var doesn't
+# break the rest of the router.
+_SEC_EMAIL_ENV = "SEC_EMAIL"
+
+
+def _require_sec_email() -> str:
+    email = os.environ.get(_SEC_EMAIL_ENV)
+    if not email:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{_SEC_EMAIL_ENV} env var is not set; cannot identify to SEC. "
+                "Set it to your contact address (e.g. via .env) and restart uvicorn."
+            ),
+        )
+    return email
 
 
 def _row_to_filing(row: sqlite3.Row) -> SecEdgarFiling:
@@ -186,7 +202,7 @@ def download_filing(
             status_code=422, detail="filing has no filing_url to download from"
         )
 
-    body = download_filing_body(filing_url, row["form_type"] or "", _SEC_EMAIL)
+    body = download_filing_body(filing_url, row["form_type"] or "", _require_sec_email())
     if body is None:
         status, stored = "error", None
     elif body.strip():

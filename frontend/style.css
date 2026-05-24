@@ -717,6 +717,35 @@ body {
   padding-left: var(--space-lg);
 }
 
+/* ===== Values table (worldbank) ========================================== */
+
+.values-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: var(--space-md);
+}
+
+.values-table th,
+.values-table td {
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.values-table th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+}
+
+.values-table td:last-child {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 /* ===== Content rendering ================================================= */
 
 .content-pre {
