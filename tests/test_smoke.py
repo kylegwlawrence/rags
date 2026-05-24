@@ -46,6 +46,14 @@ HEALTH_DBS = (
     "simplewiki", "simplewiki_rag",
     "pydocs", "pydocs_rag",
     "wikihow", "wikihow_rag",
+    "federal_register", "federal_register_rag",
+    "github", "github_rag",
+    "sec_edgar", "sec_edgar_rag",
+    "worldbank",
+    # enwiki is remote (HTTP probe in main.py) so it shows up too unless the
+    # ENWIKI_REMOTE_URL env var is unset, in which case the entry says
+    # "skipped:". Either way it's a key in body["databases"], so include it.
+    "enwiki",
 )
 
 # Repo-relative path to each source's rag indexer script. Most sources have

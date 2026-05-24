@@ -20,8 +20,20 @@ def _row_to_doc(row: sqlite3.Row) -> PydocsDoc:
     )
 
 
-def _lookup(conn: sqlite3.Connection, doc_path: str) -> sqlite3.Row:
-    """Fetch a `docs` row by doc_path or raise 404."""
+def _lookup_meta(conn: sqlite3.Connection, doc_path: str) -> sqlite3.Row:
+    """Fetch a `docs` row's metadata (no body) by doc_path or raise 404."""
+    row = conn.execute(
+        "SELECT doc_path, section, title, length(content) AS content_chars "
+        "FROM docs WHERE doc_path = ?",
+        [doc_path],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"doc {doc_path!r} not found")
+    return row
+
+
+def _lookup_with_body(conn: sqlite3.Connection, doc_path: str) -> sqlite3.Row:
+    """Fetch a `docs` row including `content` body by doc_path or raise 404."""
     row = conn.execute(
         "SELECT doc_path, section, title, content, "
         "       length(content) AS content_chars "
@@ -105,7 +117,7 @@ def get_doc_content(
     markdown-rendered body in chunked form for retrieval; downstream tools
     that want different formatting can pipe this through their own renderer.
     """
-    row = _lookup(conn, doc_path)
+    row = _lookup_with_body(conn, doc_path)
     if not row["content"]:
         raise HTTPException(status_code=404, detail="doc has no body")
     return Response(content=row["content"], media_type="text/plain; charset=utf-8")
@@ -120,7 +132,7 @@ def get_doc(
 
     `{doc_path:path}` so the slash in path-style ids matches cleanly.
     """
-    return _row_to_doc(_lookup(conn, doc_path))
+    return _row_to_doc(_lookup_meta(conn, doc_path))
 
 
 add_chunks_route(

@@ -43,13 +43,33 @@ def _row_to_filing(row: sqlite3.Row) -> SecEdgarFiling:
     )
 
 
-def _lookup(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row:
-    # No status filter: metadata-only filings (body not yet downloaded) are
-    # reachable here so the detail view can show them and offer a download.
+_META_COLS = (
+    "accession_number, company_name, cik, form_type, date_filed, "
+    "filing_url, status, length(body) AS body_chars"
+)
+
+
+def _lookup_meta(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row:
+    """Fetch a `filings` row's metadata (no body) by accession or raise 404.
+
+    `length(body)` runs over the BLOB header alone, so it's cheap even when
+    the body is hundreds of KB. No status filter: metadata-only filings
+    (body not yet downloaded) are reachable so the detail view can show
+    them and offer a download.
+    """
     row = conn.execute(
-        "SELECT accession_number, company_name, cik, form_type, date_filed, "
-        "       filing_url, body, status, length(body) AS body_chars "
-        "FROM filings WHERE accession_number = ?",
+        f"SELECT {_META_COLS} FROM filings WHERE accession_number = ?",
+        [accession_number],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"filing {accession_number!r} not found")
+    return row
+
+
+def _lookup_with_body(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row:
+    """Fetch a `filings` row including `body` text by accession or raise 404."""
+    row = conn.execute(
+        f"SELECT {_META_COLS}, body FROM filings WHERE accession_number = ?",
         [accession_number],
     ).fetchone()
     if row is None:
@@ -166,7 +186,7 @@ def get_filing_content(
     conn: sqlite3.Connection = Depends(db.sec_edgar),
 ) -> Response:
     """Return the extracted body text for one filing as text/plain."""
-    row = _lookup(conn, accession_number)
+    row = _lookup_with_body(conn, accession_number)
     if not row["body"]:
         raise HTTPException(status_code=404, detail="filing has no text content")
     return Response(content=row["body"], media_type="text/plain; charset=utf-8")
@@ -195,7 +215,7 @@ def download_filing(
     Building the FTS / RAG search indexes over the new body stays a separate
     batch step (`sec_edgar_index_fts.py` / `sec_edgar_index_rag.py`).
     """
-    row = _lookup(conn, accession_number)
+    row = _lookup_meta(conn, accession_number)
     filing_url = row["filing_url"]
     if not filing_url:
         raise HTTPException(
@@ -244,7 +264,7 @@ def get_filing(
     conn: sqlite3.Connection = Depends(db.sec_edgar),
 ) -> SecEdgarFiling:
     """Return metadata for one SEC EDGAR filing by accession number."""
-    return _row_to_filing(_lookup(conn, accession_number))
+    return _row_to_filing(_lookup_meta(conn, accession_number))
 
 
 add_chunks_route(

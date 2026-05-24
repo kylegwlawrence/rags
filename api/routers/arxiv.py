@@ -45,17 +45,36 @@ def _row_to_paper(row: sqlite3.Row, authors: list[str]) -> Paper:
     )
 
 
-def _lookup(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
-    """Fetch a `papers` row by id or raise 404.
+_META_COLS = (
+    "id, title, abstract, primary_category, categories, "
+    "submitted_date, updated_date, doi, journal_ref, comments, "
+    "download_status"
+)
 
-    Mirrors the gutenberg `_lookup` helper — both detail and content endpoints
-    need the same fetch-or-404 step, so it lives in one place.
+
+def _lookup_meta(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
+    """Fetch a `papers` row's metadata (no body) by id or raise 404.
+
+    Used by the detail endpoint, which only reports `has_html` from
+    `download_status` — fetching `html_content` here would pull a multi-MB
+    body off disk on every detail request just to throw it away.
     """
     row = conn.execute(
-        "SELECT id, title, abstract, primary_category, categories, "
-        "       submitted_date, updated_date, doi, journal_ref, comments, "
-        "       download_status, html_content "
-        "FROM papers WHERE id = ?",
+        f"SELECT {_META_COLS} FROM papers WHERE id = ?",
+        [paper_id],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
+    return row
+
+
+def _lookup_with_body(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
+    """Fetch a `papers` row including `html_content` by id or raise 404.
+
+    Used by the content endpoint where the body is the response payload.
+    """
+    row = conn.execute(
+        f"SELECT {_META_COLS}, html_content FROM papers WHERE id = ?",
         [paper_id],
     ).fetchone()
     if row is None:
@@ -233,7 +252,7 @@ def get_paper_content(
     why. Content lives in the DB column, not on disk — gutenberg's FileResponse
     pattern doesn't apply here.
     """
-    row = _lookup(conn, paper_id)
+    row = _lookup_with_body(conn, paper_id)
     if row["html_content"] is None:
         raise HTTPException(status_code=404, detail="paper has no downloaded HTML")
     return Response(content=row["html_content"], media_type="text/html; charset=utf-8")
@@ -249,7 +268,7 @@ def get_paper(
     `{paper_id:path}` so old-style ids with embedded slashes (e.g.
     `cond-mat/0204015`) match cleanly.
     """
-    row = _lookup(conn, paper_id)
+    row = _lookup_meta(conn, paper_id)
     with translate_fts_errors(
         "arxiv", "arxiv_normalize_authors.py", "data/arxiv/arxiv.db"
     ):

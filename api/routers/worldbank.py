@@ -19,6 +19,7 @@ def _get_indicator_row(conn: sqlite3.Connection, indicator_id: str) -> sqlite3.R
 
 
 def _topics_for(conn: sqlite3.Connection, indicator_id: str) -> list[str]:
+    """Topic names for a single indicator. Use `_topics_for_many` in list paths."""
     return [
         r[0]
         for r in conn.execute(
@@ -31,14 +32,39 @@ def _topics_for(conn: sqlite3.Connection, indicator_id: str) -> list[str]:
     ]
 
 
-def _row_to_indicator(conn: sqlite3.Connection, row: sqlite3.Row) -> WBIndicator:
+def _topics_for_many(
+    conn: sqlite3.Connection, indicator_ids: list[str]
+) -> dict[str, list[str]]:
+    """Batch the per-indicator topic lookup so list_indicators is one query.
+
+    Returns ``{indicator_id: [topic_name, ...]}`` ordered by topic id. Without
+    this, rendering a page of 200 indicators triggers 200 separate queries
+    (one per `_row_to_indicator` call).
+    """
+    if not indicator_ids:
+        return {}
+    placeholders = ",".join("?" * len(indicator_ids))
+    rows = conn.execute(
+        f"""SELECT it.indicator_id, t.name FROM indicator_topics it
+            JOIN topics t ON t.id = it.topic_id
+            WHERE it.indicator_id IN ({placeholders})
+            ORDER BY it.indicator_id, t.id""",
+        indicator_ids,
+    ).fetchall()
+    out: dict[str, list[str]] = {iid: [] for iid in indicator_ids}
+    for r in rows:
+        out[r["indicator_id"]].append(r["name"])
+    return out
+
+
+def _row_to_indicator(row: sqlite3.Row, topics: list[str]) -> WBIndicator:
     return WBIndicator(
         id=row["id"],
         name=row["name"],
         unit=row["unit"],
         source_note=row["source_note"],
         source_org=row["source_org"],
-        topics=_topics_for(conn, row["id"]),
+        topics=topics,
     )
 
 
@@ -78,8 +104,9 @@ def list_indicators(
         [*params, limit, offset],
     ).fetchall()
 
+    topics_by_id = _topics_for_many(conn, [r["id"] for r in rows])
     return Page[WBIndicator](
-        items=[_row_to_indicator(conn, r) for r in rows],
+        items=[_row_to_indicator(r, topics_by_id.get(r["id"], [])) for r in rows],
         total=total,
         limit=limit,
         offset=offset,
@@ -185,7 +212,8 @@ def get_indicator(
     conn: sqlite3.Connection = Depends(db.worldbank),
 ) -> WBIndicator:
     """Return metadata for one indicator by its World Bank ID (e.g. NY.GDP.MKTP.CD)."""
-    return _row_to_indicator(conn, _get_indicator_row(conn, indicator_id))
+    row = _get_indicator_row(conn, indicator_id)
+    return _row_to_indicator(row, _topics_for(conn, indicator_id))
 
 
 @router.get("/countries", response_model=Page[WBCountry])

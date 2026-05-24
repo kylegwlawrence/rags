@@ -20,7 +20,21 @@ def _row_to_readme(row: sqlite3.Row) -> GithubReadme:
     )
 
 
-def _lookup(conn: sqlite3.Connection, repo: str) -> sqlite3.Row:
+def _lookup_meta(conn: sqlite3.Connection, repo: str) -> sqlite3.Row:
+    """Fetch a `readmes` row's metadata (no body) by repo or raise 404."""
+    row = conn.execute(
+        "SELECT repo, owner, name, source_list, status, "
+        "       length(readme) AS readme_chars "
+        "FROM readmes WHERE repo = ? AND status = 'fetched'",
+        [repo],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"readme {repo!r} not found")
+    return row
+
+
+def _lookup_with_body(conn: sqlite3.Connection, repo: str) -> sqlite3.Row:
+    """Fetch a `readmes` row including `readme` body by repo or raise 404."""
     row = conn.execute(
         "SELECT repo, owner, name, source_list, status, readme, "
         "       length(readme) AS readme_chars "
@@ -102,7 +116,7 @@ def get_readme_content(
     conn: sqlite3.Connection = Depends(db.github),
 ) -> Response:
     """Return the raw README markdown for one repository as text/plain."""
-    row = _lookup(conn, repo)
+    row = _lookup_with_body(conn, repo)
     if not row["readme"]:
         raise HTTPException(status_code=404, detail="README has no content")
     return Response(content=row["readme"], media_type="text/plain; charset=utf-8")
@@ -114,7 +128,7 @@ def get_readme(
     conn: sqlite3.Connection = Depends(db.github),
 ) -> GithubReadme:
     """Return metadata for one repository's README by owner/repo slug."""
-    return _row_to_readme(_lookup(conn, repo))
+    return _row_to_readme(_lookup_meta(conn, repo))
 
 
 add_chunks_route(

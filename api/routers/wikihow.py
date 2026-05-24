@@ -21,8 +21,21 @@ def _row_to_article(row: sqlite3.Row) -> WikihowArticle:
     )
 
 
-def _lookup(conn: sqlite3.Connection, article_id: int) -> sqlite3.Row:
-    """Fetch an `articles` row by id or raise 404."""
+def _lookup_meta(conn: sqlite3.Connection, article_id: int) -> sqlite3.Row:
+    """Fetch an `articles` row's metadata (no body) by id or raise 404."""
+    row = conn.execute(
+        "SELECT id, title, section_label, headline, "
+        "       length(text) AS text_chars "
+        "FROM articles WHERE id = ?",
+        [article_id],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"article {article_id} not found")
+    return row
+
+
+def _lookup_with_body(conn: sqlite3.Connection, article_id: int) -> sqlite3.Row:
+    """Fetch an `articles` row including `text` body by id or raise 404."""
     row = conn.execute(
         "SELECT id, title, section_label, headline, text, "
         "       length(text) AS text_chars "
@@ -104,7 +117,7 @@ def get_article_content(
     conn: sqlite3.Connection = Depends(db.wikihow),
 ) -> Response:
     """Return the raw step `text` body for one row as text/plain."""
-    row = _lookup(conn, article_id)
+    row = _lookup_with_body(conn, article_id)
     if not row["text"]:
         raise HTTPException(status_code=404, detail="article has no body")
     return Response(content=row["text"], media_type="text/plain; charset=utf-8")
@@ -116,7 +129,7 @@ def get_article(
     conn: sqlite3.Connection = Depends(db.wikihow),
 ) -> WikihowArticle:
     """Return metadata for one step row by id."""
-    return _row_to_article(_lookup(conn, article_id))
+    return _row_to_article(_lookup_meta(conn, article_id))
 
 
 add_chunks_route(

@@ -24,14 +24,16 @@ SORTS = {
 Sort = Literal["cited_by_count_desc", "year_desc", "year_asc", "relevance"]
 
 
-def _row_to_work(row: sqlite3.Row) -> Work:
-    """Map a `works` row to its response model, splitting authors and shortening the id."""
+def _row_to_work(row: sqlite3.Row, authors: list[str]) -> Work:
+    """Map a `works` row + its ordered author display_names to the response model.
+
+    `authors` comes from the normalized `work_authors` / `authors` tables — fetched
+    in batch by `_fetch_authors_many` for list endpoints, per-row for the detail
+    endpoint. The denormalized `works.authors` column still exists from the
+    downloader but is no longer the source of truth here.
+    """
     full_id = row["id"]
     short = full_id.rsplit("/", 1)[-1] if full_id else full_id
-    # Split on the same separator the downloader uses to join names, so the
-    # `authors` array in the response matches the rows in `work_authors`.
-    authors_raw = row["authors"] or ""
-    authors = [a.strip() for a in authors_raw.split(", ") if a.strip()]
     return Work(
         id=short,
         openalex_url=full_id,
@@ -45,6 +47,37 @@ def _row_to_work(row: sqlite3.Row) -> Work:
     )
 
 
+def _fetch_authors_one(conn: sqlite3.Connection, work_id: str) -> list[str]:
+    """Return the ordered list of author display_names for one work."""
+    rows = conn.execute(
+        "SELECT a.display_name FROM work_authors wa "
+        "JOIN authors a ON a.id = wa.author_id "
+        "WHERE wa.work_id = ? ORDER BY wa.position",
+        (work_id,),
+    ).fetchall()
+    return [r["display_name"] for r in rows]
+
+
+def _fetch_authors_many(
+    conn: sqlite3.Connection, work_ids: list[str]
+) -> dict[str, list[str]]:
+    """Batch lookup: ``{work_id: [display_name, ...]}`` ordered by position."""
+    if not work_ids:
+        return {}
+    placeholders = ",".join("?" * len(work_ids))
+    rows = conn.execute(
+        f"SELECT wa.work_id, a.display_name "
+        f"FROM work_authors wa JOIN authors a ON a.id = wa.author_id "
+        f"WHERE wa.work_id IN ({placeholders}) "
+        f"ORDER BY wa.work_id, wa.position",
+        work_ids,
+    ).fetchall()
+    out: dict[str, list[str]] = {wid: [] for wid in work_ids}
+    for r in rows:
+        out[r["work_id"]].append(r["display_name"])
+    return out
+
+
 @router.get("/works/{short_id}", response_model=Work)
 def get_work(
     short_id: str,
@@ -55,13 +88,17 @@ def get_work(
         raise HTTPException(status_code=400, detail="id must look like W123456")
     full = OPENALEX_PREFIX + short_id
     row = conn.execute(
-        "SELECT id, title, abstract, year, cited_by_count, doi, authors, venue "
+        "SELECT id, title, abstract, year, cited_by_count, doi, venue "
         "FROM works WHERE id = ?",
         [full],
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"work {short_id!r} not found")
-    return _row_to_work(row)
+    with translate_fts_errors(
+        "openalex", "openalex_normalize_authors.py", "data/openalex/openalex.db"
+    ):
+        authors = _fetch_authors_one(conn, full)
+    return _row_to_work(row, authors)
 
 
 @router.get("/works", response_model=Page[Work])
@@ -137,13 +174,17 @@ def list_works(
         ).fetchone()[0]
         rows = conn.execute(
             f"SELECT works.id, works.title, works.abstract, works.year, "
-            f"       works.cited_by_count, works.doi, works.authors, works.venue "
+            f"       works.cited_by_count, works.doi, works.venue "
             f"FROM {from_clause} {where} ORDER BY {order} LIMIT ? OFFSET ?",
             [*params, limit, offset],
         ).fetchall()
 
+    with translate_fts_errors(
+        "openalex", "openalex_normalize_authors.py", "data/openalex/openalex.db"
+    ):
+        authors_by_work = _fetch_authors_many(conn, [r["id"] for r in rows])
     return Page[Work](
-        items=[_row_to_work(r) for r in rows],
+        items=[_row_to_work(r, authors_by_work.get(r["id"], [])) for r in rows],
         total=total,
         limit=limit,
         offset=offset,

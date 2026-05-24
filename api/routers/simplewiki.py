@@ -26,7 +26,12 @@ _OVERLAP = 100
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:
-    """Map an `articles` row to its response model. text_content lives at /content."""
+    """Map an `articles` row to its response model. text_content lives at /content.
+
+    `redirect_to` is left None here; only the detail endpoint walks the
+    redirect chain and overrides it. Pydantic would fill the default anyway,
+    but spelling it out keeps the list-vs-detail contract obvious.
+    """
     return Article(
         page_id=row["page_id"],
         title=row["title"],
@@ -34,14 +39,34 @@ def _row_to_article(row: sqlite3.Row) -> Article:
         revision_id=row["revision_id"],
         timestamp=row["timestamp"],
         text_bytes=row["text_bytes"],
+        redirect_to=None,
     )
 
 
-def _lookup(conn: sqlite3.Connection, page_id: int) -> sqlite3.Row:
-    """Fetch an `articles` row by page_id or raise 404."""
+_META_COLS = "page_id, title, namespace, revision_id, timestamp, text_bytes"
+
+
+def _lookup_meta(conn: sqlite3.Connection, page_id: int) -> sqlite3.Row:
+    """Fetch an `articles` row's metadata plus a 300-char `head` of the body.
+
+    The `head` is enough for `_resolve_redirect` to detect and follow a
+    ``#REDIRECT`` stub without loading the full text_content (which can be
+    several MB on long articles).
+    """
     row = conn.execute(
-        "SELECT page_id, title, namespace, revision_id, timestamp, text_bytes, text_content "
+        f"SELECT {_META_COLS}, substr(text_content, 1, 300) AS head "
         "FROM articles WHERE page_id = ?",
+        [page_id],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"article {page_id} not found")
+    return row
+
+
+def _lookup_with_body(conn: sqlite3.Connection, page_id: int) -> sqlite3.Row:
+    """Fetch an `articles` row including the full `text_content` or raise 404."""
+    row = conn.execute(
+        f"SELECT {_META_COLS}, text_content FROM articles WHERE page_id = ?",
         [page_id],
     ).fetchone()
     if row is None:
@@ -187,7 +212,7 @@ def get_article_content(
     in chunked form for retrieval; downstream tools that want HTML can pipe
     this through their own renderer.
     """
-    row = _lookup(conn, page_id)
+    row = _lookup_with_body(conn, page_id)
     if not row["text_content"]:
         raise HTTPException(status_code=404, detail="article has no body")
     return Response(content=row["text_content"], media_type="text/plain; charset=utf-8")
@@ -204,9 +229,11 @@ def get_article(
     resolved target's page_id so the UI can navigate straight there. It stays
     None for normal articles and for redirects whose target can't be resolved.
     """
-    row = _lookup(conn, page_id)
+    row = _lookup_meta(conn, page_id)
     article = _row_to_article(row)
-    article.redirect_to = _resolve_redirect(conn, row["text_content"] or "", page_id)
+    # `head` is the first 300 chars — enough for redirect_target / _resolve_redirect
+    # to recognise and follow a #REDIRECT stub without loading the full body.
+    article.redirect_to = _resolve_redirect(conn, row["head"] or "", page_id)
     return article
 
 
@@ -228,7 +255,7 @@ def embed_article(
     embed nothing and return `embedded=false`. A 503 means Ollama was
     unreachable; the article's existing chunks (if any) are left untouched.
     """
-    row = _lookup(conn, page_id)
+    row = _lookup_with_body(conn, page_id)
     markdown = wikitext_to_markdown(row["text_content"] or "")
     doc = Doc(
         doc_id=str(row["page_id"]),
