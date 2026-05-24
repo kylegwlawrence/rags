@@ -49,7 +49,8 @@ def create_schema(cur: sqlite3.Cursor) -> None:
             income_level TEXT,
             capital_city TEXT,
             longitude    REAL,
-            latitude     REAL
+            latitude     REAL,
+            iso2_code    TEXT
         );
 
         CREATE TABLE IF NOT EXISTS indicators (
@@ -82,6 +83,12 @@ def create_schema(cur: sqlite3.Cursor) -> None:
             indicator_id TEXT PRIMARY KEY
         );
     """)
+    # Idempotent column add for DBs created before iso2_code existed.
+    # ALTER TABLE ADD COLUMN errors if the column is already there — swallow.
+    try:
+        cur.execute("ALTER TABLE countries ADD COLUMN iso2_code TEXT")
+    except sqlite3.OperationalError:
+        pass
 
 
 def fetch_json(session: requests.Session, url: str, params: dict) -> Optional[list]:
@@ -128,6 +135,25 @@ def _none_if_blank(v: Optional[str]) -> Optional[str]:
     return v if v else None
 
 
+# Codes that show up in observation rows but never in /v2/country, so the
+# JOIN to `countries` would otherwise leave their `country_name` NULL. Two
+# kinds: (a) politically-excluded territories WB reports data for but
+# doesn't list as countries (Taiwan, Kosovo), (b) legacy/internal regional
+# aggregate codes used by some indicators. Names for the aggregates are
+# honest placeholders — WB doesn't publish a definitive expansion. INSERT
+# OR IGNORE means a real /country entry always wins if WB ever adds one.
+_EXTRA_COUNTRIES: tuple[tuple[str, str, Optional[str]], ...] = (
+    # (id, name, region)
+    ("TW",  "Taiwan, China",        None),
+    ("KV",  "Kosovo",               "Europe & Central Asia"),
+    ("LCR", "Aggregate (LCR)",      "Aggregates"),
+    ("MCA", "Aggregate (MCA)",      "Aggregates"),
+    ("ANR", "Aggregate (ANR)",      "Aggregates"),
+    ("SCE", "Aggregate (SCE)",      "Aggregates"),
+    ("zz",  "Aggregate (unclassified)", "Aggregates"),
+)
+
+
 def main() -> None:
     current_year = datetime.date.today().year
     parser = argparse.ArgumentParser(
@@ -139,6 +165,9 @@ def main() -> None:
                         help="First year to fetch observations for (default: 2021)")
     parser.add_argument("--reset", action="store_true",
                         help="Drop and recreate all tables before downloading")
+    parser.add_argument("--countries-only", action="store_true",
+                        help="Re-fetch just Phase 2 (countries). Useful to backfill "
+                             "the iso2_code column after a schema migration.")
     args = parser.parse_args()
 
     os.makedirs(os.path.dirname(args.db), exist_ok=True)
@@ -167,19 +196,24 @@ def main() -> None:
     # -------------------------------------------------------------------------
     # Phase 1: Topics
     # -------------------------------------------------------------------------
-    print("Phase 1: Fetching topics...")
-    topics = fetch_paginated(session, f"{BASE_URL}/topic", {})
-    for t in topics:
-        cur.execute(
-            "INSERT OR IGNORE INTO topics (id, name) VALUES (?, ?)",
-            (int(t["id"]), t["value"]),
-        )
-    con.commit()
-    print(f"  {len(topics)} topics stored")
+    if not args.countries_only:
+        print("Phase 1: Fetching topics...")
+        topics = fetch_paginated(session, f"{BASE_URL}/topic", {})
+        for t in topics:
+            cur.execute(
+                "INSERT OR IGNORE INTO topics (id, name) VALUES (?, ?)",
+                (int(t["id"]), t["value"]),
+            )
+        con.commit()
+        print(f"  {len(topics)} topics stored")
+    else:
+        topics = []
 
     # -------------------------------------------------------------------------
     # Phase 2: Countries (all economies, including regional/income aggregates)
     # -------------------------------------------------------------------------
+    # INSERT OR REPLACE (not IGNORE) so re-runs backfill new columns like
+    # iso2_code onto rows that pre-date the column existing.
     print("Phase 2: Fetching countries and aggregates...")
     countries = fetch_paginated(session, f"{BASE_URL}/country", {})
     for c in countries:
@@ -189,9 +223,9 @@ def main() -> None:
         except (ValueError, TypeError):
             lon = lat = None
         cur.execute(
-            """INSERT OR IGNORE INTO countries
-               (id, name, region, income_level, capital_city, longitude, latitude)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT OR REPLACE INTO countries
+               (id, name, region, income_level, capital_city, longitude, latitude, iso2_code)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 c["id"],
                 c["name"],
@@ -200,10 +234,23 @@ def main() -> None:
                 _none_if_blank(c.get("capitalCity")),
                 lon,
                 lat,
+                _none_if_blank(c.get("iso2Code")),
             ),
         )
+    # Backfill known codes that observations reference but /v2/country omits.
+    # INSERT OR IGNORE: a real /country row above always wins.
+    for code, name, region in _EXTRA_COUNTRIES:
+        cur.execute(
+            "INSERT OR IGNORE INTO countries (id, name, region) VALUES (?, ?, ?)",
+            (code, name, region),
+        )
     con.commit()
-    print(f"  {len(countries)} economies stored")
+    print(f"  {len(countries)} economies stored (+ {len(_EXTRA_COUNTRIES)} extras)")
+
+    if args.countries_only:
+        con.close()
+        print("\nDone (countries-only).")
+        return
 
     # -------------------------------------------------------------------------
     # Phase 3: Indicators (union of all topic-tagged indicators)

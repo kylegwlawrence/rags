@@ -719,6 +719,57 @@ body {
 
 /* ===== Values table (worldbank) ========================================== */
 
+.values-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.values-filters__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.values-filters__label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.values-filters__input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text-primary);
+  min-width: 140px;
+}
+
+.values-filters__btn {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 14px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.values-filters__btn:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.values-filters__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .values-table {
   width: 100%;
   border-collapse: collapse;

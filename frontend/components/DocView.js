@@ -35,6 +35,8 @@ export default defineComponent({
     const valuesTotal = ref(0);
     const valuesLoading = ref(false);
     const valuesError = ref(null);
+    const valuesCountry = ref('');
+    const valuesYear = ref('');
 
     // Chunks tab state
     const chunks = ref([]);
@@ -175,7 +177,10 @@ export default defineComponent({
       valuesLoading.value = true;
       valuesError.value = null;
       try {
-        const page = await getValues(props.source, props.doc[props.source.idField]);
+        const page = await getValues(props.source, props.doc[props.source.idField], {
+          country: valuesCountry.value.trim() || undefined,
+          year: valuesYear.value || undefined,
+        });
         values.value = page.items || [];
         valuesTotal.value = page.total || 0;
       } catch (e) {
@@ -286,6 +291,7 @@ export default defineComponent({
     return {
       activeTab, resolving, content, contentLoading, contentError,
       values, valuesTotal, valuesLoading, valuesError,
+      valuesCountry, valuesYear, loadValues,
       chunks, chunksLoading, chunksError, chunksLoaded,
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel,
@@ -354,11 +360,39 @@ export default defineComponent({
           <p v-else style="line-height: 1.65; margin: 0;">{{ doc.abstract }}</p>
         </div>
         <div v-else-if="source.contentType === 'values'">
+          <div class="values-filters">
+            <label class="values-filters__field">
+              <span class="values-filters__label">Country code</span>
+              <input
+                v-model="valuesCountry"
+                type="text"
+                placeholder="e.g. USA, GBR, WLD"
+                class="values-filters__input"
+                @keydown.enter="loadValues"
+              />
+            </label>
+            <label class="values-filters__field">
+              <span class="values-filters__label">Year</span>
+              <input
+                v-model="valuesYear"
+                type="number"
+                placeholder="e.g. 2022"
+                class="values-filters__input"
+                @keydown.enter="loadValues"
+              />
+            </label>
+            <button
+              type="button"
+              class="values-filters__btn"
+              :disabled="valuesLoading"
+              @click="loadValues"
+            >Apply</button>
+          </div>
           <div v-if="valuesLoading" class="doc-content-state">Loading values…</div>
           <div v-else-if="valuesError" class="doc-content-state doc-content-state--error">
             {{ valuesError }}
           </div>
-          <div v-else-if="values.length === 0" class="doc-content-state">No values recorded.</div>
+          <div v-else-if="values.length === 0" class="doc-content-state">No values for that filter.</div>
           <div v-else>
             <p class="chunks-summary">
               Showing {{ values.length }} of {{ valuesTotal }} observations
@@ -366,6 +400,7 @@ export default defineComponent({
             <table class="values-table">
               <thead>
                 <tr>
+                  <th>Code</th>
                   <th>Country</th>
                   <th>Year</th>
                   <th>Value</th>
@@ -373,7 +408,8 @@ export default defineComponent({
               </thead>
               <tbody>
                 <tr v-for="(v, i) in values" :key="i">
-                  <td>{{ v.country_name || v.country_id }}</td>
+                  <td>{{ v.country_id }}</td>
+                  <td>{{ v.country_name || '' }}</td>
                   <td>{{ v.year }}</td>
                   <td>{{ v.value }}</td>
                 </tr>

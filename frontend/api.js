@@ -115,11 +115,13 @@ export async function downloadDoc(source, id) {
  *
  * @param {object} source
  * @param {string|number} id
- * @param {number} limit
+ * @param {{country?: string, year?: string|number, limit?: number}} [opts]
  * @returns {Promise<{items: any[], total: number, limit: number, offset: number}>}
  */
-export async function getValues(source, id, limit = 200) {
-  const params = new URLSearchParams({ limit });
+export async function getValues(source, id, opts = {}) {
+  const params = new URLSearchParams({ limit: opts.limit ?? 500 });
+  if (opts.country) params.set('country', opts.country);
+  if (opts.year) params.set('year', opts.year);
   const resp = await _fetch(`${source.valuesEndpoint(id)}?${params}`);
   return resp.json();
 }

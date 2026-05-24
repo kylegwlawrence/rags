@@ -90,22 +90,57 @@ def list_indicators(
 def get_indicator_values(
     indicator_id: str,
     country: str | None = Query(
-        None, description="ISO2 country code to restrict results to one economy."
+        None,
+        description=(
+            "Country code (ISO2 or ISO3) to restrict results to one economy. "
+            "Either form works — the resolver looks up its alternate via "
+            "`countries.iso2_code` so 'USA' and 'US' both match."
+        ),
     ),
     year: int | None = Query(None, description="Filter to a specific year."),
-    limit: int = Query(200, ge=1, le=200),
+    limit: int = Query(
+        500,
+        ge=1,
+        le=2000,
+        description=(
+            "Max rows. Default 500 fits one year × ~300 economies (the worst "
+            "case); cap raised to 2000 so multi-year unfiltered views aren't "
+            "truncated mid-year."
+        ),
+    ),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.worldbank),
 ) -> Page[WBObservation]:
-    """Return observations for one indicator across all economies and years."""
+    """Return observations for one indicator across all economies and years.
+
+    `observations.country_id` is a mix of ISO2 (real countries) and ISO3
+    (aggregates like 'WLD', 'EUU') — what the WB API returns per row. The
+    JOIN to `countries` therefore matches on either form so country names
+    show up regardless.
+    """
     _get_indicator_row(conn, indicator_id)
 
     clauses = ["o.indicator_id = ?"]
     params: list = [indicator_id]
 
     if country is not None:
-        clauses.append("o.country_id = ?")
-        params.append(country.upper())
+        # Resolve the input to every form known for this country (id and
+        # iso2_code) so the filter matches regardless of which form the
+        # observation row happens to store.
+        code = country.upper()
+        forms = {code}
+        row = conn.execute(
+            "SELECT id, iso2_code FROM countries WHERE id = ? OR iso2_code = ? LIMIT 1",
+            (code, code),
+        ).fetchone()
+        if row is not None:
+            if row["id"]:
+                forms.add(row["id"])
+            if row["iso2_code"]:
+                forms.add(row["iso2_code"])
+        placeholders = ",".join(["?"] * len(forms))
+        clauses.append(f"o.country_id IN ({placeholders})")
+        params.extend(sorted(forms))
     if year is not None:
         clauses.append("o.year = ?")
         params.append(year)
@@ -116,10 +151,14 @@ def get_indicator_values(
         f"SELECT COUNT(*) FROM observations o {where}", params
     ).fetchone()[0]
     rows = conn.execute(
-        f"""SELECT o.country_id, c.name AS country_name, o.year, o.value
-            FROM observations o LEFT JOIN countries c ON c.id = o.country_id
+        f"""SELECT o.country_id,
+                   COALESCE(c1.name, c2.name) AS country_name,
+                   o.year, o.value
+            FROM observations o
+            LEFT JOIN countries c1 ON c1.id = o.country_id
+            LEFT JOIN countries c2 ON c2.iso2_code = o.country_id
             {where}
-            ORDER BY o.country_id, o.year DESC
+            ORDER BY o.year DESC, o.country_id
             LIMIT ? OFFSET ?""",
         [*params, limit, offset],
     ).fetchall()

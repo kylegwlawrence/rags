@@ -1,6 +1,6 @@
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 # Load .env before any router module reads its env vars at import time
@@ -38,6 +38,22 @@ app.include_router(sec_edgar.router)
 app.include_router(worldbank.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
+
+
+@app.middleware("http")
+async def no_cache_ui_assets(request: Request, call_next):
+    """Tell browsers never to cache `/ui/*` assets.
+
+    The frontend ships as plain ES modules and HTML — small files that change
+    often during development. Without an explicit `Cache-Control` header,
+    browsers happily memo-cache the module graph per page session, and even a
+    hard refresh sometimes won't pick up an edited file. Force revalidation
+    so the latest version always wins.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/ui/"):
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
 
 
 @app.get("/health")
