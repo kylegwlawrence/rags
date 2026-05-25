@@ -1,3 +1,5 @@
+/docs/*
+!/docs/source-hints.md
 /.venv
 /data/*
 /.claude/
