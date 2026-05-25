@@ -41,6 +41,9 @@ DENSE = ChunkerProfile(chunk_size=1000, max_chunk_size=1200, overlap=100)
 # vector count without losing intra-paragraph context.
 LONG_FORM = ChunkerProfile(chunk_size=2000, max_chunk_size=2400, overlap=300)
 
-# simplewiki: tuned smaller (~200 tokens/chunk) for accurate retrieval on the
-# small Ollama models used here. The API's live-embed button imports this.
+# simplewiki/enwiki: tuned smaller (~200 tokens/chunk) for accurate retrieval on the
+# small Ollama models used here. The API's live-embed button imports these.
 SIMPLEWIKI = ChunkerProfile(chunk_size=800, max_chunk_size=1000, overlap=100)
+
+# enwiki: same settings as simplewiki — same Ollama models, same retrieval goals.
+ENWIKI = SIMPLEWIKI

@@ -122,9 +122,9 @@ export const SOURCES = {
     listEndpoint: '/enwiki/articles',
     detailEndpoint: (id) => `/enwiki/articles/${id}`,
     contentEndpoint: (id) => `/enwiki/articles/${id}/content`,
-    // No chunksEndpoint / embedEndpoint / followsRedirects in v1 — RAG, the
-    // live embed button, and #REDIRECT resolution are deferred. The frontend
-    // hides those UI affordances when the keys are absent.
+    chunksEndpoint: '/enwiki/chunks',
+    docChunksEndpoint: '/enwiki/doc-chunks',
+    embedEndpoint: (id) => `/enwiki/articles/${id}/embed`,
     idField: 'page_id',
     titleField: 'title',
     subtitle_fn: () => '',

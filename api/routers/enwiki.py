@@ -7,8 +7,9 @@ that host over Tailscale via `ENWIKI_REMOTE_URL` and reshapes the response
 into the same `Page[Article]` / `Article` models the rest of the API uses,
 so the frontend treats this source like any other.
 
-Read-only — no `/chunks`, no embed button, no live writes. RAG over enwiki
-is a future build.
+The embed button (`POST /articles/{page_id}/embed`) fetches the article body
+from the remote and embeds it locally into `data/enwiki/enwiki_rag.db` using
+local Ollama — no writes to the Pi. Chunks are served from that local RAG DB.
 
 A missing `ENWIKI_REMOTE_URL` env var or an unreachable host both surface as
 503 with a clear `detail`, matching the per-DB 503 pattern in `api.db`.
@@ -19,7 +20,15 @@ import os
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from api.models import Article, Page
+from api import db
+from api._chunks import add_chunks_route, add_doc_chunks_route
+from api.models import Article, EmbedResult, Page
+from rag import Doc
+from rag.chunker import chunk_markdown
+from rag.cleaner import CLEANER_VERSION
+from rag.embed_one import embed_doc
+from rag.profiles import ENWIKI as _PROFILE
+from rag.wikitext import wikitext_to_markdown
 
 router = APIRouter(prefix="/enwiki", tags=["enwiki"])
 
@@ -113,9 +122,78 @@ def get_article_content(page_id: int) -> Response:
     return Response(content=resp.content, media_type="text/plain; charset=utf-8")
 
 
+@router.post("/articles/{page_id}/embed", response_model=EmbedResult)
+def embed_article(page_id: int) -> EmbedResult:
+    """Embed one enwiki article into enwiki_rag.db on demand (synchronous).
+
+    Fetches the article's metadata and wikitext from the remote Pi server,
+    renders wikitext to markdown, and embeds with local Ollama — identical
+    pipeline to the simplewiki embed button. Writes to a local enwiki_rag.db
+    (WAL mode; readable by the cached read-only connection immediately).
+
+    Two HTTP calls to the Pi: one for metadata (title, revision_id), one for
+    the wikitext body. A 503 means either the Pi is unreachable or Ollama is
+    down; any prior chunks for this article are left untouched in that case.
+    """
+    meta_resp = _get(f"/articles/{page_id}")
+    _raise_for_remote(meta_resp)
+    meta = meta_resp.json()
+
+    body_resp = _get(f"/articles/{page_id}/content")
+    _raise_for_remote(body_resp)
+
+    markdown = wikitext_to_markdown(body_resp.text)
+    doc = Doc(
+        doc_id=str(page_id),
+        title=meta["title"],
+        version=f"{meta['revision_id']}-{CLEANER_VERSION}",
+        text=markdown,
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.ENWIKI_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_fn=chunk_markdown,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
+
+
 @router.get("/articles/{page_id}", response_model=Article)
 def get_article(page_id: int) -> Article:
     """Return metadata for one enwiki article via the remote."""
     resp = _get(f"/articles/{page_id}")
     _raise_for_remote(resp)
     return Article.model_validate(resp.json())
+
+
+add_chunks_route(
+    router,
+    opener=db.enwiki_rag,
+    source_name="enwiki",
+    indexer_script="enwiki_index_rag.py",
+)
+add_doc_chunks_route(
+    router,
+    opener=db.enwiki_rag,
+    source_name="enwiki",
+    indexer_script="enwiki_index_rag.py",
+)
