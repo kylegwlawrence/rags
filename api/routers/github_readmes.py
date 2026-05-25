@@ -1,11 +1,17 @@
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
-from api.models import GithubReadme, Page
+from api.models import EmbedResult, GithubReadme, Page
+from rag import Doc, content_hash
+from rag.chunker import chunk_markdown
+from rag.cleaner import CLEANER_VERSION, strip_html
+from rag.embed_one import embed_doc
+from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -120,6 +126,58 @@ def get_readme_content(
     if not row["readme"]:
         raise HTTPException(status_code=404, detail="README has no content")
     return Response(content=row["readme"], media_type="text/plain; charset=utf-8")
+
+
+@router.post("/readmes/{repo:path}/embed", response_model=EmbedResult)
+def embed_readme(
+    repo: str,
+    conn: sqlite3.Connection = Depends(db.github),
+) -> EmbedResult:
+    """Embed one README into github_readmes_rag.db on demand (synchronous).
+
+    Cleans the README via the same `strip_html` path as
+    `github_readmes_index_rag.py` and replaces any chunks already stored for
+    it, so the repo becomes searchable through `/github/chunks` immediately —
+    the RAG DB runs in WAL mode, so the cached read-only connection picks up
+    the new rows without a uvicorn restart.
+
+    Returns `embedded=false` for empty READMEs. A 503 means Ollama was
+    unreachable; existing chunks (if any) are left untouched.
+    """
+    row = _lookup_with_body(conn, repo)
+    readme = row["readme"] or ""
+    doc = Doc(
+        doc_id=row["repo"],
+        title=row["name"] or row["repo"],
+        version=f"{content_hash(readme)}-{CLEANER_VERSION}",
+        text=strip_html(readme),
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.GITHUB_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_fn=chunk_markdown,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
 
 
 @router.get("/readmes/{repo:path}", response_model=GithubReadme)

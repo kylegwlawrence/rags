@@ -275,6 +275,7 @@ export const SOURCES = {
     contentEndpoint: (id) => `/github/readmes/${id}/content`,
     chunksEndpoint: '/github/chunks',
     docChunksEndpoint: '/github/doc-chunks',
+    embedEndpoint: (id) => `/github/readmes/${id}/embed`,
     idField: 'repo',
     titleField: 'repo',
     subtitle_fn: (item) => item.name || '',
