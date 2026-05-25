@@ -8,7 +8,7 @@ module turns that raw submission into clean prose for a single filing.
 It is shared by the batch fetcher
 (``scripts/sec_edgar/sec_edgar_fetch_bodies.py``) and the API's on-demand
 "Download full filing" route (``api/routers/sec_edgar.py``) so both extract
-bodies identically. Like ``rag.wikitext`` / ``rag.render``, it is source-specific
+bodies identically. Like ``rag.wikitext`` / ``rag.html_to_markdown``, it is source-specific
 parsing that more than one entry point needs.
 """
 

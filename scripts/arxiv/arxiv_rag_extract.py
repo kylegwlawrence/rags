@@ -1,7 +1,7 @@
 """Extract one Doc per arxiv paper for the RAG indexer.
 
 Papers with downloaded HTML (`papers.html_content`) get rendered into
-section-tagged markdown via `rag.render.html_to_markdown` and consumed by
+section-tagged markdown via `rag.html_to_markdown.html_to_markdown` and consumed by
 `rag.chunker.chunk_markdown` downstream, so each chunk carries its paper
 section (Abstract / Introduction / Methods / Results / ...) in the
 `chunks.section` column. Papers without HTML fall back to abstract-only
@@ -15,7 +15,7 @@ from collections.abc import Iterator
 
 from rag import Doc, content_hash
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
-from rag.render import html_to_markdown
+from rag.html_to_markdown import html_to_markdown
 
 
 def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Iterator[Doc]:

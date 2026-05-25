@@ -1,4 +1,4 @@
-"""Unit tests for `rag.render.html_to_markdown` (LaTeXML HTML → markdown).
+"""Unit tests for `rag.html_to_markdown.html_to_markdown` (LaTeXML HTML → markdown).
 
 Inline HTML fixtures only — no on-disk reads. Mirrors the style of
 `tests/test_chunker_cleaner.py`. Cases ported from
@@ -7,7 +7,7 @@ Inline HTML fixtures only — no on-disk reads. Mirrors the style of
 frontend-only and wasn't ported).
 """
 
-from rag.render import html_to_markdown
+from rag.html_to_markdown import html_to_markdown
 
 
 def _wrap(body: str) -> str:

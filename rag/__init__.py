@@ -11,7 +11,7 @@ because both a script and the API need to import them — keeping them under
 `scripts/<source>/` would force the API to sys.path-mangle to reach them:
 
 - `rag.wikitext`   — simplewiki / enwiki wikitext → markdown
-- `rag.render`     — arxiv LaTeXML HTML → markdown
+- `rag.html_to_markdown` — arxiv LaTeXML HTML → markdown
 - `rag.sec_filing` — SEC EDGAR submission fetch + primary-document extraction
 
 The embedding model is locked to `nomic-embed-text:v1.5` at 768 dimensions.
