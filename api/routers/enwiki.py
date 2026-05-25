@@ -139,6 +139,12 @@ def embed_article(page_id: int) -> EmbedResult:
     _raise_for_remote(meta_resp)
     meta = meta_resp.json()
 
+    if meta.get("namespace", -1) != 0:
+        raise HTTPException(
+            status_code=422,
+            detail=f"article {page_id} is in namespace {meta.get('namespace')}; only namespace 0 (main articles) can be embedded",
+        )
+
     body_resp = _get(f"/articles/{page_id}/content")
     _raise_for_remote(body_resp)
 
