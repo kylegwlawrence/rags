@@ -26,11 +26,43 @@ async function _fetch(url, options) {
 export async function listDocs(source, filters = {}, limit = 50, offset = 0) {
   const params = new URLSearchParams({ limit, offset });
   for (const [k, v] of Object.entries(filters)) {
-    if (v !== '' && v !== null && v !== undefined && v !== false) {
+    if (Array.isArray(v)) {
+      // Multi-value: repeat the key per element so FastAPI parses it as list[str].
+      for (const item of v) {
+        if (item !== '' && item !== null && item !== undefined) {
+          params.append(k, item);
+        }
+      }
+    } else if (v !== '' && v !== null && v !== undefined && v !== false) {
       params.set(k, v);
     }
   }
   const resp = await _fetch(`${source.listEndpoint}?${params}`);
+  return resp.json();
+}
+
+/**
+ * Fetch generic JSON from a same-origin endpoint. Used by filters whose
+ * options come from the API (e.g. the GeoNames feature-class / feature-code
+ * multi-select dropdowns).
+ *
+ * @param {string} path - endpoint path (e.g. '/geonames/feature_classes')
+ * @param {object} [params] - optional query params; array values repeat the key
+ * @returns {Promise<any>}
+ */
+export async function getJson(path, params = {}) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item !== '' && item !== null && item !== undefined) sp.append(k, item);
+      }
+    } else if (v !== '' && v !== null && v !== undefined) {
+      sp.set(k, v);
+    }
+  }
+  const qs = sp.toString();
+  const resp = await _fetch(qs ? `${path}?${qs}` : path);
   return resp.json();
 }
 

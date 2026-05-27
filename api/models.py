@@ -233,6 +233,23 @@ class WBDataPoint(BaseModel):
     value: float
 
 
+class GeonamesFeatureClass(BaseModel):
+    """One row of the GeoNames feature-class lookup (9 classes total)."""
+
+    feature_class: str
+    name: str
+    description: str | None
+    count: int | None
+
+
+class GeonamesFeatureCode(BaseModel):
+    """One row of the GeoNames feature-code lookup (~680 codes total)."""
+
+    feature_class: str
+    feature_code: str
+    description: str | None
+
+
 class GeonamesPlace(BaseModel):
     """One row from `geonames.places` — a single named geographic feature."""
 

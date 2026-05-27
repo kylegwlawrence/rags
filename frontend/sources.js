@@ -383,8 +383,25 @@ export const SOURCES = {
     filters: [
       { key: 'q',              label: 'Search',       type: 'text',   placeholder: 'FTS5 query…' },
       { key: 'country_code',   label: 'Country code', type: 'text',   placeholder: 'e.g. US' },
-      { key: 'feature_class',  label: 'Feature class', type: 'text',  placeholder: 'A/H/L/P/R/S/T/U/V' },
-      { key: 'feature_code',   label: 'Feature code', type: 'text',   placeholder: 'e.g. PPL, MT' },
+      {
+        key: 'feature_class',
+        label: 'Feature class',
+        type: 'multiselect',
+        optionsEndpoint: '/geonames/feature_classes',
+        valueField: 'feature_class',
+        labelFn: (o) => `${o.feature_class} — ${o.name}`,
+      },
+      {
+        key: 'feature_code',
+        label: 'Feature code',
+        type: 'multiselect',
+        optionsEndpoint: '/geonames/feature_codes',
+        valueField: 'feature_code',
+        labelFn: (o) => `${o.feature_code} — ${o.description || ''}`,
+        // Re-fetches when the parent (`feature_class`) selection changes;
+        // BrowseView silently drops any selected codes that no longer match.
+        dependsOn: 'feature_class',
+      },
       { key: 'min_population', label: 'Min population', type: 'number', placeholder: '10000' },
     ],
   },

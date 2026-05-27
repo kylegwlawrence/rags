@@ -1,15 +1,21 @@
-import { defineComponent, ref, reactive, onMounted } from '/ui/vendor/vue.esm-browser.js';
-import { listDocs } from '/ui/api.js';
+import { defineComponent, ref, reactive, onMounted, watch } from '/ui/vendor/vue.esm-browser.js';
+import { listDocs, getJson } from '/ui/api.js';
+import MultiselectFilter from '/ui/components/MultiselectFilter.js';
 
 const LIMIT = 50;
 
 export default defineComponent({
   name: 'BrowseView',
+  components: { MultiselectFilter },
   props: { source: { type: Object, required: true } },
   emits: ['select'],
 
   setup(props, { emit }) {
     const filters = reactive({});
+    // Per-filter resolved option lists for `type === 'multiselect'`. Populated
+    // by fetchMultiselectOptions on mount and whenever a parent filter (via
+    // dependsOn) changes value.
+    const filterOptions = reactive({});
     const offset = ref(0);
     const results = ref([]);
     const total = ref(0);
@@ -18,8 +24,51 @@ export default defineComponent({
 
     function initFilters() {
       for (const key of Object.keys(filters)) delete filters[key];
+      for (const key of Object.keys(filterOptions)) delete filterOptions[key];
       for (const f of props.source.filters) {
-        filters[f.key] = f.type === 'boolean' ? false : '';
+        if (f.type === 'boolean') filters[f.key] = false;
+        else if (f.type === 'multiselect') filters[f.key] = [];
+        else filters[f.key] = '';
+        if (f.type === 'multiselect') filterOptions[f.key] = [];
+      }
+    }
+
+    /**
+     * Fetch options for one multiselect filter. If `f.dependsOn` is set,
+     * the parent filter's current value is forwarded as a query parameter
+     * (repeated for arrays via getJson's encoder).
+     */
+    async function fetchMultiselectOptions(f) {
+      if (!f.optionsEndpoint) return;
+      try {
+        const params = {};
+        if (f.dependsOn) params[f.dependsOn] = filters[f.dependsOn];
+        const data = await getJson(f.optionsEndpoint, params);
+        filterOptions[f.key] = Array.isArray(data) ? data : [];
+        // Drop any currently-selected values that aren't in the new options
+        // (orphaned by a parent-filter change). Silent prune.
+        const allowed = new Set(filterOptions[f.key].map(o => o[f.valueField]));
+        filters[f.key] = filters[f.key].filter(v => allowed.has(v));
+      } catch (e) {
+        console.error(`Failed to load options for ${f.key}:`, e);
+        filterOptions[f.key] = [];
+      }
+    }
+
+    /**
+     * Install reactive watchers so cascading filters (feature_code depends on
+     * feature_class) refresh their option list when the parent changes —
+     * without triggering a search re-run. The search itself still waits for
+     * the user to press the Search button.
+     */
+    function installCascades() {
+      for (const f of props.source.filters) {
+        if (f.type !== 'multiselect' || !f.dependsOn) continue;
+        watch(
+          () => filters[f.dependsOn],
+          () => fetchMultiselectOptions(f),
+          { deep: true },
+        );
       }
     }
 
@@ -61,13 +110,26 @@ export default defineComponent({
     function itemMeta(item) { return props.source.meta_fn(item); }
     function itemId(item) { return item[props.source.idField]; }
 
-    onMounted(() => {
-      initFilters();
+    // Initialise filters synchronously in setup so the first render sees the
+    // right shape — multiselect filters need `[]` before they're bound to
+    // <MultiselectFilter>, whose computed selectedCount would throw on
+    // undefined. The previous (working) version of this view only had
+    // primitive bindings, so onMounted-time init was fine.
+    initFilters();
+
+    onMounted(async () => {
+      // Kick off initial option fetches for every multiselect filter. Cascades
+      // are installed AFTER the first fetch so the watcher doesn't fire
+      // redundantly during init. Don't await on the search — it can run while
+      // options are still streaming in.
+      const multiselectFilters = props.source.filters.filter(f => f.type === 'multiselect');
+      await Promise.all(multiselectFilters.map(fetchMultiselectOptions));
+      installCascades();
       load();
     });
 
     return {
-      filters, offset, results, total, loading, error, LIMIT,
+      filters, filterOptions, offset, results, total, loading, error, LIMIT,
       applyFilters, prevPage, nextPage,
       itemTitle, itemSubtitle, itemMeta, itemId,
     };
@@ -99,6 +161,18 @@ export default defineComponent({
               <input type="checkbox" v-model="filters[f.key]" @change="applyFilters" />
               {{ f.label }}
             </label>
+          </div>
+          <div v-else-if="f.type === 'multiselect'" class="filter-bar__field">
+            <label class="filter-bar__label">{{ f.label }}</label>
+            <MultiselectFilter
+              :label="f.label"
+              :model-value="filters[f.key]"
+              @update:model-value="filters[f.key] = $event"
+              :options="filterOptions[f.key] || []"
+              :value-field="f.valueField"
+              :label-fn="f.labelFn"
+              :placeholder="f.placeholder || 'No options'"
+            />
           </div>
         </template>
         <button type="submit" class="filter-bar__btn">Search</button>

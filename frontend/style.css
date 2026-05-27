@@ -330,6 +330,99 @@ body {
   background: var(--accent-hover);
 }
 
+/* ===== Multi-select dropdown ============================================ */
+
+.multiselect {
+  position: relative;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.multiselect__trigger {
+  font-size: 13px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text-primary);
+  height: auto;
+  margin: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.multiselect__trigger:hover,
+.multiselect__trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+.multiselect__panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 100%;
+  max-width: 360px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.multiselect__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-xs) 0;
+}
+
+.multiselect__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.multiselect__item:hover {
+  background: var(--bg-muted, rgba(0, 0, 0, 0.04));
+}
+
+.multiselect__item input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.multiselect__item-label {
+  color: var(--text-primary);
+}
+
+.multiselect__empty {
+  padding: var(--space-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.multiselect__footer {
+  border-top: 1px solid var(--border);
+  padding: var(--space-xs) var(--space-sm);
+  text-align: right;
+}
+
+.multiselect__clear {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
 /* ===== Browse view ======================================================= */
 
 .browse-view {
