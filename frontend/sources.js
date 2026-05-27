@@ -350,6 +350,45 @@ export const SOURCES = {
     ],
   },
 
+  geonames: {
+    key: 'geonames',
+    label: 'GeoNames',
+    subtitle: 'Geographic places',
+    listEndpoint: '/geonames/places',
+    detailEndpoint: (id) => `/geonames/places/${id}`,
+    contentEndpoint: null,
+    chunksEndpoint: null,
+    idField: 'geonameid',
+    titleField: 'name',
+    subtitle_fn: (item) => item.feature_description || '',
+    meta_fn: (item) => [
+      item.country_name,
+      item.population ? `pop ${item.population.toLocaleString()}` : '',
+    ].filter(Boolean).join(' · '),
+    contentType: 'none',
+    metaFields: [
+      { label: 'GeoName ID',  value: (d) => d.geonameid },
+      { label: 'Name',        value: (d) => d.name },
+      { label: 'Feature',     value: (d) => d.feature_description },
+      { label: 'Feature code', value: (d) => d.feature_class && d.feature_code ? `${d.feature_class}.${d.feature_code}` : '' },
+      { label: 'Country',     value: (d) => d.country_name },
+      { label: 'Country code', value: (d) => d.country_code },
+      { label: 'Latitude',    value: (d) => d.latitude },
+      { label: 'Longitude',   value: (d) => d.longitude },
+      { label: 'Population',  value: (d) => d.population ? d.population.toLocaleString() : '' },
+      { label: 'Elevation',   value: (d) => d.elevation != null ? `${d.elevation} m` : '' },
+      { label: 'Timezone',    value: (d) => d.timezone },
+      { label: 'Description', value: (d) => d.sentence },
+    ],
+    filters: [
+      { key: 'q',              label: 'Search',       type: 'text',   placeholder: 'FTS5 query…' },
+      { key: 'country_code',   label: 'Country code', type: 'text',   placeholder: 'e.g. US' },
+      { key: 'feature_class',  label: 'Feature class', type: 'text',  placeholder: 'A/H/L/P/R/S/T/U/V' },
+      { key: 'feature_code',   label: 'Feature code', type: 'text',   placeholder: 'e.g. PPL, MT' },
+      { key: 'min_population', label: 'Min population', type: 'number', placeholder: '10000' },
+    ],
+  },
+
   sec_edgar: {
     key: 'sec_edgar',
     label: 'SEC EDGAR',
@@ -399,6 +438,6 @@ export const SOURCES = {
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
-  'wikihow', 'pydocs', 'factbook', 'worldbank',
+  'wikihow', 'pydocs', 'factbook', 'worldbank', 'geonames',
   'federal_register', 'github_readmes', 'sec_edgar',
 ];

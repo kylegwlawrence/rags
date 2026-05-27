@@ -47,6 +47,7 @@ GITHUB_RAG_DB = DATA_DIR / "github" / "github_readmes_rag.db"
 SEC_EDGAR_DB = DATA_DIR / "sec_edgar" / "sec_edgar.db"
 SEC_EDGAR_RAG_DB = DATA_DIR / "sec_edgar" / "sec_edgar_rag.db"
 WORLDBANK_DB = DATA_DIR / "worldbank" / "worldbank.db"
+GEONAMES_DB = DATA_DIR / "geonames" / "geonames.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -153,6 +154,7 @@ _wikihow_rag: sqlite3.Connection | None = None
 _sec_edgar: sqlite3.Connection | None = None
 _sec_edgar_rag: sqlite3.Connection | None = None
 _worldbank: sqlite3.Connection | None = None
+_geonames: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -329,3 +331,11 @@ def worldbank() -> sqlite3.Connection:
     if _worldbank is None:
         _worldbank = _connect_ro(WORLDBANK_DB)
     return _worldbank
+
+
+def geonames() -> sqlite3.Connection:
+    """Cached read-only connection to geonames.db (FTS index built by scripts/geonames/geonames_index_fts.py)."""
+    global _geonames
+    if _geonames is None:
+        _geonames = _connect_ro(GEONAMES_DB)
+    return _geonames

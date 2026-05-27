@@ -13,6 +13,7 @@ from api.routers import (  # noqa: E402
     enwiki,
     factbook,
     federal_register,
+    geonames,
     github_readmes,
     gutenberg,
     openalex,
@@ -36,6 +37,7 @@ app.include_router(federal_register.router)
 app.include_router(github_readmes.router)
 app.include_router(sec_edgar.router)
 app.include_router(worldbank.router)
+app.include_router(geonames.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -86,6 +88,7 @@ def health(response: Response) -> dict:
         ("sec_edgar", db.sec_edgar),
         ("sec_edgar_rag", db.sec_edgar_rag),
         ("worldbank", db.worldbank),
+        ("geonames", db.geonames),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

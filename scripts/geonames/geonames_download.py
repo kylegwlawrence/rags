@@ -36,6 +36,7 @@ def create_schema(cur: sqlite3.Cursor) -> None:
             longitude    REAL,
             feature_class TEXT,
             feature_code TEXT,
+            feature_description TEXT,
             country_code TEXT,
             country_name TEXT,
             population   INTEGER,
@@ -195,16 +196,20 @@ def main() -> None:
                     feature_descriptions,
                 )
 
+                feature_key = f"{record['feature_class']}.{record['feature_code']}"
+                feature_description = feature_descriptions.get(feature_key, "")
+
                 cur.execute("""
                     INSERT OR IGNORE INTO places
                     (geonameid, name, latitude, longitude, feature_class, feature_code,
-                     country_code, country_name, population, elevation, timezone, sentence)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     feature_description, country_code, country_name, population,
+                     elevation, timezone, sentence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     geonameid, record["name"], lat, lon,
                     record["feature_class"], record["feature_code"],
-                    record["country_code"], country_name, pop, elev,
-                    record["timezone"], sentence,
+                    feature_description, record["country_code"], country_name,
+                    pop, elev, record["timezone"], sentence,
                 ))
                 total += cur.rowcount
 

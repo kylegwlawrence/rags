@@ -231,3 +231,21 @@ class WBDataPoint(BaseModel):
     indicator_name: str
     year: int
     value: float
+
+
+class GeonamesPlace(BaseModel):
+    """One row from `geonames.places` — a single named geographic feature."""
+
+    geonameid: int
+    name: str | None
+    latitude: float | None
+    longitude: float | None
+    feature_class: str | None
+    feature_code: str | None
+    feature_description: str | None
+    country_code: str | None
+    country_name: str | None
+    population: int | None
+    elevation: int | None
+    timezone: str | None
+    sentence: str | None
