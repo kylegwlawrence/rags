@@ -318,7 +318,7 @@ export const SOURCES = {
       { label: 'Region', value: (d) => d.region },
     ],
     filters: [
-      { key: 'region', label: 'Region', type: 'text', placeholder: 'exact match' },
+      { key: 'name', label: 'Country', type: 'text', placeholder: 'substring, e.g. "land"' },
     ],
   },
 

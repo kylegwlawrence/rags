@@ -33,17 +33,17 @@ def _flatten(obj: Any) -> Any:
 
 @router.get("/countries", response_model=Page[CountrySummary])
 def list_countries(
-    region: str | None = Query(None, description="Exact region match"),
+    name: str | None = Query(None, description="Case-insensitive substring match on country name"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.factbook),
 ) -> Page[CountrySummary]:
-    """List countries (slim, no JSON blob). Filter by exact region; paginate."""
-    where = "WHERE region = ?" if region is not None else ""
-    params: list = [region] if region is not None else []
+    """List countries (slim, no JSON blob). Filter by name substring; paginate."""
+    where = "WHERE LOWER(name) LIKE LOWER(?)" if name is not None else ""
+    params: list = [f"%{name}%"] if name is not None else []
     total = conn.execute(f"SELECT COUNT(*) FROM countries {where}", params).fetchone()[0]
     rows = conn.execute(
-        f"SELECT id, name, region FROM countries {where} ORDER BY id LIMIT ? OFFSET ?",
+        f"SELECT id, name, region FROM countries {where} ORDER BY name LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
     items = [CountrySummary(id=r["id"], name=r["name"], region=r["region"]) for r in rows]
