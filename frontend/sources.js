@@ -455,7 +455,7 @@ export const SOURCES = {
   billstatus: {
     key: 'billstatus',
     label: 'Bill status',
-    subtitle: 'U.S. Congressional bills (108th–present)',
+    subtitle: 'U.S. Congressional bills',
     listEndpoint: '/billstatus/bills',
     detailEndpoint: (id) => `/billstatus/bills/${id}`,
     contentEndpoint: (id) => `/billstatus/bills/${id}/content`,
