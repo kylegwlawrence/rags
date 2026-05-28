@@ -92,6 +92,7 @@ def health(response: Response) -> dict:
         ("worldbank", db.worldbank),
         ("geonames", db.geonames),
         ("billstatus", db.billstatus),
+        ("enwiki_rag", db.enwiki_rag),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

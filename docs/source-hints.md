@@ -66,3 +66,9 @@ organized by guide, section, and individual step. Use for actionable instruction
 on DIY projects, cooking, health and wellness, personal relationships, social
 skills, or any "how do I…" question where sequential guidance is expected. Not
 suitable for factual reference, academic research, or technical documentation.
+
+## `search_enwiki`
+
+Full English Wikipedia articles across all encyclopedic topics. Use when Simple
+Wikipedia lacks sufficient depth. Results matched by title only (trigram, 3+
+chars); no body FTS or RAG chunks in v1. Does not cover events after April 2026.
