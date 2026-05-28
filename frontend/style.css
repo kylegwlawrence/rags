@@ -152,7 +152,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 3px var(--space-sm);
+  padding: 4px var(--space-sm);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-xs);
   cursor: pointer;
@@ -190,9 +190,9 @@ body {
 }
 
 .source-nav__sub {
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.2;
-  color: #696969;
+  color: var(--text-secondary);
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
