@@ -168,6 +168,11 @@ export const SOURCES = {
       { key: 'title',    label: 'Title',    type: 'text', placeholder: 'substring' },
       { key: 'author',   label: 'Author',   type: 'text', placeholder: 'substring' },
       { key: 'language', label: 'Language', type: 'text', placeholder: 'e.g. en' },
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
     ],
   },
 

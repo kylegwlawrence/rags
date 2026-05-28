@@ -156,6 +156,21 @@ export default defineComponent({
               </option>
             </select>
           </div>
+          <div v-else-if="f.type === 'radio'" class="filter-bar__field">
+            <span class="filter-bar__label">{{ f.label }}</span>
+            <div class="filter-bar__radios" role="radiogroup" :aria-label="f.label">
+              <label v-for="opt in f.options" :key="opt.value" class="filter-bar__radio">
+                <input
+                  type="radio"
+                  :name="'radio-' + f.key"
+                  :value="opt.value"
+                  v-model="filters[f.key]"
+                  @change="applyFilters"
+                />
+                <span>{{ opt.label }}</span>
+              </label>
+            </div>
+          </div>
           <div v-else-if="f.type === 'boolean'" class="filter-bar__field filter-bar__field--check">
             <label>
               <input type="checkbox" v-model="filters[f.key]" @change="applyFilters" />

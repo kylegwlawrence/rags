@@ -28,11 +28,24 @@ def list_texts(
     title: str | None = Query(None, description="Substring match on title"),
     author: str | None = Query(None, description="Substring match on author"),
     language: str | None = Query(None, description="Exact language code, e.g. 'en'"),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only texts whose body has "
+            "been chunked into gutenberg_rag.db, false = only texts not yet "
+            "embedded. Omit to list all texts (the default)."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.gutenberg),
 ) -> Page[GutenbergText]:
-    """List Gutenberg texts. Title/author are substring filters; language is exact."""
+    """List Gutenberg texts. Title/author are substring filters; language is exact.
+
+    The `embedded` filter cross-references the separate `gutenberg_rag.db` to
+    select texts that do (or don't) have any chunks indexed. The rag DB is
+    opened lazily so a missing rag DB still allows unfiltered listing.
+    """
     clauses: list[str] = []
     params: list = []
     if title is not None:
@@ -44,6 +57,30 @@ def list_texts(
     if language is not None:
         clauses.append("language = ?")
         params.append(language)
+    if embedded is not None:
+        # doc_id is stored as TEXT in gutenberg_rag.db (values are stringified
+        # int text ids). Pull the distinct set once and inline it as a literal
+        # IN-list — the rag corpus is small (low thousands at most) so this
+        # stays well under SQLite's parameter and expression limits.
+        rag_conn = db.gutenberg_rag()
+        embedded_ids = [
+            int(r[0]) for r in rag_conn.execute("SELECT DISTINCT doc_id FROM chunks")
+        ]
+        if embedded:
+            if not embedded_ids:
+                # No texts are embedded yet → empty page without touching the
+                # main DB at all.
+                return Page[GutenbergText](items=[], total=0, limit=limit, offset=offset)
+            placeholders = ",".join("?" * len(embedded_ids))
+            clauses.append(f"id IN ({placeholders})")
+            params.extend(embedded_ids)
+        else:
+            if embedded_ids:
+                placeholders = ",".join("?" * len(embedded_ids))
+                clauses.append(f"id NOT IN ({placeholders})")
+                params.extend(embedded_ids)
+            # else: nothing is embedded → every row qualifies as "unembedded",
+            # so no extra clause needed.
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
     total = conn.execute(f"SELECT COUNT(*) FROM texts {where}", params).fetchone()[0]
