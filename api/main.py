@@ -10,6 +10,7 @@ load_dotenv()
 from api import db  # noqa: E402
 from api.routers import (  # noqa: E402
     arxiv,
+    billstatus,
     enwiki,
     factbook,
     federal_register,
@@ -38,6 +39,7 @@ app.include_router(github_readmes.router)
 app.include_router(sec_edgar.router)
 app.include_router(worldbank.router)
 app.include_router(geonames.router)
+app.include_router(billstatus.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -89,6 +91,7 @@ def health(response: Response) -> dict:
         ("sec_edgar_rag", db.sec_edgar_rag),
         ("worldbank", db.worldbank),
         ("geonames", db.geonames),
+        ("billstatus", db.billstatus),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

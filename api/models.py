@@ -250,6 +250,28 @@ class GeonamesFeatureCode(BaseModel):
     description: str | None
 
 
+class Bill(BaseModel):
+    """One row from `billstatus.bills`. Summary body served at /content."""
+
+    bill_id: str
+    congress: int | None
+    bill_type: str | None
+    bill_number: str | None
+    title: str | None
+    sponsor: str | None
+    introduced_date: str | None
+    latest_action: str | None
+    policy_area: str | None
+    subjects: list[str]
+    summary_chars: int | None
+
+
+class BillDetail(Bill):
+    """Bill with full summary text included (detail endpoint only)."""
+
+    summary: str | None
+
+
 class GeonamesPlace(BaseModel):
     """One row from `geonames.places` — a single named geographic feature."""
 

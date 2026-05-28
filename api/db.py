@@ -48,6 +48,7 @@ SEC_EDGAR_DB = DATA_DIR / "sec_edgar" / "sec_edgar.db"
 SEC_EDGAR_RAG_DB = DATA_DIR / "sec_edgar" / "sec_edgar_rag.db"
 WORLDBANK_DB = DATA_DIR / "worldbank" / "worldbank.db"
 GEONAMES_DB = DATA_DIR / "geonames" / "geonames.db"
+BILLSTATUS_DB = DATA_DIR / "billstatus" / "billstatus.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -155,6 +156,7 @@ _sec_edgar: sqlite3.Connection | None = None
 _sec_edgar_rag: sqlite3.Connection | None = None
 _worldbank: sqlite3.Connection | None = None
 _geonames: sqlite3.Connection | None = None
+_billstatus: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -339,3 +341,11 @@ def geonames() -> sqlite3.Connection:
     if _geonames is None:
         _geonames = _connect_ro(GEONAMES_DB)
     return _geonames
+
+
+def billstatus() -> sqlite3.Connection:
+    """Cached read-only connection to billstatus.db (FTS index built by scripts/billstatus/billstatus_index_fts.py)."""
+    global _billstatus
+    if _billstatus is None:
+        _billstatus = _connect_ro(BILLSTATUS_DB)
+    return _billstatus

@@ -25,7 +25,7 @@ python scripts/openalex/openalex_index_fts.py       # works_fts FTS5 index
 python scripts/openalex/openalex_index_rag.py       # data/openalex/openalex_rag.db (top-5k)
 python scripts/gutenberg/gutenberg_index.py         # data/gutenberg/gutenberg.db
 python scripts/gutenberg/gutenberg_index_rag.py     # data/gutenberg/gutenberg_rag.db
-bash   scripts/gutenberg/gutenberg_download.sh
+python scripts/gutenberg/gutenberg_download.py      # rsync from ibiblio; --language (default en), --dry-run
 python scripts/simplewiki/simplewiki_download.py
 python scripts/simplewiki/simplewiki_parse.py
 python scripts/simplewiki/simplewiki_index_rag.py   # data/simplewiki/simplewiki_rag.db
@@ -43,6 +43,8 @@ python scripts/sec_edgar/sec_edgar_fetch_bodies.py    # fetch 10-K bodies (stand
 python scripts/sec_edgar/sec_edgar_index_fts.py       # filings_fts FTS5 index
 python scripts/sec_edgar/sec_edgar_index_rag.py       # data/sec_edgar/sec_edgar_rag.db
 python scripts/worldbank/worldbank_download.py        # indicators + observations → data/worldbank/worldbank.db
+python scripts/billstatus/billstatus_download.py      # GPO BILLSTATUS XML → data/billstatus/billstatus.db
+python scripts/billstatus/billstatus_index_fts.py     # bills_fts FTS5 index
 ```
 
 ## Running the API
@@ -71,6 +73,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `/wikihow/articles`, `/{id}`, `/{id}/content`, `/wikihow/chunks`
 - `/sec_edgar/filings` (`?downloaded=` true/false), `/{accession_number}`, `/{accession_number}/content`, `POST /{accession_number}/download`, `/sec_edgar/chunks`
 - `/worldbank/indicators` (`?q=`, `?topic=`), `/indicators/{id}`, `/indicators/{id}/values` (`?country=`, `?year=`), `/worldbank/countries`, `/countries/{id}/data` (`?topic=`, `?year=`)
+- `/billstatus/bills` (`?q=`, `?congress=`, `?bill_type=`, `?sponsor=`, `?policy_area=`, `?subject=`, `?sort=`), `/{bill_id}`, `/{bill_id}/content` — bill_id format is `{congress}-{TYPE}-{number}`, e.g. `118-HR-1234`. No RAG/chunks.
 
 `/wikihow/articles` rows are per-step (not whole guides); `/wikihow/chunks` reassembles whole guides. The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings whose body hasn't been downloaded — `?downloaded=` narrows to fetched/unfetched. `POST /simplewiki/.../embed` and `POST /sec_edgar/.../download` are the only write paths in the API.
 
@@ -81,7 +84,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `arxiv_download.py` — HTML body fetcher. Flags: `--db`, `--limit`, `--force`. Restart after.
 - `arxiv_normalize_authors.py` — Backfill only for arxiv.db files predating Phase 3; idempotent.
 - `arxiv_index_fts.py` — Rebuilds `papers_fts` (porter, external-content). Required for `?q=`.
-- `arxiv_index_rag.py` — `arxiv_rag.db`. Falls back to title+abstract when HTML unavailable. Flags: `--limit`, `--reset`, `--batch`, `--chunk-size` (1500), `--max-chunk-size` (1800), `--overlap` (150). Restart after.
+- `arxiv_index_rag.py` — `arxiv_rag.db`. Chunks full HTML body (section-tagged markdown) when available; falls back to abstract-only for papers without downloaded HTML. Flags: `--limit`, `--reset`, `--batch`, `--chunk-size` (1500), `--max-chunk-size` (1800), `--overlap` (150). Restart after.
 
 **factbook**
 - `factbook_download.py` — Clones `github.com/factbook/factbook.json` → `factbook.db`.
@@ -94,7 +97,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `openalex_index_rag.py` — `openalex_rag.db` (top-5k by citation count). Same flags as arxiv rag. Restart after.
 
 **gutenberg**
-- `gutenberg_download.sh` — rsync via SSH to `pop-os`; requires that alias.
+- `gutenberg_download.py` — Fetches PG catalog CSV, filters by language, rsyncs matching files from ibiblio mirror. Flags: `--language` (default `en`; comma-separated codes or `all`), `--dry-run`.
 - `gutenberg_index.py` — Walks `.txt` files, joins PG catalog CSV → `gutenberg.db`.
 - `gutenberg_index_rag.py` — `gutenberg_rag.db`. Flags: `--language` (en), `--limit` (100), `--chunk-size` (2000), `--max-chunk-size` (2400), `--overlap` (300). Restart after.
 
@@ -133,6 +136,10 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 
 **worldbank**
 - `worldbank_download.py` — Fetches all 21 topic-tagged indicator groups from the World Bank Indicators API v2. Stores topics, countries/aggregates, indicator metadata, and non-null observations. No API key required. Flags: `--db`, `--start-year` (default 2021), `--reset`. Resumable: completed indicators tracked in `completed_indicators` table. Runtime: ~1–2 h for full topic-tagged set (~5–7k indicators). Restart API after.
+
+**billstatus**
+- `billstatus_download.py` — Downloads GPO BILLSTATUS XML bulk zips per Congress/bill-type, extracts metadata + the latest CRS summary into `bills` (one row per bill, PK `{congress}-{TYPE}-{number}`). Covers 108th–present. Flags: `--db`, `--congress-from` (default: resume from `ingest_state`), `--congress-to` (default 119). Resumable via `ingest_state`.
+- `billstatus_index_fts.py` — Rebuilds `bills_fts` over `title + summary + subjects` (porter, external-content). Required for `?q=`. Restart after. No RAG indexer (summaries are short).
 
 ### Re-indexing notes
 
