@@ -2,7 +2,7 @@ import { defineComponent, ref, reactive, onMounted, watch } from '/ui/vendor/vue
 import { listDocs, getJson } from '/ui/api.js';
 import MultiselectFilter from '/ui/components/MultiselectFilter.js';
 
-const LIMIT = 50;
+const LIMIT = 20;
 
 export default defineComponent({
   name: 'BrowseView',

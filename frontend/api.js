@@ -23,7 +23,7 @@ async function _fetch(url, options) {
  * @param {number} offset
  * @returns {Promise<{items: any[], total: number, limit: number, offset: number}>}
  */
-export async function listDocs(source, filters = {}, limit = 50, offset = 0) {
+export async function listDocs(source, filters = {}, limit = 20, offset = 0) {
   const params = new URLSearchParams({ limit, offset });
   for (const [k, v] of Object.entries(filters)) {
     if (Array.isArray(v)) {
