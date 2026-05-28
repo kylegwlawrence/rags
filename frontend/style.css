@@ -10,10 +10,10 @@
   --surface-hover: #f1f2f1;
   --border: #ececec;
   --text-primary: #1f1f1f;
-  --text-secondary: #6b6b6b;
+  --text-secondary: #5b5b5b;
   --accent: #9ccaa6;
   --accent-hover: #7fb38c;
-  --accent-tonal: #e8f2eb;
+  --accent-tonal: #d9efde;
   --accent-tonal-text: #3d6549;
   --accent-on: #1f3a26;
   --danger: #d93025;
@@ -28,7 +28,7 @@
   --radius-lg: 6px;
   --radius-pill: 9999px;
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
-  --font-size-base: 15px;
+  --font-size-base: 13px;
 }
 
 [data-theme="dark"] {
@@ -148,16 +148,22 @@ body {
   align-items: stretch;
 }
 
-.source-nav__item {
-  display: grid;
-  height: 28px;
-  padding: 0 var(--space-sm);
+.source-nav .source-nav__item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3px var(--space-sm);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-xs);
   cursor: pointer;
-  align-content: center;
-  overflow: hidden;
   transition: background 0.15s ease;
+}
+
+/* Pico CSS injects `:where(nav li)::before { float: left; content: "​"; }` —
+   the floated zero-width space steals a line of vertical space at the top of
+   every nav item. Neutralize it. */
+.source-nav .source-nav__item::before {
+  content: none;
 }
 
 .source-nav__item:hover {
@@ -175,14 +181,22 @@ body {
 
 .source-nav__label {
   font-size: 14px;
-  line-height: 1.1;
+  line-height: 1.2;
   color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .source-nav__sub {
   font-size: 12px;
-  line-height: 1.1;
-  color: var(--text-secondary);
+  line-height: 1.2;
+  color: #696969;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ===== Top bar =========================================================== */
