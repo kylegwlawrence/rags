@@ -6,11 +6,11 @@
 
 :root {
   --bg: #ffffff;
-  --surface: #fafafa;
-  --surface-hover: #f1f2f1;
+  --surface: #f6f6f6;
+  --surface-hover: #e5e5e5;
   --border: #ececec;
-  --text-primary: #1f1f1f;
-  --text-secondary: #5b5b5b;
+  --text-primary: #2a2a2a;
+  --text-secondary: #6b6b6b;
   --accent: #9ccaa6;
   --accent-hover: #7fb38c;
   --accent-tonal: #d9efde;
