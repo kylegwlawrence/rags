@@ -176,37 +176,6 @@ export const SOURCES = {
     ],
   },
 
-  wikihow: {
-    key: 'wikihow',
-    label: 'wikiHow',
-    subtitle: 'How-to guides',
-    listEndpoint: '/wikihow/articles',
-    detailEndpoint: (id) => `/wikihow/articles/${id}`,
-    contentEndpoint: (id) => `/wikihow/articles/${id}/content`,
-    chunksEndpoint: '/wikihow/chunks',
-    docChunksEndpoint: '/wikihow/doc-chunks',
-    idField: 'id',
-    // RAG doc_id is the guide title (the indexer reassembles whole guides),
-    // not the per-step row id — so the per-doc chunk inspector keys on title.
-    docIdField: 'title',
-    titleField: 'title',
-    subtitle_fn: (item) => item.section_label || '',
-    meta_fn: (item) => item.section_label || '',
-    contentType: 'text',
-    metaFields: [
-      { label: 'ID',       value: (d) => d.id },
-      { label: 'Title',    value: (d) => d.title },
-      { label: 'Section',  value: (d) => d.section_label },
-      { label: 'Headline', value: (d) => d.headline },
-      { label: 'Size',     value: (d) => d.text_chars ? `${d.text_chars} chars` : '' },
-    ],
-    filters: [
-      { key: 'q',             label: 'Search',  type: 'text', placeholder: 'FTS5 query…' },
-      { key: 'title',         label: 'Title',   type: 'text', placeholder: 'substring' },
-      { key: 'section_label', label: 'Section', type: 'text', placeholder: 'exact match' },
-    ],
-  },
-
   pydocs: {
     key: 'pydocs',
     label: 'Python Docs',
@@ -457,6 +426,51 @@ export const SOURCES = {
     ],
   },
 
+  eurlex: {
+    key: 'eurlex',
+    label: 'EUR-Lex',
+    subtitle: 'EU legislation',
+    listEndpoint: '/eurlex/laws',
+    detailEndpoint: (id) => `/eurlex/laws/${id}`,
+    contentEndpoint: (id) => `/eurlex/laws/${id}/content`,
+    chunksEndpoint: null,
+    idField: 'celex',
+    titleField: 'act_name',
+    subtitle_fn: (item) => item.act_type || '',
+    meta_fn: (item) => [item.date_publication, item.status].filter(Boolean).join(' · '),
+    contentType: 'text',
+    metaFields: [
+      { label: 'CELEX',              value: (d) => d.celex },
+      { label: 'Act type',           value: (d) => d.act_type },
+      { label: 'Status',             value: (d) => d.status },
+      { label: 'Authors',            value: (d) => (d.authors || []).join('; ') },
+      { label: 'Date document',      value: (d) => d.date_document },
+      { label: 'Date publication',   value: (d) => d.date_publication },
+      { label: 'Treaty',             value: (d) => d.treaty },
+      { label: 'Legal basis',        value: (d) => d.legal_basis_celex },
+      { label: 'First in force',     value: (d) => d.first_entry_into_force },
+      { label: 'Cites',              value: (d) => (d.act_cites || []).join('; ') },
+      { label: 'Amends',             value: (d) => (d.act_amends || []).join('; ') },
+      { label: 'EUROVOC',            value: (d) => (d.eurovoc || []).join('; ') },
+      { label: 'Subject matter',     value: (d) => (d.subject_matter || []).join('; ') },
+      { label: 'EUR-Lex',            value: (d) => d.eurlex_link },
+      { label: 'ELI',                value: (d) => d.eli_link },
+      { label: 'Proposal',           value: (d) => d.proposal_link },
+      { label: 'OEIL',               value: (d) => d.oeil_link },
+      { label: 'Size',               value: (d) => d.text_chars ? `${d.text_chars.toLocaleString()} chars` : '' },
+    ],
+    filters: [
+      { key: 'q',        label: 'Search',   type: 'text',   placeholder: 'FTS5 query… (requires index)' },
+      { key: 'act_type', label: 'Act type', type: 'text',   placeholder: 'e.g. Regulation' },
+      { key: 'status',   label: 'Status',   type: 'select', options: [
+        { value: '',           label: 'Any status' },
+        { value: 'In Force',   label: 'In Force' },
+        { value: 'Not in Force', label: 'Not in Force' },
+      ]},
+      { key: 'author',   label: 'Author',   type: 'text',   placeholder: 'substring' },
+    ],
+  },
+
   billstatus: {
     key: 'billstatus',
     label: 'Bill status',
@@ -514,6 +528,6 @@ export const SOURCES = {
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
-  'wikihow', 'pydocs', 'factbook', 'worldbank', 'geonames',
-  'federal_register', 'github_readmes', 'sec_edgar', 'billstatus',
+  'pydocs', 'factbook', 'worldbank', 'geonames',
+  'federal_register', 'github_readmes', 'sec_edgar', 'billstatus', 'eurlex',
 ];

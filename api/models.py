@@ -86,20 +86,6 @@ class PydocsDoc(BaseModel):
     content_chars: int | None
 
 
-class WikihowArticle(BaseModel):
-    """One row from `wikihow.articles` — a single step of a how-to guide.
-
-    Several rows share a `title` (one per step); `/wikihow/chunks` reassembles
-    whole guides for retrieval. Raw step `text` lives at /content.
-    """
-
-    id: int
-    title: str | None
-    section_label: str | None
-    headline: str | None
-    text_chars: int | None
-
-
 class StoredChunk(BaseModel):
     """One chunk row from `<source>_rag.db`, fetched by doc_id for inspection."""
 
@@ -270,6 +256,36 @@ class BillDetail(Bill):
     """Bill with full summary text included (detail endpoint only)."""
 
     summary: str | None
+
+
+class EurlexLaw(BaseModel):
+    """One row from `eurlex.laws`. Raw body text served at /content."""
+
+    celex: str
+    act_name: str | None
+    act_type: str | None
+    status: str | None
+    eurovoc: list[str]
+    subject_matter: list[str]
+    treaty: str | None
+    authors: list[str]
+    date_document: str | None
+    date_publication: str | None
+    eurlex_link: str | None
+    eli_link: str | None
+    text_chars: int | None
+
+
+class EurlexLawDetail(EurlexLaw):
+    """EUR-Lex act with extended metadata (detail endpoint only)."""
+
+    legal_basis_celex: str | None
+    procedure_number: str | None
+    first_entry_into_force: str | None
+    act_cites: list[str]
+    act_amends: list[str]
+    proposal_link: str | None
+    oeil_link: str | None
 
 
 class GeonamesPlace(BaseModel):

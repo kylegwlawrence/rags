@@ -38,8 +38,6 @@ SIMPLEWIKI_RAG_DB = DATA_DIR / "simplewiki" / "simplewiki_rag.db"
 ENWIKI_RAG_DB = DATA_DIR / "enwiki" / "enwiki_rag.db"
 PYDOCS_DB = DATA_DIR / "pydocs" / "python_docs.db"
 PYDOCS_RAG_DB = DATA_DIR / "pydocs" / "python_docs_rag.db"
-WIKIHOW_DB = DATA_DIR / "wikihow" / "wikihow.db"
-WIKIHOW_RAG_DB = DATA_DIR / "wikihow" / "wikihow_rag.db"
 FEDERAL_REGISTER_DB = DATA_DIR / "federal_register" / "federal_register.db"
 FEDERAL_REGISTER_RAG_DB = DATA_DIR / "federal_register" / "federal_register_rag.db"
 GITHUB_DB = DATA_DIR / "github" / "readmes.db"
@@ -49,6 +47,7 @@ SEC_EDGAR_RAG_DB = DATA_DIR / "sec_edgar" / "sec_edgar_rag.db"
 WORLDBANK_DB = DATA_DIR / "worldbank" / "worldbank.db"
 GEONAMES_DB = DATA_DIR / "geonames" / "geonames.db"
 BILLSTATUS_DB = DATA_DIR / "billstatus" / "billstatus.db"
+EURLEX_DB = DATA_DIR / "eurlex" / "eurlex.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -150,13 +149,12 @@ _simplewiki_rag: sqlite3.Connection | None = None
 _enwiki_rag: sqlite3.Connection | None = None
 _pydocs: sqlite3.Connection | None = None
 _pydocs_rag: sqlite3.Connection | None = None
-_wikihow: sqlite3.Connection | None = None
-_wikihow_rag: sqlite3.Connection | None = None
 _sec_edgar: sqlite3.Connection | None = None
 _sec_edgar_rag: sqlite3.Connection | None = None
 _worldbank: sqlite3.Connection | None = None
 _geonames: sqlite3.Connection | None = None
 _billstatus: sqlite3.Connection | None = None
+_eurlex: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -263,22 +261,6 @@ def pydocs_rag() -> sqlite3.Connection:
     return _pydocs_rag
 
 
-def wikihow() -> sqlite3.Connection:
-    """Cached read-only connection to wikihow.db (FTS index built by scripts/wikihow/wikihow_index_fts.py)."""
-    global _wikihow
-    if _wikihow is None:
-        _wikihow = _connect_ro(WIKIHOW_DB)
-    return _wikihow
-
-
-def wikihow_rag() -> sqlite3.Connection:
-    """Cached read-only connection to wikihow_rag.db (built by scripts/wikihow/wikihow_index_rag.py)."""
-    global _wikihow_rag
-    if _wikihow_rag is None:
-        _wikihow_rag = _connect_ro_with_vec(WIKIHOW_RAG_DB)
-    return _wikihow_rag
-
-
 def federal_register() -> sqlite3.Connection:
     """Cached read-only connection to federal_register.db (FTS built by scripts/federal_register/federal_register_index_fts.py)."""
     global _federal_register
@@ -349,3 +331,11 @@ def billstatus() -> sqlite3.Connection:
     if _billstatus is None:
         _billstatus = _connect_ro(BILLSTATUS_DB)
     return _billstatus
+
+
+def eurlex() -> sqlite3.Connection:
+    """Cached read-only connection to eurlex.db (built by scripts/eurlex/)."""
+    global _eurlex
+    if _eurlex is None:
+        _eurlex = _connect_ro(EURLEX_DB)
+    return _eurlex

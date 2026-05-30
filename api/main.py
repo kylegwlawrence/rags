@@ -12,6 +12,7 @@ from api.routers import (  # noqa: E402
     arxiv,
     billstatus,
     enwiki,
+    eurlex,
     factbook,
     federal_register,
     geonames,
@@ -21,7 +22,6 @@ from api.routers import (  # noqa: E402
     python_docs,
     sec_edgar,
     simplewiki,
-    wikihow,
     worldbank,
 )
 
@@ -33,13 +33,13 @@ app.include_router(gutenberg.router)
 app.include_router(simplewiki.router)
 app.include_router(enwiki.router)
 app.include_router(python_docs.router)
-app.include_router(wikihow.router)
 app.include_router(federal_register.router)
 app.include_router(github_readmes.router)
 app.include_router(sec_edgar.router)
 app.include_router(worldbank.router)
 app.include_router(geonames.router)
 app.include_router(billstatus.router)
+app.include_router(eurlex.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -81,9 +81,7 @@ def health(response: Response) -> dict:
         ("simplewiki_rag", db.simplewiki_rag),
         ("pydocs", db.pydocs),
         ("pydocs_rag", db.pydocs_rag),
-        ("wikihow", db.wikihow),
-        ("wikihow_rag", db.wikihow_rag),
-        ("federal_register", db.federal_register),
+("federal_register", db.federal_register),
         ("federal_register_rag", db.federal_register_rag),
         ("github", db.github),
         ("github_rag", db.github_rag),
@@ -92,6 +90,7 @@ def health(response: Response) -> dict:
         ("worldbank", db.worldbank),
         ("geonames", db.geonames),
         ("billstatus", db.billstatus),
+        ("eurlex", db.eurlex),
         ("enwiki_rag", db.enwiki_rag),
     ):
         try:
