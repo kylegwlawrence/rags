@@ -1,15 +1,25 @@
 import os
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
-from api.models import DownloadResult, Page, SecEdgarFiling
+from api.models import DownloadResult, EmbedResult, Page, SecEdgarFiling
+from rag import Doc, content_hash
+from rag.cleaner import CLEANER_VERSION, strip_html
+from rag.embed_one import embed_doc
+from rag.profiles import DEFAULT as _PROFILE
 from rag.sec_filing import download_filing_body
 
 router = APIRouter(prefix="/sec_edgar", tags=["sec_edgar"])
+
+# Live-embed chunk settings come from `rag.profiles.DEFAULT` — the same
+# profile `scripts/sec_edgar/sec_edgar_index_rag.py` uses (`chunk_doc`, flat
+# prose; filing text has no reliable `##` heading structure). Doc-building
+# mirrors `sec_edgar_rag_extract.iter_docs` — keep them in sync.
 
 # Contact address advertised to SEC when downloading a filing on demand. SEC
 # rejects requests without an identifying User-Agent, so this is required —
@@ -255,6 +265,71 @@ def download_filing(
         accession_number=accession_number,
         status=status,
         body_chars=len(stored) if stored else 0,
+    )
+
+
+@router.post("/filings/{accession_number}/embed", response_model=EmbedResult)
+def embed_filing(
+    accession_number: str,
+    conn: sqlite3.Connection = Depends(db.sec_edgar),
+) -> EmbedResult:
+    """Embed one fetched SEC filing into sec_edgar_rag.db on demand (synchronous).
+
+    Requires the body to have been downloaded first — `sec_edgar_download.py`
+    records only metadata + `filing_url`, and the bytes are pulled in either
+    by `sec_edgar_fetch_bodies.py` or the live "Download full filing" button
+    (`POST .../download`). When body is missing this returns 409 with a hint
+    so the UI can prompt the download step.
+
+    Doc construction mirrors `sec_edgar_rag_extract.iter_docs`. Replaces any
+    chunks already stored for the filing, becoming searchable through
+    `/sec_edgar/chunks` immediately (the RAG DB runs in WAL mode, so the
+    cached read-only connection sees the new rows without a uvicorn restart).
+    A 503 means Ollama was unreachable; existing chunks are untouched.
+    """
+    row = _lookup_with_body(conn, accession_number)
+    body = row["body"]
+    if not body or not body.strip():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "filing body has not been downloaded — POST "
+                f"/sec_edgar/filings/{accession_number}/download first"
+            ),
+        )
+
+    company = row["company_name"] or row["accession_number"]
+    title = f"{company} {row['form_type']} {row['date_filed']}".strip()
+    doc = Doc(
+        doc_id=row["accession_number"],
+        title=title,
+        version=f"{content_hash(body)}-{CLEANER_VERSION}",
+        text=strip_html(body),
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.SEC_EDGAR_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
     )
 
 

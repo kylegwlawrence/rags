@@ -1,13 +1,26 @@
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
-from api.models import GutenbergText, Page
+from api.models import EmbedResult, GutenbergText, Page
+from rag import Doc
+from rag.cleaner import CLEANER_VERSION
+from rag.embed_one import embed_doc
+from rag.gutenberg_text import file_fingerprint, read_text, strip_banners
+from rag.profiles import LONG_FORM as _PROFILE
 
 router = APIRouter(prefix="/gutenberg", tags=["gutenberg"])
+
+# Live-embed chunk settings come from `rag.profiles.LONG_FORM` — the same
+# profile `scripts/gutenberg/gutenberg_index_rag.py` uses, so a text
+# embedded via the button chunks identically to a batch indexer pass.
+# Whole-book embeds can produce thousands of chunks and take many minutes
+# on local Ollama; that's a deliberate trade so the click does the real
+# work synchronously rather than queueing a job.
 
 
 def _row_to_text(row: sqlite3.Row) -> GutenbergText:
@@ -135,6 +148,69 @@ def get_text_content(
     if not full.is_file():
         raise HTTPException(status_code=404, detail="file missing on disk")
     return FileResponse(full, media_type="text/plain; charset=utf-8")
+
+
+@router.post("/texts/{text_id}/embed", response_model=EmbedResult)
+def embed_text(
+    text_id: int,
+    conn: sqlite3.Connection = Depends(db.gutenberg),
+) -> EmbedResult:
+    """Embed one Gutenberg text into gutenberg_rag.db on demand (synchronous).
+
+    Reads the `.txt` body from disk via `rag.gutenberg_text`, strips the PG
+    start/end banners, and replaces any chunks already stored for the text.
+    The text becomes searchable through `/gutenberg/chunks` immediately — the
+    RAG DB runs in WAL mode, so the cached read-only connection picks up the
+    new rows without a uvicorn restart.
+
+    Whole-book embeds can run for tens of minutes on local Ollama — the
+    button stays in "Embedding…" the whole time. A 503 means Ollama was
+    unreachable; existing chunks are untouched.
+    """
+    row = _lookup(conn, text_id)
+    # Defense in depth: even though the indexer only stores relative paths
+    # produced via Path.relative_to(GUTENBERG_ROOT), refuse to embed anything
+    # whose resolved location escapes the gutenberg root.
+    root = db.GUTENBERG_ROOT.resolve()
+    full = (db.GUTENBERG_ROOT / row["path"]).resolve()
+    if root not in full.parents:
+        raise HTTPException(status_code=404, detail="text not found")
+    if not full.is_file():
+        raise HTTPException(status_code=404, detail="file missing on disk")
+
+    body = strip_banners(read_text(full))
+    title = row["title"] or row["author"] or str(row["id"])
+    doc = Doc(
+        doc_id=str(row["id"]),
+        title=title,
+        version=f"{file_fingerprint(full)}-{CLEANER_VERSION}",
+        text=body,
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.GUTENBERG_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
 
 
 add_chunks_route(

@@ -70,6 +70,16 @@ export default defineComponent({
       () => !!props.source.downloadEndpoint && !hasBody.value,
     );
 
+    // Show the embed button when the source has an embed endpoint AND — if a
+    // bodyField gates the source (sec_edgar) — the body has actually been
+    // downloaded. Embedding without a body would create zero or junk chunks,
+    // so the button stays hidden until the download path completes.
+    const showEmbed = computed(() => {
+      if (!props.source.embedEndpoint) return false;
+      if (props.source.bodyField) return hasBody.value;
+      return true;
+    });
+
     const downloadLabel = computed(() => {
       if (downloading.value) return 'Downloading…';
       if (downloadError.value) return 'Retry download';
@@ -294,7 +304,7 @@ export default defineComponent({
       valuesCountry, valuesYear, loadValues,
       chunks, chunksLoading, chunksError, chunksLoaded,
       expandedChunks,
-      embedding, embedError, isEmbedded, embedLabel,
+      embedding, embedError, isEmbedded, embedLabel, showEmbed,
       downloading, downloadError, showDownload, downloadLabel, downloadFiling,
       profileHtml,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
@@ -307,7 +317,7 @@ export default defineComponent({
         <button class="doc-view__back" @click="$emit('back')">← Back</button>
         <h2 class="doc-view__title">{{ doc[source.titleField] || '(untitled)' }}</h2>
         <button
-          v-if="source.embedEndpoint"
+          v-if="showEmbed"
           class="doc-view__embed"
           :class="{
             'doc-view__embed--done': isEmbedded && !embedding && !embedError,

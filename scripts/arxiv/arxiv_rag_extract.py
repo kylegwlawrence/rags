@@ -30,6 +30,10 @@ def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Itera
     body when present (so a paper that gets HTML downloaded later re-embeds
     even when its OAI datestamp didn't move), plus `CLEANER_VERSION` so any
     cleaning-pipeline change invalidates every previously-stored chunk.
+
+    The live-embed router (`api.routers.arxiv.embed_paper`) duplicates this
+    construction inline using the same primitives — keep the two in sync if
+    either changes.
     """
     if limit is not None:
         cursor = arxiv_conn.execute(

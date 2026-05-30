@@ -91,6 +91,7 @@ def health(response: Response) -> dict:
         ("geonames", db.geonames),
         ("billstatus", db.billstatus),
         ("eurlex", db.eurlex),
+        ("eurlex_rag", db.eurlex_rag),
         ("enwiki_rag", db.enwiki_rag),
     ):
         try:

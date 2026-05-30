@@ -48,6 +48,7 @@ WORLDBANK_DB = DATA_DIR / "worldbank" / "worldbank.db"
 GEONAMES_DB = DATA_DIR / "geonames" / "geonames.db"
 BILLSTATUS_DB = DATA_DIR / "billstatus" / "billstatus.db"
 EURLEX_DB = DATA_DIR / "eurlex" / "eurlex.db"
+EURLEX_RAG_DB = DATA_DIR / "eurlex" / "eurlex_rag.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -155,6 +156,7 @@ _worldbank: sqlite3.Connection | None = None
 _geonames: sqlite3.Connection | None = None
 _billstatus: sqlite3.Connection | None = None
 _eurlex: sqlite3.Connection | None = None
+_eurlex_rag: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -339,3 +341,11 @@ def eurlex() -> sqlite3.Connection:
     if _eurlex is None:
         _eurlex = _connect_ro(EURLEX_DB)
     return _eurlex
+
+
+def eurlex_rag() -> sqlite3.Connection:
+    """Cached read-only connection to eurlex_rag.db (built by scripts/eurlex/eurlex_index_rag.py)."""
+    global _eurlex_rag
+    if _eurlex_rag is None:
+        _eurlex_rag = _connect_ro_with_vec(EURLEX_RAG_DB)
+    return _eurlex_rag

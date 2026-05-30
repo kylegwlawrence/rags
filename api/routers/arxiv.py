@@ -1,14 +1,27 @@
 import sqlite3
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
-from api.models import Page, Paper
+from api.models import EmbedResult, Page, Paper
+from rag import Doc, content_hash
+from rag.chunker import chunk_markdown
+from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
+from rag.embed_one import embed_doc
+from rag.html_to_markdown import html_to_markdown
+from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/arxiv", tags=["arxiv"])
+
+# Live-embed chunk settings match `scripts/arxiv/arxiv_index_rag.py` (both
+# pull from `rag.profiles.DEFAULT` and use `chunk_markdown`), so a paper
+# embedded via the button produces the same chunks as a batch indexer run.
+# The Doc-building logic mirrors `arxiv_rag_extract.iter_docs` — keep the two
+# in sync if either changes.
 
 SORTS = {
     "submitted_desc": "submitted_date DESC",
@@ -256,6 +269,76 @@ def get_paper_content(
     if row["html_content"] is None:
         raise HTTPException(status_code=404, detail="paper has no downloaded HTML")
     return Response(content=row["html_content"], media_type="text/html; charset=utf-8")
+
+
+@router.post("/papers/{paper_id:path}/embed", response_model=EmbedResult)
+def embed_paper(
+    paper_id: str,
+    conn: sqlite3.Connection = Depends(db.arxiv),
+) -> EmbedResult:
+    """Embed one arxiv paper into arxiv_rag.db on demand (synchronous).
+
+    Mirrors `arxiv_rag_extract.iter_docs`: renders downloaded HTML via
+    `html_to_markdown` (chunked section-aware) or falls back to the cleaned
+    abstract / title when no body is on disk. Replaces any chunks already
+    stored for this paper, so it becomes searchable through `/arxiv/chunks`
+    immediately — the RAG DB runs in WAL mode, so the cached read-only
+    connection picks up the new rows without a uvicorn restart.
+
+    Returns `embedded=false` when the paper yields no chunks (genuinely empty
+    body and abstract). A 503 means Ollama was unreachable; any existing
+    chunks are left untouched.
+    """
+    row = conn.execute(
+        "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
+        "FROM papers WHERE id = ?",
+        [paper_id],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
+
+    title = normalize_whitespace(strip_html(row["title"] or ""))
+    html_content = row["html_content"]
+    text = html_to_markdown(html_content).strip() if html_content else ""
+    if not text:
+        abstract = normalize_whitespace(strip_html(row["abstract"] or ""))
+        text = abstract or title
+    html_marker = content_hash(html_content)[:8] if html_content else "no-html"
+    base_version = row["oai_datestamp"] or content_hash(
+        title, row["abstract"] or "", row["updated_date"]
+    )
+    doc = Doc(
+        doc_id=row["id"],
+        title=title or row["id"],
+        version=f"{base_version}-{html_marker}-{CLEANER_VERSION}",
+        text=text,
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.ARXIV_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_fn=chunk_markdown,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
 
 
 @router.get("/papers/{paper_id:path}", response_model=Paper)

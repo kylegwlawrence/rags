@@ -1,10 +1,15 @@
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
+from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
-from api.models import EurlexLaw, EurlexLawDetail, Page
+from api.models import EmbedResult, EurlexLaw, EurlexLawDetail, Page
+from rag.embed_one import embed_doc
+from rag.eurlex import build_doc
+from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/eurlex", tags=["eurlex"])
 
@@ -117,7 +122,64 @@ def list_laws(
     )
 
 
-# /content must come before /{celex} so FastAPI doesn't treat "content" as a CELEX id.
+# /content and /embed must come before /{celex} so FastAPI doesn't treat those
+# tokens as CELEX ids.
+@router.post("/laws/{celex}/embed", response_model=EmbedResult)
+def embed_law(
+    celex: str,
+    conn: sqlite3.Connection = Depends(db.eurlex),
+) -> EmbedResult:
+    """Embed one EUR-Lex law into eurlex_rag.db on demand (synchronous).
+
+    Reads the act's `act_raw_text` body and chunks it as flat prose via the
+    same `rag.eurlex.build_doc` builder the batch indexer uses. Replaces any
+    chunks already stored for the law, becoming searchable through
+    `/eurlex/chunks` immediately (the RAG DB runs in WAL mode, so the cached
+    read-only connection picks up the new rows without a uvicorn restart).
+
+    Returns `embedded=false` when the law has no body text. A 503 means
+    Ollama was unreachable; existing chunks are untouched.
+    """
+    row = conn.execute(
+        "SELECT CELEX, Act_name, act_raw_text FROM laws WHERE CELEX = ?",
+        [celex],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"law {celex!r} not found")
+    doc = build_doc(row)
+    if doc is None:
+        return EmbedResult(
+            doc_id=celex,
+            title=row["Act_name"] or celex,
+            chunk_count=0,
+            embedded=False,
+        )
+
+    rag_conn = db.connect_rag_rw(db.EURLEX_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
+
+
 @router.get("/laws/{celex}/content")
 def get_law_content(
     celex: str,
@@ -160,3 +222,17 @@ def get_law(
         proposal_link=row["Proposal_link"] or None,
         oeil_link=row["Oeil_link"] or None,
     )
+
+
+add_chunks_route(
+    router,
+    opener=db.eurlex_rag,
+    source_name="eurlex",
+    indexer_script="eurlex/eurlex_index_rag.py",
+)
+add_doc_chunks_route(
+    router,
+    opener=db.eurlex_rag,
+    source_name="eurlex",
+    indexer_script="eurlex/eurlex_index_rag.py",
+)

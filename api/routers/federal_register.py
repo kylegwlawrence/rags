@@ -1,11 +1,16 @@
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
-from api.models import FederalRegisterDoc, Page
+from api.models import EmbedResult, FederalRegisterDoc, Page
+from rag.chunker import chunk_markdown
+from rag.embed_one import embed_doc
+from rag.federal_register import build_doc
+from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/federal_register", tags=["federal_register"])
 
@@ -135,6 +140,61 @@ def get_document_content(
     if not body:
         raise HTTPException(status_code=404, detail="document has no text content")
     return Response(content=body, media_type="text/plain; charset=utf-8")
+
+
+@router.post("/documents/{document_number}/embed", response_model=EmbedResult)
+def embed_document(
+    document_number: str,
+    conn: sqlite3.Connection = Depends(db.federal_register),
+) -> EmbedResult:
+    """Embed one Federal Register document into federal_register_rag.db (synchronous).
+
+    Renders the document to section-headered markdown via
+    `rag.federal_register.build_doc` — the same builder
+    `federal_register_index_rag.py` uses, so a button-embedded document
+    chunks identically to a batch indexer pass. Replaces any chunks already
+    stored for it, becoming searchable through `/federal_register/chunks`
+    immediately (the RAG DB runs in WAL mode, so the cached read-only
+    connection picks up the new rows without a uvicorn restart).
+
+    Returns `embedded=false` when the document has neither title nor
+    abstract. A 503 means Ollama was unreachable; existing chunks are
+    untouched.
+    """
+    row = _lookup(conn, document_number)
+    doc = build_doc(row)
+    if doc is None:
+        return EmbedResult(
+            doc_id=document_number,
+            title=row["title"] or document_number,
+            chunk_count=0,
+            embedded=False,
+        )
+
+    rag_conn = db.connect_rag_rw(db.FEDERAL_REGISTER_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_fn=chunk_markdown,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
 
 
 @router.get("/documents/{document_number}", response_model=FederalRegisterDoc)

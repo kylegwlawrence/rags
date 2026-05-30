@@ -2,14 +2,25 @@ import re
 import sqlite3
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
-from api.models import Page, Work
+from api.models import EmbedResult, Page, Work
+from rag import Doc, content_hash
+from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
+from rag.embed_one import embed_doc
+from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/openalex", tags=["openalex"])
+
+# Live-embed chunk settings come from `rag.profiles.DEFAULT` — the same
+# profile `scripts/openalex/openalex_index_rag.py` uses, so a work embedded
+# via the button chunks identically to a batch indexer pass. Doc-building
+# logic mirrors `openalex_rag_extract.iter_docs` (title + abstract only —
+# openalex.db has no full body).
 
 SHORT_ID_RE = re.compile(r"^W\d+$")
 OPENALEX_PREFIX = "https://openalex.org/"
@@ -188,6 +199,76 @@ def list_works(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post("/works/{short_id}/embed", response_model=EmbedResult)
+def embed_work(
+    short_id: str,
+    conn: sqlite3.Connection = Depends(db.openalex),
+) -> EmbedResult:
+    """Embed one OpenAlex work into openalex_rag.db on demand (synchronous).
+
+    Embeds title + abstract (openalex.db has no body content). Replaces any
+    chunks already stored for this work, so it becomes searchable through
+    `/openalex/chunks` immediately — the RAG DB runs in WAL mode, so the
+    cached read-only connection picks up the new rows without a uvicorn
+    restart.
+
+    Returns `embedded=false` when both title and abstract are empty after
+    cleanup. A 503 means Ollama was unreachable; existing chunks are
+    untouched.
+    """
+    if not SHORT_ID_RE.match(short_id):
+        raise HTTPException(status_code=400, detail="id must look like W123456")
+    full = OPENALEX_PREFIX + short_id
+    row = conn.execute(
+        "SELECT id, title, abstract FROM works WHERE id = ?",
+        [full],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"work {short_id!r} not found")
+
+    title = normalize_whitespace(strip_html(row["title"] or ""))
+    abstract = normalize_whitespace(strip_html(row["abstract"] or ""))
+    if title and abstract:
+        text = f"{title}\n\n{abstract}"
+    else:
+        text = title or abstract
+    # Fallback to the W-id (not '<untitled>') so the embedder's format_document
+    # header doesn't push NULL-title works toward each other in vector space
+    # via a shared placeholder string.
+    display_title = title or short_id
+    doc = Doc(
+        doc_id=short_id,
+        title=display_title,
+        version=f"{content_hash(title, abstract)}-{CLEANER_VERSION}",
+        text=text,
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.OPENALEX_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
     )
 
 
