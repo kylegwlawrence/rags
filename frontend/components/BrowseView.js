@@ -138,6 +138,7 @@ export default defineComponent({
   template: `
     <div class="browse-view">
       <form class="filter-bar" @submit.prevent="applyFilters">
+        <div class="filter-bar__fields">
         <template v-for="f in source.filters" :key="f.key">
           <div v-if="f.type === 'text' || f.type === 'number'" class="filter-bar__field">
             <label class="filter-bar__label">{{ f.label }}</label>
@@ -190,6 +191,7 @@ export default defineComponent({
             />
           </div>
         </template>
+        </div>
         <button type="submit" class="filter-bar__btn">Search</button>
       </form>
 
