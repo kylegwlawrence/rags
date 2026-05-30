@@ -72,7 +72,6 @@ export const SOURCES = {
       { key: 'author',      label: 'Author',       type: 'text',   placeholder: 'substring' },
       { key: 'year',        label: 'Year',         type: 'number', placeholder: '2023' },
       { key: 'cited_by_min', label: 'Min citations', type: 'number', placeholder: '100' },
-      { key: 'venue',       label: 'Venue',        type: 'text',   placeholder: 'exact match' },
       { key: 'sort', label: 'Sort', type: 'select', options: [
         { value: '',                   label: 'Default' },
         { value: 'cited_by_count_desc', label: 'Most cited' },
@@ -167,7 +166,6 @@ export const SOURCES = {
     filters: [
       { key: 'title',    label: 'Title',    type: 'text', placeholder: 'substring' },
       { key: 'author',   label: 'Author',   type: 'text', placeholder: 'substring' },
-      { key: 'language', label: 'Language', type: 'text', placeholder: 'e.g. en' },
       { key: 'embedded', label: 'Embedding', type: 'radio', options: [
         { value: '',      label: 'All' },
         { value: 'true',  label: 'Embedded only' },
@@ -418,11 +416,6 @@ export const SOURCES = {
         { value: 'true',  label: 'Downloaded only' },
         { value: 'false', label: 'Not downloaded' },
       ]},
-      { key: 'sort', label: 'Sort', type: 'select', options: [
-        { value: '',          label: 'Newest first' },
-        { value: 'oldest',    label: 'Oldest first' },
-        { value: 'relevance', label: 'Relevance' },
-      ]},
     ],
   },
 
@@ -467,7 +460,6 @@ export const SOURCES = {
         { value: 'In Force',   label: 'In Force' },
         { value: 'Not in Force', label: 'Not in Force' },
       ]},
-      { key: 'author',   label: 'Author',   type: 'text',   placeholder: 'substring' },
     ],
   },
 
@@ -517,11 +509,6 @@ export const SOURCES = {
       { key: 'sponsor',     label: 'Sponsor',     type: 'text',   placeholder: 'substring' },
       { key: 'policy_area', label: 'Policy area', type: 'text',   placeholder: 'exact match' },
       { key: 'subject',     label: 'Subject',     type: 'text',   placeholder: 'substring' },
-      { key: 'sort', label: 'Sort', type: 'select', options: [
-        { value: '',          label: 'Newest first' },
-        { value: 'oldest',    label: 'Oldest first' },
-        { value: 'relevance', label: 'Relevance' },
-      ]},
     ],
   },
 };
