@@ -86,25 +86,65 @@ def select_pending(
     limit: int | None,
     *,
     force: bool,
+    from_date: str | None = None,
+    categories: list[str] | None = None,
+    category_prefixes: list[str] | None = None,
 ) -> list[str]:
     """Return paper IDs that need HTML download, newest-first by ``submitted_date``.
 
     With ``force=True``, returns every paper id (re-download everything,
     capped by ``limit``). Otherwise returns only papers with NULL
     ``download_status`` or ``download_status='retry'``.
+
+    ``from_date`` filters to papers with ``submitted_date >= from_date`` (ISO
+    date string, e.g. ``'2023-01-01'``). ``categories`` filters to papers
+    whose ``categories`` field contains at least one of the given tokens
+    (e.g. ``['cs.LG', 'stat.ML']``). ``category_prefixes`` matches any
+    category token that starts with the given prefix followed by a dot
+    (e.g. ``['physics']`` matches ``physics.flu-dyn``, ``physics.optics``,
+    etc.). Both filters are combined with OR when both are provided.
     """
-    if force:
-        sql = "SELECT id FROM papers ORDER BY submitted_date DESC"
-    else:
-        sql = (
-            "SELECT id FROM papers "
-            "WHERE download_status IS NULL OR download_status = 'retry' "
-            "ORDER BY submitted_date DESC"
+    conditions: list[str] = []
+    params: list = []
+
+    if not force:
+        conditions.append(
+            "(download_status IS NULL OR download_status = 'retry')"
         )
-    params: tuple = ()
+
+    if from_date:
+        conditions.append("submitted_date >= ?")
+        params.append(from_date)
+
+    cat_clauses: list[str] = []
+
+    if categories:
+        # categories column is space-separated; match each token with LIKE
+        for cat in categories:
+            cat_clauses.append(
+                "(categories = ? OR categories LIKE ? OR categories LIKE ? OR categories LIKE ?)"
+            )
+            params += [cat, f"% {cat}", f"{cat} %", f"% {cat} %"]
+
+    if category_prefixes:
+        # Match any token that starts with "<prefix>." at the start of the
+        # field or after a space boundary.
+        for prefix in category_prefixes:
+            cat_clauses.append(
+                "(categories LIKE ? OR categories LIKE ?)"
+            )
+            params += [f"{prefix}.%", f"% {prefix}.%"]
+
+    if cat_clauses:
+        conditions.append(f"({' OR '.join(cat_clauses)})")
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"SELECT id FROM papers {where} ORDER BY submitted_date DESC"
+
     if limit is not None:
         sql += " LIMIT ?"
-        params = (limit,)
+        params.append(limit)
+
     return [r[0] for r in conn.execute(sql, params)]
 
 
@@ -190,6 +230,36 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Re-download every paper, ignoring existing download_status.",
     )
+    parser.add_argument(
+        "--from-date",
+        dest="from_date",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="Only process papers submitted on or after this date.",
+    )
+    parser.add_argument(
+        "--category",
+        dest="categories",
+        action="append",
+        default=None,
+        metavar="CAT",
+        help=(
+            "Only process papers in this category (e.g. cs.LG). "
+            "Repeat to allow multiple categories."
+        ),
+    )
+    parser.add_argument(
+        "--category-prefix",
+        dest="category_prefixes",
+        action="append",
+        default=None,
+        metavar="PREFIX",
+        help=(
+            "Only process papers whose categories include any subcategory "
+            "starting with PREFIX (e.g. physics matches physics.flu-dyn, "
+            "physics.optics, etc.). Repeat to allow multiple prefixes."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.db.is_file():
@@ -199,7 +269,14 @@ def main(argv: list[str] | None = None) -> int:
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
 
-    paper_ids = select_pending(conn, args.limit, force=args.force)
+    paper_ids = select_pending(
+        conn,
+        args.limit,
+        force=args.force,
+        from_date=args.from_date,
+        categories=args.categories,
+        category_prefixes=args.category_prefixes,
+    )
     _print_stderr(f"Processing {len(paper_ids)} papers...")
 
     stats = download_papers(conn, paper_ids, progress=_print_stderr)

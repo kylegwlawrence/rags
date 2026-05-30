@@ -84,6 +84,9 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_papers_submitted   ON papers(submitted_date);
         CREATE INDEX IF NOT EXISTS idx_papers_primary_cat ON papers(primary_category);
+        -- Speeds up the API's ?has_html= filter (download_status IS / IS NOT
+        -- 'downloaded') and the downloader's pending-work scans.
+        CREATE INDEX IF NOT EXISTS idx_papers_download_status ON papers(download_status);
 
         CREATE TABLE IF NOT EXISTS authors (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
