@@ -32,9 +32,6 @@ python scripts/simplewiki/simplewiki_index_rag.py   # data/simplewiki/simplewiki
 python scripts/python_docs/python_docs_download.py
 python scripts/python_docs/python_docs_index_fts.py
 python scripts/python_docs/python_docs_index_rag.py # data/pydocs/python_docs_rag.db
-python scripts/wikihow/wikihow_loader.py
-python scripts/wikihow/wikihow_index_fts.py
-python scripts/wikihow/wikihow_index_rag.py
 python scripts/loc/loc_download.py
 python scripts/loc/loc_newspapers_download.py
 python scripts/loc/loc_books_marc.py
@@ -70,12 +67,11 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `/simplewiki/articles`, `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks`
 - `/enwiki/articles`, `/{page_id}`, `/{page_id}/content` — thin proxy to `scripts/enwiki/enwiki_remote_server.py` running on `raspberrypi6`. Read-only; no `/chunks` and no embed in v1.
 - `/pydocs/docs`, `/{doc_path:path}`, `/{doc_path:path}/content`, `/pydocs/chunks`
-- `/wikihow/articles`, `/{id}`, `/{id}/content`, `/wikihow/chunks`
 - `/sec_edgar/filings` (`?downloaded=` true/false), `/{accession_number}`, `/{accession_number}/content`, `POST /{accession_number}/download`, `/sec_edgar/chunks`
 - `/worldbank/indicators` (`?q=`, `?topic=`), `/indicators/{id}`, `/indicators/{id}/values` (`?country=`, `?year=`), `/worldbank/countries`, `/countries/{id}/data` (`?topic=`, `?year=`)
 - `/billstatus/bills` (`?q=`, `?congress=`, `?bill_type=`, `?sponsor=`, `?policy_area=`, `?subject=`, `?sort=`), `/{bill_id}`, `/{bill_id}/content` — bill_id format is `{congress}-{TYPE}-{number}`, e.g. `118-HR-1234`. No RAG/chunks.
 
-`/wikihow/articles` rows are per-step (not whole guides); `/wikihow/chunks` reassembles whole guides. The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings whose body hasn't been downloaded — `?downloaded=` narrows to fetched/unfetched. `POST /simplewiki/.../embed` and `POST /sec_edgar/.../download` are the only write paths in the API.
+The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings whose body hasn't been downloaded — `?downloaded=` narrows to fetched/unfetched. `POST /simplewiki/.../embed` and `POST /sec_edgar/.../download` are the only write paths in the API.
 
 ## Script notes
 
@@ -117,11 +113,6 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `python_docs_download.py` — Python docs text archive. Pass a pinned `--python-version` (e.g. `3.13`); the generic `3` redirect doesn't work for `.tar.bz2`.
 - `python_docs_index_fts.py` — Rebuilds `docs_fts`. Required for `?q=`.
 - `python_docs_index_rag.py` — `python_docs_rag.db`. Full run ≈ 513 pages; runtime not yet measured. Restart after.
-
-**wikihow**
-- `wikihow_loader.py` — Loads `wikihowSep.csv` → `wikihow.db` (one row per step). Required before `/wikihow` routes work.
-- `wikihow_index_fts.py` — Rebuilds `articles_fts`. Required for `?q=`.
-- `wikihow_index_rag.py` — `wikihow_rag.db`. Default `--limit 100` caps guides (not step rows). Restart after.
 
 **loc**
 - `loc_download.py` — LOC search API. Flags: `--format`, `--language`. Resumes via `ingest_state`.

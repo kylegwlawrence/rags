@@ -30,7 +30,7 @@ class ChunkerProfile:
 
 
 # Soft default: most narrative prose (arxiv abstracts/HTML, openalex,
-# federal_register, sec_edgar filings, python_docs, wikihow, github READMEs).
+# federal_register, sec_edgar filings, python_docs, github READMEs).
 DEFAULT = ChunkerProfile(chunk_size=1500, max_chunk_size=1800, overlap=150)
 
 # Dense key:value or short-paragraph content (factbook, openfoodfacts).
