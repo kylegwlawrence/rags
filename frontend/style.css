@@ -362,8 +362,8 @@ body {
   color: var(--text-secondary);
   height: var(--control-height);
   margin: 0;
-  min-width: 90px;
-  max-width: 170px;
+  min-width: 72px;
+  max-width: 132px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease,
               background 0.15s ease;
 }
@@ -487,8 +487,8 @@ select.filter-bar__input {
 
 .multiselect {
   position: relative;
-  min-width: 100px;
-  max-width: 170px;
+  min-width: 84px;
+  max-width: 132px;
 }
 
 .multiselect__trigger {
