@@ -42,6 +42,8 @@ python scripts/sec_edgar/sec_edgar_index_rag.py       # data/sec_edgar/sec_edgar
 python scripts/worldbank/worldbank_download.py        # indicators + observations → data/worldbank/worldbank.db
 python scripts/billstatus/billstatus_download.py      # GPO BILLSTATUS XML → data/billstatus/billstatus.db
 python scripts/billstatus/billstatus_index_fts.py     # bills_fts FTS5 index
+python scripts/ceps/ceps_download.py                  # CEPS EurLex dump (Harvard Dataverse) → data/eurlex/eurlex.db
+python scripts/eurlex/eurlex_index_rag.py             # data/eurlex/eurlex_rag.db
 ```
 
 ## Running the API
@@ -131,6 +133,13 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 **billstatus**
 - `billstatus_download.py` — Downloads GPO BILLSTATUS XML bulk zips per Congress/bill-type, extracts metadata + the latest CRS summary into `bills` (one row per bill, PK `{congress}-{TYPE}-{number}`). Covers 108th–present. Flags: `--db`, `--congress-from` (default: resume from `ingest_state`), `--congress-to` (default 119). Resumable via `ingest_state`.
 - `billstatus_index_fts.py` — Rebuilds `bills_fts` over `title + summary + subjects` (porter, external-content). Required for `?q=`. Restart after. No RAG indexer (summaries are short).
+
+**eurlex** (ingested by the `ceps` downloader — see note below)
+- `eurlex_index_rag.py` — `eurlex_rag.db` over the `laws` bodies (`act_raw_text`, flat prose via `chunk_doc` — extracted PDF text carries no reliable `##` headings). Reads `data/eurlex/eurlex.db`; re-runnable, content-hash skip. Flags: `--limit` (full 142k corpus is many hours on local Ollama). Restart after. Per-row Doc construction lives in `rag/eurlex.py` (`build_doc`), shared with the API's live-embed route.
+- `eurlex_rag_extract.py` — Indexer entry point: queries `laws` (non-empty `act_raw_text`, newest-first) and yields one Doc per row via `rag.eurlex.build_doc`. Not run directly; imported by `eurlex_index_rag.py`.
+
+**ceps** (EUR-Lex ingest — lives in `scripts/ceps/`, writes into `data/eurlex/`)
+- `ceps_download.py` — The **only** downloader for the EUR-Lex source. Pulls the CEPS EurLex dataset (142k EU laws, 1952–2019; a frozen snapshot, not incremental) from Harvard Dataverse (DOI `10.7910/DVN/0EGYWY`) into `data/eurlex/raw/`, then bulk-loads every CSV/tab into a dynamically-typed `laws` table (header columns sanitized to TEXT). The CSV ships the full law text in `act_raw_text`, so there is no separate body-fetch step. Flags: `--db` (default `data/eurlex/eurlex.db`), `--download-dir` (default `data/eurlex/raw`), `--reset` (drops + reimports `laws`). Idempotent: skips already-downloaded files and refuses to reimport a non-empty `laws` table without `--reset`. The `raw/` CSVs are only needed for a `--reset` reimport — safe to delete once `laws` is populated. There is no updater for laws past 2019.
 
 ### Re-indexing notes
 
