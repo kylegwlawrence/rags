@@ -50,6 +50,7 @@ HEALTH_DBS = (
     "geonames",
     "billstatus",
     "eurlex", "eurlex_rag",
+    "ecfr",
     "enwiki_rag",
     # enwiki is remote (HTTP probe in main.py) so it shows up too unless the
     # ENWIKI_REMOTE_URL env var is unset, in which case the entry says

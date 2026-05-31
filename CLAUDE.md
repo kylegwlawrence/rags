@@ -44,6 +44,8 @@ python scripts/billstatus/billstatus_download.py      # GPO BILLSTATUS XML → d
 python scripts/billstatus/billstatus_index_fts.py     # bills_fts FTS5 index
 python scripts/ceps/ceps_download.py                  # CEPS EurLex dump (Harvard Dataverse) → data/eurlex/eurlex.db
 python scripts/eurlex/eurlex_index_rag.py             # data/eurlex/eurlex_rag.db
+python scripts/ecfr/ecfr_download.py                  # eCFR titles + section text → data/ecfr/ecfr.db
+python scripts/ecfr/ecfr_index_fts.py                 # regulations_fts FTS5 index
 ```
 
 ## Running the API
@@ -72,6 +74,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `/sec_edgar/filings` (`?downloaded=` true/false), `/{accession_number}`, `/{accession_number}/content`, `POST /{accession_number}/download`, `/sec_edgar/chunks`
 - `/worldbank/indicators` (`?q=`, `?topic=`), `/indicators/{id}`, `/indicators/{id}/values` (`?country=`, `?year=`), `/worldbank/countries`, `/countries/{id}/data` (`?topic=`, `?year=`)
 - `/billstatus/bills` (`?q=`, `?congress=`, `?bill_type=`, `?sponsor=`, `?policy_area=`, `?subject=`, `?sort=`), `/{bill_id}`, `/{bill_id}/content` — bill_id format is `{congress}-{TYPE}-{number}`, e.g. `118-HR-1234`. No RAG/chunks.
+- `/ecfr/regulations` (`?q=`, `?title=`, `?part=`, `?sort=`), `/{reg_id}`, `/{reg_id}/content` — one row per CFR section; `reg_id` is the integer row id. `?q=` is FTS5 over heading + content; `sort=relevance` requires `q`, else document (reading) order. No RAG/chunks.
 
 The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings whose body hasn't been downloaded — `?downloaded=` narrows to fetched/unfetched. `POST /simplewiki/.../embed` and `POST /sec_edgar/.../download` are the only write paths in the API.
 
@@ -140,6 +143,10 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 
 **ceps** (EUR-Lex ingest — lives in `scripts/ceps/`, writes into `data/eurlex/`)
 - `ceps_download.py` — The **only** downloader for the EUR-Lex source. Pulls the CEPS EurLex dataset (142k EU laws, 1952–2019; a frozen snapshot, not incremental) from Harvard Dataverse (DOI `10.7910/DVN/0EGYWY`) into `data/eurlex/raw/`, then bulk-loads every CSV/tab into a dynamically-typed `laws` table (header columns sanitized to TEXT). The CSV ships the full law text in `act_raw_text`, so there is no separate body-fetch step. Flags: `--db` (default `data/eurlex/eurlex.db`), `--download-dir` (default `data/eurlex/raw`), `--reset` (drops + reimports `laws`). Idempotent: skips already-downloaded files and refuses to reimport a non-empty `laws` table without `--reset`. The `raw/` CSVs are only needed for a `--reset` reimport — safe to delete once `laws` is populated. There is no updater for laws past 2019.
+
+**ecfr**
+- `ecfr_download.py` — Fetches the current Electronic Code of Federal Regulations from the `ecfr.gov` versioner API. Walks all 50 CFR titles (Title 35 is reserved/empty), then stores one row per section in `regulations` (`title_num`, `title_name`, `chapter`, `part`, `section`, `heading`, `content`; `UNIQUE(title_num, section)`). Single current snapshot — no amendment history. Set `MAILTO`. Resumes via `ingest_state.completed_titles`.
+- `ecfr_index_fts.py` — Rebuilds `regulations_fts` (porter, external-content) over `heading + content`, keyed on the `id` INTEGER PK. Required for `?q=`. ~20 s. No RAG indexer (227k sections; full-text search only). Restart after.
 
 ### Re-indexing notes
 

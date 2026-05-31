@@ -556,10 +556,47 @@ export const SOURCES = {
       { key: 'subject',     label: 'Subject',     type: 'text',   placeholder: 'substring' },
     ],
   },
+
+  ecfr: {
+    key: 'ecfr',
+    label: 'eCFR',
+    subtitle: 'U.S. federal regulations',
+    listEndpoint: '/ecfr/regulations',
+    detailEndpoint: (id) => `/ecfr/regulations/${id}`,
+    contentEndpoint: (id) => `/ecfr/regulations/${id}/content`,
+    chunksEndpoint: null,
+    idField: 'id',
+    titleField: 'heading',
+    subtitle_fn: (item) => item.title_name || '',
+    meta_fn: (item) => [
+      item.title_num ? `Title ${item.title_num}` : '',
+      item.part,
+      item.section,
+    ].filter(Boolean).join(' · '),
+    contentType: 'text',
+    metaFields: [
+      { label: 'ID',      value: (d) => d.id },
+      { label: 'Title',   value: (d) => d.title_num ? `${d.title_num} — ${d.title_name || ''}` : '' },
+      { label: 'Chapter', value: (d) => d.chapter },
+      { label: 'Part',    value: (d) => d.part },
+      { label: 'Section', value: (d) => d.section },
+      { label: 'Heading', value: (d) => d.heading },
+      { label: 'Size',    value: (d) => d.content_chars ? `${d.content_chars.toLocaleString()} chars` : '' },
+    ],
+    filters: [
+      { key: 'q',     label: 'Search', type: 'text',   placeholder: 'FTS5 query…' },
+      { key: 'title', label: 'Title',  type: 'number', placeholder: 'CFR title 1–50' },
+      { key: 'part',  label: 'Part',   type: 'text',   placeholder: 'substring' },
+      { key: 'sort', label: 'Sort', type: 'select', options: [
+        { value: '',          label: 'Document order' },
+        { value: 'relevance', label: 'Relevance' },
+      ]},
+    ],
+  },
 };
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
   'pydocs', 'factbook', 'worldbank', 'geonames',
-  'federal_register', 'github_readmes', 'sec_edgar', 'billstatus', 'eurlex',
+  'federal_register', 'github_readmes', 'sec_edgar', 'billstatus', 'eurlex', 'ecfr',
 ];

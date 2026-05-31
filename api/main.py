@@ -11,6 +11,7 @@ from api import db  # noqa: E402
 from api.routers import (  # noqa: E402
     arxiv,
     billstatus,
+    ecfr,
     enwiki,
     eurlex,
     factbook,
@@ -40,6 +41,7 @@ app.include_router(worldbank.router)
 app.include_router(geonames.router)
 app.include_router(billstatus.router)
 app.include_router(eurlex.router)
+app.include_router(ecfr.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -91,6 +93,7 @@ def health(response: Response) -> dict:
         ("geonames", db.geonames),
         ("billstatus", db.billstatus),
         ("eurlex", db.eurlex),
+        ("ecfr", db.ecfr),
         ("eurlex_rag", db.eurlex_rag),
         ("enwiki_rag", db.enwiki_rag),
     ):

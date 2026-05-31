@@ -304,3 +304,20 @@ class GeonamesPlace(BaseModel):
     elevation: int | None
     timezone: str | None
     sentence: str | None
+
+
+class EcfrRegulation(BaseModel):
+    """One section from `ecfr.regulations`. Regulation body served at /content.
+
+    `content_chars` is `length(content)` — SQLite returns the character count
+    for a TEXT value, not its UTF-8 byte length.
+    """
+
+    id: int
+    title_num: int | None
+    title_name: str | None
+    chapter: str | None
+    part: str | None
+    section: str | None
+    heading: str | None
+    content_chars: int | None

@@ -49,6 +49,7 @@ GEONAMES_DB = DATA_DIR / "geonames" / "geonames.db"
 BILLSTATUS_DB = DATA_DIR / "billstatus" / "billstatus.db"
 EURLEX_DB = DATA_DIR / "eurlex" / "eurlex.db"
 EURLEX_RAG_DB = DATA_DIR / "eurlex" / "eurlex_rag.db"
+ECFR_DB = DATA_DIR / "ecfr" / "ecfr.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -157,6 +158,7 @@ _geonames: sqlite3.Connection | None = None
 _billstatus: sqlite3.Connection | None = None
 _eurlex: sqlite3.Connection | None = None
 _eurlex_rag: sqlite3.Connection | None = None
+_ecfr: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -349,3 +351,11 @@ def eurlex_rag() -> sqlite3.Connection:
     if _eurlex_rag is None:
         _eurlex_rag = _connect_ro_with_vec(EURLEX_RAG_DB)
     return _eurlex_rag
+
+
+def ecfr() -> sqlite3.Connection:
+    """Cached read-only connection to ecfr.db (FTS index built by scripts/ecfr/ecfr_index_fts.py)."""
+    global _ecfr
+    if _ecfr is None:
+        _ecfr = _connect_ro(ECFR_DB)
+    return _ecfr
