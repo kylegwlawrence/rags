@@ -100,6 +100,7 @@ def health(response: Response) -> dict:
         ("eurlex_rag", db.eurlex_rag),
         ("enwiki_rag", db.enwiki_rag),
         ("pdfs", db.pdfs),
+        ("pdfs_rag", db.pdfs_rag),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

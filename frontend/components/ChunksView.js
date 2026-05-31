@@ -58,13 +58,25 @@ export default defineComponent({
       return expanded.value.has(chunk.chunk_id);
     }
 
+    // PDF chunk sections are page labels ("p. 42"); pull the page number out so
+    // clicking the hit can deep-link the viewer to it. null for every other
+    // source (whose section is a heading, not a page).
+    function pageOf(chunk) {
+      const m = /^p\.\s*(\d+)$/.exec(chunk.section || '');
+      return m ? Number(m[1]) : null;
+    }
+
+    function openHit(chunk) {
+      openDocById(chunk.doc_id, pageOf(chunk));
+    }
+
     onMounted(() => {
       if (query.value.trim()) search();
     });
 
     return {
       query, topK, results, loading, error, usedDense,
-      search, onKeydown, toggleExpand, chunkText, isExpanded, openDocById,
+      search, onKeydown, toggleExpand, chunkText, isExpanded, openHit,
     };
   },
 
@@ -104,7 +116,7 @@ export default defineComponent({
             <span v-if="chunk.section" class="section-badge">{{ chunk.section }}</span>
             <button
               class="chunk-card__doc-link"
-              @click="openDocById(chunk.doc_id)"
+              @click="openHit(chunk)"
               :title="chunk.title"
             >{{ chunk.title }}</button>
             <span class="chunk-card__score">{{ chunk.score.toFixed(3) }}</span>

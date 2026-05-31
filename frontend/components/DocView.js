@@ -282,6 +282,14 @@ export default defineComponent({
       return false;
     }
 
+    // Source URL for the PDF <iframe>. When a chunk hit opened this doc with a
+    // target page (doc.targetPage), append a #page=N fragment — browsers' built-in
+    // PDF viewers honour it and jump straight to that page.
+    const pdfSrc = computed(() => {
+      const base = props.source.contentEndpoint(props.doc[props.source.idField]);
+      return props.doc.targetPage ? `${base}#page=${props.doc.targetPage}` : base;
+    });
+
     onMounted(async () => {
       if (await checkRedirect()) return;
       loadDetail();
@@ -311,7 +319,7 @@ export default defineComponent({
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel, showEmbed,
       downloading, downloadError, showDownload, downloadLabel, downloadFiling,
-      profileHtml,
+      profileHtml, pdfSrc,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
     };
   },
@@ -443,7 +451,8 @@ export default defineComponent({
         <pre v-else-if="source.contentType === 'text' && content" class="content-pre">{{ content }}</pre>
         <iframe
           v-else-if="source.contentType === 'pdf'"
-          :src="source.contentEndpoint(doc[source.idField])"
+          :key="pdfSrc"
+          :src="pdfSrc"
           class="pdf-frame"
           title="PDF document"
         />

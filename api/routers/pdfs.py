@@ -7,7 +7,12 @@ router lists/serves that metadata and streams the original PDF bytes from
 
 `doc_id` is the source filename stem. The list endpoint supports full-text
 search (`?q=`) over the page text via the `pages_fts` index built by
-`scripts/pdfs/pdfs_index_fts.py`; there is no RAG/chunks layer for this source.
+`scripts/pdfs/pdfs_index_fts.py`.
+
+Semantic search is served by `/pdfs/chunks` over `pdfs_rag.db`
+(`scripts/pdfs/pdfs_index_rag.py`). PDFs are chunked page by page, so each
+chunk's `section` is its page label (`"p. 42"`) — the frontend reads that to
+deep-link the in-browser viewer to the matching page.
 """
 
 import sqlite3
@@ -16,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from api import db
+from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
 from api.models import Page, PdfDocument
 
@@ -228,3 +234,19 @@ def get_document_content(
         content_disposition_type="inline",
         filename=full.name,
     )
+
+
+# Semantic search over pdfs_rag.db. Chunks are page-tagged (section = "p. N"),
+# so a hit tells the frontend which page to open in the viewer.
+add_chunks_route(
+    router,
+    opener=db.pdfs_rag,
+    source_name="pdfs",
+    indexer_script="pdfs/pdfs_index_rag.py",
+)
+add_doc_chunks_route(
+    router,
+    opener=db.pdfs_rag,
+    source_name="pdfs",
+    indexer_script="pdfs/pdfs_index_rag.py",
+)

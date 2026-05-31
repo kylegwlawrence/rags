@@ -608,7 +608,10 @@ export const SOURCES = {
     listEndpoint: '/pdfs/documents',
     detailEndpoint: (id) => `/pdfs/documents/${encodeURIComponent(id)}`,
     contentEndpoint: (id) => `/pdfs/documents/${encodeURIComponent(id)}/content`,
-    chunksEndpoint: null,
+    // Page-aware semantic search: chunk sections are page labels ("p. 42"), so a
+    // hit deep-links the viewer to its page via a #page=N fragment (see DocView).
+    chunksEndpoint: '/pdfs/chunks',
+    docChunksEndpoint: '/pdfs/doc-chunks',
     // idField is the filename stem; embedded PDF `title` metadata is often
     // blank, so the stem doubles as the reliable display title and the parsed
     // title (when present) shows as a meta field.

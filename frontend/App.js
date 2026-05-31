@@ -55,18 +55,22 @@ export default defineComponent({
       pushNav(key, 'browse');
     }
 
-    function openDoc(doc) {
+    function openDoc(doc, targetPage = null) {
+      // targetPage (PDFs only) deep-links the viewer to a page; stashed on the
+      // doc like redirectedFrom so DocView can read it without extra props.
+      if (targetPage != null) doc.targetPage = targetPage;
       selectedDoc.value = doc;
       activeView.value = 'doc';
       const docId = doc[activeSource.value.idField];
       pushNav(activeSourceKey.value, 'doc', docId);
     }
 
-    // Called from ChunksView when clicking a doc title — fetches full detail first.
-    async function openDocById(docId) {
+    // Called from ChunksView when clicking a doc title — fetches full detail
+    // first. targetPage (optional) opens a PDF straight to that page.
+    async function openDocById(docId, targetPage = null) {
       try {
         const doc = await getDoc(activeSource.value, String(docId));
-        openDoc(doc);
+        openDoc(doc, targetPage);
       } catch (e) {
         console.error('Failed to fetch doc:', e);
       }
