@@ -94,6 +94,7 @@ def health(response: Response) -> dict:
         ("billstatus", db.billstatus),
         ("eurlex", db.eurlex),
         ("ecfr", db.ecfr),
+        ("ecfr_rag", db.ecfr_rag),
         ("eurlex_rag", db.eurlex_rag),
         ("enwiki_rag", db.enwiki_rag),
     ):

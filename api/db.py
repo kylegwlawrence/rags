@@ -50,6 +50,7 @@ BILLSTATUS_DB = DATA_DIR / "billstatus" / "billstatus.db"
 EURLEX_DB = DATA_DIR / "eurlex" / "eurlex.db"
 EURLEX_RAG_DB = DATA_DIR / "eurlex" / "eurlex_rag.db"
 ECFR_DB = DATA_DIR / "ecfr" / "ecfr.db"
+ECFR_RAG_DB = DATA_DIR / "ecfr" / "ecfr_rag.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -159,6 +160,7 @@ _billstatus: sqlite3.Connection | None = None
 _eurlex: sqlite3.Connection | None = None
 _eurlex_rag: sqlite3.Connection | None = None
 _ecfr: sqlite3.Connection | None = None
+_ecfr_rag: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -359,3 +361,11 @@ def ecfr() -> sqlite3.Connection:
     if _ecfr is None:
         _ecfr = _connect_ro(ECFR_DB)
     return _ecfr
+
+
+def ecfr_rag() -> sqlite3.Connection:
+    """Cached read-only connection to ecfr_rag.db (populated on demand by the embed button)."""
+    global _ecfr_rag
+    if _ecfr_rag is None:
+        _ecfr_rag = _connect_ro_with_vec(ECFR_RAG_DB)
+    return _ecfr_rag

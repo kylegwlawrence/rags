@@ -1,10 +1,18 @@
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
+from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
-from api.models import EcfrRegulation, Page
+from api.models import EcfrRegulation, EmbedResult, Page
+from rag import Doc, content_hash
+from rag.chunker import chunk_doc
+from rag.cleaner import CLEANER_VERSION
+from rag.embed_one import embed_doc
+from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/ecfr", tags=["ecfr"])
 
@@ -46,6 +54,14 @@ def list_regulations(
         None,
         description="Substring match on the part label (case-insensitive via LIKE).",
     ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only sections chunked into "
+            "ecfr_rag.db, false = only sections not yet embedded. Omit to list "
+            "all (the default)."
+        ),
+    ),
     sort: str | None = Query(
         None,
         description="Sort order: 'document' (default, reading order) or 'relevance' (requires q).",
@@ -70,6 +86,19 @@ def list_regulations(
     if part is not None:
         clauses.append("regulations.part LIKE ?")
         params.append(f"%{part}%")
+    if embedded is not None:
+        # doc_id in the rag DB is str(regulations.id); the main column is the
+        # INTEGER id, so map the stored ids back to int before comparing.
+        c, p, empty = embedded_clauses(
+            db.ecfr_rag,
+            embedded=embedded,
+            column="regulations.id",
+            id_transform=int,
+        )
+        if empty:
+            return Page[EcfrRegulation](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -122,6 +151,76 @@ def get_regulation_content(
     return Response(content=row["content"], media_type="text/plain; charset=utf-8")
 
 
+@router.post("/regulations/{reg_id}/embed", response_model=EmbedResult)
+def embed_regulation(
+    reg_id: int,
+    conn: sqlite3.Connection = Depends(db.ecfr),
+) -> EmbedResult:
+    """Embed one eCFR section into ecfr_rag.db on demand (synchronous).
+
+    eCFR has no batch RAG indexer — the full corpus is ~509k chunks (~8 days on
+    local Ollama), so sections are embedded individually on request, like the
+    enwiki embed button. The body is flat legal prose with no `##` headings, so
+    it chunks with `chunk_doc` (not `chunk_markdown`) under the DEFAULT profile.
+
+    Replaces any chunks already stored for this section, becoming searchable
+    through `/ecfr/chunks` immediately (the RAG DB runs in WAL mode, so the
+    cached read-only connection picks up the new rows without a uvicorn
+    restart). Returns `embedded=false` when the section has no body text. A 503
+    means Ollama was unreachable; any existing chunks are left untouched.
+    """
+    row = conn.execute(
+        "SELECT id, title_num, section, heading, content "
+        "FROM regulations WHERE id = ?",
+        [reg_id],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"regulation {reg_id} not found")
+
+    heading = (row["heading"] or "").strip()
+    content = (row["content"] or "").strip()
+    # A citation-style fallback title when the section has no heading.
+    title = heading or f"Title {row['title_num']} § {row['section']}"
+
+    if not content:
+        return EmbedResult(
+            doc_id=str(reg_id), title=title, chunk_count=0, embedded=False
+        )
+
+    doc = Doc(
+        doc_id=str(reg_id),
+        title=title,
+        version=f"{content_hash(heading, content)}-{CLEANER_VERSION}",
+        text=content,
+        section=None,
+    )
+
+    rag_conn = db.connect_rag_rw(db.ECFR_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_fn=chunk_doc,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
+    )
+
+
 @router.get("/regulations/{reg_id}", response_model=EcfrRegulation)
 def get_regulation(
     reg_id: int,
@@ -134,3 +233,17 @@ def get_regulation(
     if row is None:
         raise HTTPException(status_code=404, detail=f"regulation {reg_id} not found")
     return _row_to_reg(row)
+
+
+add_chunks_route(
+    router,
+    opener=db.ecfr_rag,
+    source_name="ecfr",
+    indexer_script="ecfr (embed-only: POST /ecfr/regulations/{id}/embed)",
+)
+add_doc_chunks_route(
+    router,
+    opener=db.ecfr_rag,
+    source_name="ecfr",
+    indexer_script="ecfr (embed-only: POST /ecfr/regulations/{id}/embed)",
+)

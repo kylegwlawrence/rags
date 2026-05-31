@@ -564,7 +564,9 @@ export const SOURCES = {
     listEndpoint: '/ecfr/regulations',
     detailEndpoint: (id) => `/ecfr/regulations/${id}`,
     contentEndpoint: (id) => `/ecfr/regulations/${id}/content`,
-    chunksEndpoint: null,
+    chunksEndpoint: '/ecfr/chunks',
+    docChunksEndpoint: '/ecfr/doc-chunks',
+    embedEndpoint: (id) => `/ecfr/regulations/${id}/embed`,
     idField: 'id',
     titleField: 'heading',
     subtitle_fn: (item) => item.title_name || '',
@@ -590,6 +592,11 @@ export const SOURCES = {
       { key: 'sort', label: 'Sort', type: 'select', options: [
         { value: '',          label: 'Document order' },
         { value: 'relevance', label: 'Relevance' },
+      ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
       ]},
     ],
   },
