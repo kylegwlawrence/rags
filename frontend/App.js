@@ -185,24 +185,34 @@ export default defineComponent({
           </nav>
         </div>
 
-        <BrowseView
-          v-if="activeView === 'browse'"
-          :key="activeSourceKey"
-          :source="activeSource"
-          @select="openDoc"
-        />
-        <DocView
-          v-else-if="activeView === 'doc'"
-          :key="selectedDoc && selectedDoc[activeSource.idField]"
-          :source="activeSource"
-          :doc="selectedDoc"
-          @back="goBack"
-        />
-        <ChunksView
-          v-else-if="activeView === 'chunks'"
-          :source="activeSource"
-          :standalone="true"
-        />
+        <!--
+          keep-alive caches the BrowseView instance (per :key, so each source
+          keeps its own) when you open a doc, so Back restores the exact
+          filters/page/results you left. include="BrowseView" excludes DocView
+          and ChunksView, which should always render fresh. NB: the comment must
+          stay OUTSIDE <keep-alive> — KeepAlive disables caching if its slot has
+          more than one child node.
+        -->
+        <keep-alive include="BrowseView">
+          <BrowseView
+            v-if="activeView === 'browse'"
+            :key="activeSourceKey"
+            :source="activeSource"
+            @select="openDoc"
+          />
+          <DocView
+            v-else-if="activeView === 'doc'"
+            :key="selectedDoc && selectedDoc[activeSource.idField]"
+            :source="activeSource"
+            :doc="selectedDoc"
+            @back="goBack"
+          />
+          <ChunksView
+            v-else-if="activeView === 'chunks'"
+            :source="activeSource"
+            :standalone="true"
+          />
+        </keep-alive>
       </div>
     </div>
   `,
