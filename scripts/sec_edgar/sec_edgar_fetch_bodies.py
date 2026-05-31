@@ -104,7 +104,7 @@ def main() -> int:
         # Targeted single fetch: select by unique key, ignore status so an
         # already-fetched row is refetched on demand.
         rows = cur.execute(
-            "SELECT accession_number, form_type, filing_url FROM filings "
+            "SELECT accession_number, company_name, form_type, filing_url FROM filings "
             "WHERE accession_number = ?",
             (args.accession,),
         ).fetchall()
@@ -125,7 +125,7 @@ def main() -> int:
             print(f"Cleared status/body for {cur.rowcount} {args.form_type} filings.")
 
         rows = cur.execute(
-            "SELECT accession_number, form_type, filing_url FROM filings "
+            "SELECT accession_number, company_name, form_type, filing_url FROM filings "
             "WHERE form_type = ? AND status IS NULL "
             "ORDER BY date_filed DESC LIMIT ?",
             (args.form_type, args.limit),
@@ -139,7 +139,8 @@ def main() -> int:
     session = build_session(args.email)
 
     fetched = missing = errored = 0
-    for i, (accession_number, form_type, filing_url) in enumerate(rows, 1):
+    total = len(rows)
+    for i, (accession_number, company_name, form_type, filing_url) in enumerate(rows, 1):
         text = fetch_submission(session, filing_url)
         if text is None:
             cur.execute(
@@ -147,6 +148,7 @@ def main() -> int:
                 (accession_number,),
             )
             errored += 1
+            outcome = "fetch failed (error)"
         else:
             body, body_html = extract_primary(text, form_type)
             if body.strip():
@@ -156,16 +158,27 @@ def main() -> int:
                     (body, body_html, accession_number),
                 )
                 fetched += 1
+                outcome = (
+                    f"fetched ({len(body_html) / 1024:.0f} KB html, "
+                    f"{len(body) / 1024:.0f} KB text)"
+                )
             else:
                 cur.execute(
                     "UPDATE filings SET status = 'missing' WHERE accession_number = ?",
                     (accession_number,),
                 )
                 missing += 1
+                outcome = "no extractable text (missing)"
 
+        # Per-filing progress. flush=True so it shows live even when piped
+        # (stdout is block-buffered to a pipe/file otherwise).
+        label = (company_name or "").strip()[:40]
+        print(f"  [{i}/{total}] {accession_number} {label} — {outcome}", flush=True)
+
+        # Commit periodically so a long run survives an interruption without
+        # losing all progress; the final commit below catches the remainder.
         if i % 50 == 0:
             con.commit()
-            print(f"  {i}/{len(rows)} — fetched {fetched}, missing {missing}, errored {errored}")
 
         time.sleep(args.delay)
 
