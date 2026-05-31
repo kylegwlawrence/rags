@@ -12,7 +12,7 @@ from rag import Doc, content_hash
 from rag.chunker import chunk_doc
 from rag.cleaner import CLEANER_VERSION
 from rag.embed_one import embed_doc
-from rag.profiles import DEFAULT as _PROFILE
+from rag.profiles import DENSE as _PROFILE
 
 router = APIRouter(prefix="/ecfr", tags=["ecfr"])
 
@@ -161,7 +161,8 @@ def embed_regulation(
     eCFR has no batch RAG indexer — the full corpus is ~509k chunks (~8 days on
     local Ollama), so sections are embedded individually on request, like the
     enwiki embed button. The body is flat legal prose with no `##` headings, so
-    it chunks with `chunk_doc` (not `chunk_markdown`) under the DEFAULT profile.
+    it chunks with `chunk_doc` (not `chunk_markdown`) under the DENSE profile
+    (dense regulatory text → smaller chunks for finer retrieval grain).
 
     Replaces any chunks already stored for this section, becoming searchable
     through `/ecfr/chunks` immediately (the RAG DB runs in WAL mode, so the
