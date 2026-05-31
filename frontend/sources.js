@@ -612,6 +612,9 @@ export const SOURCES = {
     // hit deep-links the viewer to its page via a #page=N fragment (see DocView).
     chunksEndpoint: '/pdfs/chunks',
     docChunksEndpoint: '/pdfs/doc-chunks',
+    // Live per-PDF embed button (whole document, page-aware). A big PDF is many
+    // pages, so a click can take minutes of Ollama time — see the route docstring.
+    embedEndpoint: (id) => `/pdfs/documents/${encodeURIComponent(id)}/embed`,
     // idField is the filename stem; embedded PDF `title` metadata is often
     // blank, so the stem doubles as the reliable display title and the parsed
     // title (when present) shows as a meta field.

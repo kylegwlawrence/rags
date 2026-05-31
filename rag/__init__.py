@@ -13,6 +13,7 @@ because both a script and the API need to import them — keeping them under
 - `rag.wikitext`   — simplewiki / enwiki wikitext → markdown
 - `rag.html_to_markdown` — arxiv LaTeXML HTML → markdown
 - `rag.sec_filing` — SEC EDGAR submission fetch + primary-document extraction
+- `rag.pdfs`       — PDF per-page Doc builder + page-aware chunker
 
 The embedding model is locked to `nomic-embed-text:v1.5` at 768 dimensions.
 Changing the model means rebuilding every `<source>_rag.db` from scratch.

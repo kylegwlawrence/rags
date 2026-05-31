@@ -17,13 +17,17 @@ deep-link the in-browser viewer to the matching page.
 
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._fts import translate_table_errors
-from api.models import Page, PdfDocument
+from api.models import EmbedResult, Page, PdfDocument
+from rag.embed_one import embed_doc
+from rag.pdfs import build_doc, chunk_pdf
+from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/pdfs", tags=["pdfs"])
 
@@ -233,6 +237,69 @@ def get_document_content(
         media_type="application/pdf",
         content_disposition_type="inline",
         filename=full.name,
+    )
+
+
+@router.post("/documents/{doc_id}/embed", response_model=EmbedResult)
+def embed_document(
+    doc_id: str,
+    conn: sqlite3.Connection = Depends(db.pdfs),
+) -> EmbedResult:
+    """Embed one whole PDF into pdfs_rag.db on demand (synchronous).
+
+    The batch indexer (`scripts/pdfs/pdfs_index_rag.py`) embeds every PDF; this
+    button does a single PDF the same way, reusing the shared page-aware
+    `chunk_pdf` so a button-embedded PDF chunks identically to a batch-indexed
+    one (each chunk tagged with its page, `section="p. {n}"`). Replaces any
+    chunks already stored for this PDF, becoming searchable through
+    `/pdfs/chunks` immediately (the RAG DB runs in WAL mode, so the cached
+    read-only connection picks up the new rows without a uvicorn restart).
+
+    Unlike the eCFR/SimpleWiki buttons (one short section/article), a PDF can be
+    dozens of pages, so this request can take a while — a ~200-page document is
+    minutes of Ollama time in a single call.
+
+    Returns `embedded=false` when the PDF has no extractable text (e.g. a
+    scanned/image-only file). A 503 means Ollama was unreachable; any existing
+    chunks are left untouched.
+    """
+    # Confirm the PDF exists (404) and grab a display title for the empty-text
+    # response, independent of whether it has any extractable body.
+    meta = conn.execute(
+        "SELECT title FROM documents WHERE doc_id = ?", [doc_id]
+    ).fetchone()
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"PDF {doc_id!r} not found")
+    title = (meta["title"] or "").strip() or doc_id
+
+    doc = build_doc(conn, doc_id)
+    if doc is None:
+        # Exists but no extractable text — nothing to embed.
+        return EmbedResult(doc_id=doc_id, title=title, chunk_count=0, embedded=False)
+
+    rag_conn = db.connect_rag_rw(db.PDFS_RAG_DB)
+    try:
+        chunk_count = embed_doc(
+            rag_conn,
+            doc,
+            chunk_fn=chunk_pdf,
+            chunk_size=_PROFILE.chunk_size,
+            overlap=_PROFILE.overlap,
+            max_chunk_size=_PROFILE.max_chunk_size,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"embedding service (Ollama) unavailable: {e}",
+        ) from e
+    finally:
+        rag_conn.close()
+
+    return EmbedResult(
+        doc_id=doc.doc_id,
+        title=doc.title,
+        chunk_count=chunk_count,
+        embedded=chunk_count > 0,
     )
 
 
