@@ -5,8 +5,9 @@ in `pdfs.db`, leaving the original files in the `incoming/` drop folder. This
 router lists/serves that metadata and streams the original PDF bytes from
 `incoming/` so the frontend can render the document in an in-browser viewer.
 
-`doc_id` is the source filename stem. There is no FTS or RAG layer for this
-source yet, so the list endpoint offers only substring filters.
+`doc_id` is the source filename stem. The list endpoint supports full-text
+search (`?q=`) over the page text via the `pages_fts` index built by
+`scripts/pdfs/pdfs_index_fts.py`; there is no RAG/chunks layer for this source.
 """
 
 import sqlite3
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from api import db
+from api._fts import translate_table_errors
 from api.models import Page, PdfDocument
 
 router = APIRouter(prefix="/pdfs", tags=["pdfs"])
@@ -24,6 +26,13 @@ router = APIRouter(prefix="/pdfs", tags=["pdfs"])
 _COLUMNS = (
     "doc_id, title, author, subject, keywords, creator, producer, "
     "creation_date, mod_date, num_pages, file_size, ingested_at"
+)
+
+# Same columns qualified with the `documents.` table alias, for the `?q=` path
+# where the query joins `documents` to `pages`/`pages_fts` and bare `doc_id`
+# would be ambiguous.
+_COLUMNS_QUALIFIED = ", ".join(
+    f"documents.{c.strip()}" for c in _COLUMNS.split(",")
 )
 
 
@@ -47,31 +56,118 @@ def _row_to_doc(row: sqlite3.Row) -> PdfDocument:
 
 @router.get("/documents", response_model=Page[PdfDocument])
 def list_documents(
+    q: str | None = Query(
+        None,
+        description=(
+            "FTS5 full-text search over the PDF page text. Page hits are rolled "
+            "up to their parent document, so results are whole PDFs. Accepts "
+            "FTS5 syntax: `\"phrase\"`, `term*`, `a OR b`, `a NOT b`. Requires "
+            "the pages_fts index (scripts/pdfs/pdfs_index_fts.py)."
+        ),
+    ),
     title: str | None = Query(None, description="Substring match on PDF title metadata"),
     author: str | None = Query(None, description="Substring match on PDF author metadata"),
+    sort: str | None = Query(
+        None,
+        description=(
+            "Sort order: 'relevance' (BM25; requires q) or 'recent' "
+            "(newest-first). Default is relevance when q is given, else recent."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.pdfs),
 ) -> Page[PdfDocument]:
-    """List ingested PDFs, newest first. Title/author are substring filters."""
+    """List ingested PDFs. `q` runs a full-text search over the page text and
+    returns whole documents (de-duplicated across matching pages); title/author
+    are substring filters. Defaults to newest-first, or BM25 relevance when `q`
+    is given."""
+    if sort == "relevance" and q is None:
+        raise HTTPException(status_code=400, detail="sort=relevance requires q")
+
+    if q is None:
+        # No search: plain document listing with optional substring filters.
+        clauses: list[str] = []
+        params: list = []
+        if title is not None:
+            clauses.append("title LIKE ?")
+            params.append(f"%{title}%")
+        if author is not None:
+            clauses.append("author LIKE ?")
+            params.append(f"%{author}%")
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM documents {where}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT {_COLUMNS} FROM documents {where} "
+            f"ORDER BY ingested_at DESC, doc_id LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+        return Page[PdfDocument](
+            items=[_row_to_doc(r) for r in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    # `?q=` path: the FTS index is per-page, so search runs in two stages and
+    # rolls the page hits up to whole documents.
+    #
+    #   `scored`  — one row per matching page with its BM25 score. The score is
+    #               selected as a plain column because FTS5 auxiliary functions
+    #               like bm25() can't be nested inside an aggregate. DISTINCT is
+    #               an optimisation fence: without it SQLite flattens this CTE
+    #               into the aggregate below, putting bm25() back inside MIN()
+    #               and failing with "unable to use function bm25".
+    #   `ranked`  — collapses to one row per doc_id, keeping that PDF's single
+    #               best (most negative = most relevant) page score.
+    #
+    # The outer query then joins each matched document's metadata and applies
+    # the title/author substring filters.
+    cte = (
+        "WITH scored AS ("
+        "  SELECT DISTINCT pages.doc_id AS doc_id, bm25(pages_fts) AS score "
+        "  FROM pages_fts "
+        "  JOIN pages ON pages.rowid = pages_fts.rowid "
+        "  WHERE pages_fts MATCH ?"
+        "), ranked AS ("
+        "  SELECT doc_id, MIN(score) AS score FROM scored GROUP BY doc_id"
+        ")"
+    )
+    join = "ranked JOIN documents ON documents.doc_id = ranked.doc_id"
     clauses: list[str] = []
-    params: list = []
+    params: list = [q]
     if title is not None:
-        clauses.append("title LIKE ?")
+        clauses.append("documents.title LIKE ?")
         params.append(f"%{title}%")
     if author is not None:
-        clauses.append("author LIKE ?")
+        clauses.append("documents.author LIKE ?")
         params.append(f"%{author}%")
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM documents {where}", params
-    ).fetchone()[0]
-    rows = conn.execute(
-        f"SELECT {_COLUMNS} FROM documents {where} "
-        f"ORDER BY ingested_at DESC, doc_id LIMIT ? OFFSET ?",
-        [*params, limit, offset],
-    ).fetchall()
+    # 'recent' keeps newest-first; otherwise rank by each PDF's best-matching
+    # page (more-negative BM25 = more relevant, so ranked.score ASC first).
+    if sort == "recent":
+        order = "documents.ingested_at DESC, documents.doc_id"
+    else:
+        order = "ranked.score ASC, documents.doc_id"
+
+    with translate_table_errors(
+        "pdfs",
+        "pdfs/pdfs_index_fts.py",
+        "data/pdfs/pdfs.db",
+    ):
+        total = conn.execute(
+            f"{cte} SELECT COUNT(*) FROM {join} {where}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"{cte} SELECT {_COLUMNS_QUALIFIED} FROM {join} {where} "
+            f"ORDER BY {order} LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+
     return Page[PdfDocument](
         items=[_row_to_doc(r) for r in rows],
         total=total,

@@ -633,8 +633,14 @@ export const SOURCES = {
       { label: 'Ingested', value: (d) => d.ingested_at },
     ],
     filters: [
+      { key: 'q',      label: 'Search', type: 'text', placeholder: 'FTS5 query…' },
       { key: 'title',  label: 'Title',  type: 'text', placeholder: 'substring' },
       { key: 'author', label: 'Author', type: 'text', placeholder: 'substring' },
+      { key: 'sort', label: 'Sort', type: 'select', options: [
+        { value: '',          label: 'Relevance (or newest)' },
+        { value: 'recent',    label: 'Newest first' },
+        { value: 'relevance', label: 'Relevance' },
+      ]},
     ],
   },
 };

@@ -339,6 +339,46 @@ def test_pydocs_content_returns_text(client):
     assert len(r.content) > 0
 
 
+def test_pdfs_list(client):
+    r = client.get("/pdfs/documents?limit=1")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "total" in body
+    if body["items"]:
+        item = body["items"][0]
+        for key in ("doc_id", "title", "author", "num_pages"):
+            assert key in item, item
+
+
+def test_pdfs_fts_query(client):
+    """`q` runs an FTS5 match over page text, rolled up to whole documents."""
+    r = client.get("/pdfs/documents?q=the&limit=5")
+    if r.status_code == 503:
+        # FTS index not built yet — surface as a skip, same as the rag.db pattern.
+        pytest.skip("pages_fts not built; run scripts/pdfs/pdfs_index_fts.py")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("pdfs.db has no PDFs; drop files in data/pdfs/incoming/ and ingest")
+    # Each PDF appears once however many of its pages matched.
+    doc_ids = [it["doc_id"] for it in items]
+    assert len(doc_ids) == len(set(doc_ids)), doc_ids
+
+
+def test_pdfs_sort_relevance_requires_q(client):
+    """sort=relevance without q is a 400, mirroring the ecfr contract."""
+    r = client.get("/pdfs/documents?sort=relevance")
+    assert r.status_code == 400
+
+
+def test_pdfs_bad_fts_syntax_400(client):
+    """Malformed FTS5 syntax surfaces as a 400, not a 500."""
+    r = client.get("/pdfs/documents", params={"q": '"unbalanced'})
+    if r.status_code == 503:
+        pytest.skip("pages_fts not built; run scripts/pdfs/pdfs_index_fts.py")
+    assert r.status_code == 400
+
+
 def test_arxiv_list(client):
     r = client.get("/arxiv/papers?limit=1")
     assert r.status_code == 200
