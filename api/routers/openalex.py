@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EmbedResult, Page, Work
 from rag import Doc, content_hash
@@ -122,6 +123,14 @@ def list_works(
         None,
         description="Substring match against any of the work's authors (normalized table)",
     ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only works whose title + "
+            "abstract has been chunked into openalex_rag.db, false = only "
+            "works not yet embedded. Omit to list all (the default)."
+        ),
+    ),
     q: str | None = Query(
         None,
         description=(
@@ -174,6 +183,19 @@ def list_works(
             "WHERE wa.work_id = works.id AND a.display_name LIKE ?)"
         )
         params.append(f"%{author}%")
+    if embedded is not None:
+        # docs_meta stores short ids (W123…) but works.id is the full URL
+        # (https://openalex.org/W123…) — re-prefix when splicing.
+        c, p, empty = embedded_clauses(
+            db.openalex_rag,
+            embedded=embedded,
+            column="works.id",
+            id_transform=lambda sid: OPENALEX_PREFIX + sid,
+        )
+        if empty:
+            return Page[Work](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 

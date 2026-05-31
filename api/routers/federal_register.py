@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EmbedResult, FederalRegisterDoc, Page
 from rag.chunker import chunk_markdown
@@ -63,6 +64,14 @@ def list_documents(
         None,
         description="Filter to documents published in this year.",
     ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only documents chunked "
+            "into federal_register_rag.db, false = only documents not yet "
+            "embedded. Omit to list all (the default)."
+        ),
+    ),
     sort: str | None = Query(
         None,
         description="Sort order: 'newest' (default), 'oldest', or 'relevance' (requires q).",
@@ -91,6 +100,17 @@ def list_documents(
     if publication_year is not None:
         clauses.append("strftime('%Y', documents.publication_date) = ?")
         params.append(str(publication_year))
+    if embedded is not None:
+        # doc_id == document_number, matches documents.document_number 1:1.
+        c, p, empty = embedded_clauses(
+            db.federal_register_rag,
+            embedded=embedded,
+            column="documents.document_number",
+        )
+        if empty:
+            return Page[FederalRegisterDoc](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 

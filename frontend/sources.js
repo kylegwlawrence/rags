@@ -42,6 +42,11 @@ export const SOURCES = {
         { value: 'submitted_asc', label: 'Oldest first' },
         { value: 'relevance',     label: 'Relevance' },
       ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
     ],
   },
 
@@ -81,6 +86,11 @@ export const SOURCES = {
         { value: 'year_asc',           label: 'Oldest first' },
         { value: 'relevance',          label: 'Relevance' },
       ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
     ],
   },
 
@@ -113,6 +123,11 @@ export const SOURCES = {
     filters: [
       { key: 'q',     label: 'Search',        type: 'text', placeholder: 'Title FTS5 search…' },
       { key: 'title', label: 'Title contains', type: 'text', placeholder: 'substring' },
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
     ],
   },
 
@@ -239,6 +254,11 @@ export const SOURCES = {
         { value: 'oldest',    label: 'Oldest first' },
         { value: 'relevance', label: 'Relevance' },
       ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
     ],
   },
 
@@ -268,6 +288,11 @@ export const SOURCES = {
       { key: 'q',           label: 'Search',      type: 'text', placeholder: 'FTS5 query…' },
       { key: 'owner',       label: 'Owner',       type: 'text', placeholder: 'substring' },
       { key: 'source_list', label: 'Source list', type: 'text', placeholder: 'exact match' },
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
     ],
   },
 
@@ -401,7 +426,10 @@ export const SOURCES = {
     titleField: 'company_name',
     subtitle_fn: (item) => item.form_type || '',
     meta_fn: (item) => item.date_filed || '',
-    contentType: 'text',
+    // Filing bodies are now served as render-ready HTML (body_html); the
+    // Content tab v-html's them like arxiv. Older rows fetched before
+    // body_html existed fall back to <pre>-wrapped text server-side.
+    contentType: 'html',
     metaFields: [
       { label: 'Company',   value: (d) => d.company_name },
       { label: 'CIK',       value: (d) => d.cik },
@@ -420,6 +448,11 @@ export const SOURCES = {
         { value: '',      label: 'All filings' },
         { value: 'true',  label: 'Downloaded only' },
         { value: 'false', label: 'Not downloaded' },
+      ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
       ]},
     ],
   },
@@ -466,6 +499,11 @@ export const SOURCES = {
         { value: '',           label: 'Any status' },
         { value: 'In Force',   label: 'In Force' },
         { value: 'Not in Force', label: 'Not in Force' },
+      ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
       ]},
     ],
   },

@@ -6,13 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import DownloadResult, EmbedResult, Page, SecEdgarFiling
 from rag import Doc, content_hash
 from rag.cleaner import CLEANER_VERSION, strip_html
 from rag.embed_one import embed_doc
 from rag.profiles import DEFAULT as _PROFILE
-from rag.sec_filing import download_filing_body
+from rag.sec_filing import download_filing_content
 
 router = APIRouter(prefix="/sec_edgar", tags=["sec_edgar"])
 
@@ -77,9 +78,14 @@ def _lookup_meta(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row
 
 
 def _lookup_with_body(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row:
-    """Fetch a `filings` row including `body` text by accession or raise 404."""
+    """Fetch a `filings` row including `body` text + `body_html` by accession or raise 404.
+
+    `body` is the cleaned text the embed route chunks; `body_html` is the
+    render-ready markup the Content view serves. Both ride along so the content
+    and embed routes don't each need their own query.
+    """
     row = conn.execute(
-        f"SELECT {_META_COLS}, body FROM filings WHERE accession_number = ?",
+        f"SELECT {_META_COLS}, body, body_html FROM filings WHERE accession_number = ?",
         [accession_number],
     ).fetchone()
     if row is None:
@@ -114,6 +120,15 @@ def list_filings(
             "Filter by body-download state: true = only filings whose body has "
             "been downloaded, false = only those not yet downloaded. Omit to "
             "list all harvested filings (the default)."
+        ),
+    ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only filings chunked into "
+            "sec_edgar_rag.db, false = only filings not yet embedded. "
+            "Independent of `downloaded` — a filing must be downloaded "
+            "before it can be embedded."
         ),
     ),
     sort: str | None = Query(
@@ -153,6 +168,17 @@ def list_filings(
     if year is not None:
         clauses.append("strftime('%Y', filings.date_filed) = ?")
         params.append(str(year))
+    if embedded is not None:
+        # doc_id == accession_number, matches filings.accession_number 1:1.
+        c, p, empty = embedded_clauses(
+            db.sec_edgar_rag,
+            embedded=embedded,
+            column="filings.accession_number",
+        )
+        if empty:
+            return Page[SecEdgarFiling](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -195,11 +221,24 @@ def get_filing_content(
     accession_number: str,
     conn: sqlite3.Connection = Depends(db.sec_edgar),
 ) -> Response:
-    """Return the extracted body text for one filing as text/plain."""
+    """Return the rendered filing body as text/html.
+
+    Serves the stored `body_html` (cleaned, render-ready markup) so the Content
+    view can display the filing with its tables and headings intact. Rows
+    fetched before `body_html` existed have only the cleaned text `body`; those
+    are wrapped in `<pre>` so they still render. A row with neither 404s.
+    """
     row = _lookup_with_body(conn, accession_number)
-    if not row["body"]:
+    if row["body_html"]:
+        html = row["body_html"]
+    elif row["body"]:
+        # Legacy row fetched before body_html: show the cleaned text verbatim.
+        from html import escape
+
+        html = f"<pre>{escape(row['body'])}</pre>"
+    else:
         raise HTTPException(status_code=404, detail="filing has no text content")
-    return Response(content=row["body"], media_type="text/plain; charset=utf-8")
+    return Response(content=html, media_type="text/html; charset=utf-8")
 
 
 @router.post("/filings/{accession_number}/download", response_model=DownloadResult)
@@ -210,9 +249,10 @@ def download_filing(
     """Download one filing's body from SEC on demand and store it (synchronous).
 
     `sec_edgar_download.py` records only filing metadata + a `filing_url`. This
-    fetches that submission, extracts the primary document, and writes the
-    cleaned text onto the row's `body` column (status -> 'fetched'), so the
-    Content tab and `/content` start serving it. It mirrors the standalone
+    fetches that submission, extracts the primary document, and writes both the
+    cleaned text (`body`, for FTS / embedding) and the render-ready HTML
+    (`body_html`, for the Content view) onto the row (status -> 'fetched'), so
+    the Content tab and `/content` start serving it. It mirrors the standalone
     `sec_edgar_fetch_bodies.py --accession` path but runs in-process, sharing
     the same extractor (`rag.sec_filing`).
 
@@ -232,19 +272,24 @@ def download_filing(
             status_code=422, detail="filing has no filing_url to download from"
         )
 
-    body = download_filing_body(filing_url, row["form_type"] or "", _require_sec_email())
-    if body is None:
-        status, stored = "error", None
-    elif body.strip():
-        status, stored = "fetched", body
+    fetched = download_filing_content(
+        filing_url, row["form_type"] or "", _require_sec_email()
+    )
+    if fetched is None:
+        status, stored, stored_html = "error", None, None
     else:
-        status, stored = "missing", None
+        body, body_html = fetched
+        if body.strip():
+            status, stored, stored_html = "fetched", body, body_html
+        else:
+            status, stored, stored_html = "missing", None, None
 
     rw = db.connect_rw(db.SEC_EDGAR_DB)
     try:
         rw.execute(
-            "UPDATE filings SET body = ?, status = ? WHERE accession_number = ?",
-            (stored, status, accession_number),
+            "UPDATE filings SET body = ?, body_html = ?, status = ? "
+            "WHERE accession_number = ?",
+            (stored, stored_html, status, accession_number),
         )
         rw.commit()
     finally:

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EmbedResult, GithubReadme, Page
 from rag import Doc, content_hash
@@ -69,6 +70,14 @@ def list_readmes(
         None,
         description="Exact match on the awesome-list this repo was discovered from.",
     ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only READMEs chunked into "
+            "github_readmes_rag.db, false = only READMEs not yet embedded. "
+            "Omit to list all (the default)."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.github),
@@ -88,6 +97,15 @@ def list_readmes(
     if source_list is not None:
         clauses.append("readmes.source_list = ?")
         params.append(source_list)
+    if embedded is not None:
+        # doc_id == repo slug, matches readmes.repo 1:1.
+        c, p, empty = embedded_clauses(
+            db.github_rag, embedded=embedded, column="readmes.repo",
+        )
+        if empty:
+            return Page[GithubReadme](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
 
     where = "WHERE " + " AND ".join(clauses)
     order = "bm25(readmes_fts) ASC" if q is not None else "readmes.repo ASC"

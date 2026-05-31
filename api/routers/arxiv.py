@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EmbedResult, Page, Paper
 from rag import Doc, content_hash
@@ -163,6 +164,15 @@ def list_papers(
     has_html: bool | None = Query(
         None, description="true → only papers with downloaded HTML; false → only those without"
     ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only papers whose body "
+            "has been chunked into arxiv_rag.db, false = only papers not "
+            "yet embedded. Omit to list all (the default). Cross-references "
+            "arxiv_rag.db's docs_meta."
+        ),
+    ),
     sort: Sort | None = Query(
         None,
         description=(
@@ -217,6 +227,15 @@ def list_papers(
         clauses.append(
             "download_status IS 'downloaded'" if has_html else "download_status IS NOT 'downloaded'"
         )
+    if embedded is not None:
+        # arxiv doc_ids match papers.id 1:1 (both arxiv paper-id strings).
+        c, p, empty = embedded_clauses(
+            db.arxiv_rag, embedded=embedded, column="papers.id",
+        )
+        if empty:
+            return Page[Paper](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
 

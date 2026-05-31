@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EmbedResult, EurlexLaw, EurlexLawDetail, Page
 from rag.embed_one import embed_doc
@@ -67,6 +68,14 @@ def list_laws(
         None,
         description="Substring match against the Authors field (case-insensitive).",
     ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only laws chunked into "
+            "eurlex_rag.db, false = only laws not yet embedded. Omit to list "
+            "all (the default)."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.eurlex),
@@ -89,6 +98,15 @@ def list_laws(
     if author is not None:
         clauses.append("laws.Authors LIKE ?")
         params.append(f"%{author}%")
+    if embedded is not None:
+        # doc_id == CELEX, matches laws.CELEX 1:1.
+        c, p, empty = embedded_clauses(
+            db.eurlex_rag, embedded=embedded, column="laws.CELEX",
+        )
+        if empty:
+            return Page[EurlexLaw](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 

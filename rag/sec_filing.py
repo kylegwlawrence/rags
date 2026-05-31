@@ -14,6 +14,7 @@ parsing that more than one entry point needs.
 
 import re
 import time
+from html import escape
 from typing import Optional
 
 import requests
@@ -31,6 +32,13 @@ _TYPE_RE = re.compile(r"<TYPE>\s*([^\n<]+)", re.IGNORECASE)
 _TEXT_RE = re.compile(r"<TEXT>(.*?)</TEXT>", re.DOTALL | re.IGNORECASE)
 _HEADER_END_RE = re.compile(r"</(?:SEC|IMS)-HEADER>", re.IGNORECASE)
 _DISPLAY_NONE_RE = re.compile(r"display\s*:\s*none", re.IGNORECASE)
+# Real HTML filings open with a structural tag; legacy plain-text filings may
+# still contain stray angle-bracket sequences (e.g. `<co>`) that BeautifulSoup
+# would parse as bogus tags. Sniffing the payload for a genuine block-level tag
+# is more reliable than asking the parsed tree whether it found "a tag".
+_HTML_HINT_RE = re.compile(
+    r"<(?:html|body|div|p|table|tr|td|span|br|h[1-6]|font)\b", re.IGNORECASE
+)
 
 
 def build_session(email: str) -> requests.Session:
@@ -44,32 +52,59 @@ def build_session(email: str) -> requests.Session:
     return session
 
 
-def _html_to_text(payload: str) -> str:
-    """Convert a filing's primary-document payload to plain text.
+def _clean_soup(payload: str) -> BeautifulSoup:
+    """Parse a filing payload and strip machine-only / non-visible markup.
 
     Modern 10-Ks are inline XBRL (iXBRL): the visible document is preceded by
     an ``<ix:header>`` block (and/or ``display:none`` containers) holding
-    thousands of machine-readable tagging facts. ``get_text()`` would surface
-    all of that as leading noise. We decompose the hidden metadata first, then
-    extract text — leaving the *visible* ``<ix:nonFraction>`` /
-    ``<ix:nonNumeric>`` figures embedded in the narrative intact. Plain-text
-    legacy filings pass through unchanged.
+    thousands of machine-readable tagging facts. Both the text extractor and
+    the render-HTML builder decompose that hidden metadata first — leaving the
+    *visible* ``<ix:nonFraction>`` / ``<ix:nonNumeric>`` figures embedded in the
+    narrative intact, plus dropping ``<script>`` / ``<style>``. Plain-text
+    legacy filings parse to a tagless tree and pass through unchanged.
     """
     soup = BeautifulSoup(payload, "html.parser")
     for tag in soup.find_all(["script", "style", "ix:header"]):
         tag.decompose()
     for tag in soup.find_all(style=_DISPLAY_NONE_RE):
         tag.decompose()
-    return soup.get_text(separator=" ")
+    return soup
 
 
-def extract_primary_document(text: str, form_type: str) -> str:
-    """Return the cleaned text of a filing's primary document.
+def _html_to_text(payload: str) -> str:
+    """Convert a filing's primary-document payload to plain text."""
+    return _clean_soup(payload).get_text(separator=" ")
+
+
+def _payload_to_text_and_html(payload: str) -> tuple[str, str]:
+    """Render one cleaned payload into (plain text, display HTML), parsing once.
+
+    The text half is whitespace-normalised for FTS / embedding (identical to
+    what ``extract_primary_document`` has always produced). The HTML half keeps
+    the visible structure — tables, headings, paragraphs — for the rendered
+    Content view, with the iXBRL header, hidden containers, scripts, and styles
+    already removed by ``_clean_soup``. A legacy plain-text filing (no tags) is
+    escaped and wrapped in ``<pre>`` so its line breaks survive in the browser.
+    """
+    soup = _clean_soup(payload)
+    # Text is always derived via get_text() — unchanged from the historical
+    # extractor, so `body` stays byte-identical and embeddings never shift.
+    text = normalize_whitespace(soup.get_text(separator=" "))
+    if _HTML_HINT_RE.search(payload):
+        html = str(soup)
+    else:
+        # Legacy plain-text filing: escape the raw payload and keep its line
+        # breaks so it renders faithfully rather than collapsing in the browser.
+        html = f"<pre>{escape(payload)}</pre>"
+    return text, html
+
+
+def _select_payload(text: str, form_type: str) -> str:
+    """Return the raw primary-document payload from a full submission.
 
     Picks the ``<DOCUMENT>`` whose ``<TYPE>`` matches ``form_type`` (e.g.
     ``10-K``), falling back to the first document, then to everything after the
-    header for pre-``<DOCUMENT>`` legacy filings. The chosen payload is
-    HTML-stripped and whitespace-normalised.
+    header for pre-``<DOCUMENT>`` legacy filings.
     """
     blocks = _DOCUMENT_RE.findall(text)
     payload: Optional[str] = None
@@ -93,7 +128,27 @@ def extract_primary_document(text: str, form_type: str) -> str:
         header_end = _HEADER_END_RE.search(text)
         payload = text[header_end.end():] if header_end else text
 
-    return normalize_whitespace(_html_to_text(payload or ""))
+    return payload or ""
+
+
+def extract_primary(text: str, form_type: str) -> tuple[str, str]:
+    """Return ``(cleaned_text, display_html)`` for a filing's primary document.
+
+    The text is the whitespace-normalised, HTML-stripped body used for FTS and
+    embedding; the HTML is the cleaned, render-ready markup used by the Content
+    view. Both come from a single parse of the same selected payload, so they
+    can never drift apart.
+    """
+    return _payload_to_text_and_html(_select_payload(text, form_type))
+
+
+def extract_primary_document(text: str, form_type: str) -> str:
+    """Return the cleaned text of a filing's primary document.
+
+    Back-compat wrapper over ``extract_primary`` for callers that only need the
+    text half (the historical behaviour).
+    """
+    return extract_primary(text, form_type)[0]
 
 
 def fetch_submission(
@@ -122,18 +177,20 @@ def fetch_submission(
     return None
 
 
-def download_filing_body(url: str, form_type: str, email: str) -> Optional[str]:
-    """Fetch and extract one filing's primary document as clean text.
+def download_filing_content(
+    url: str, form_type: str, email: str
+) -> Optional[tuple[str, str]]:
+    """Fetch one filing and return ``(cleaned_text, display_html)``.
 
     Convenience wrapper for a single on-demand fetch: builds a session, fetches
-    the submission, and extracts the primary document. Returns the cleaned body
-    text, or None when the submission couldn't be fetched (404 / retries
-    exhausted). The batch fetcher reuses ``build_session`` / ``fetch_submission``
-    / ``extract_primary_document`` directly so it can share one session across
-    many requests.
+    the submission, and extracts the primary document as both the embedding /
+    FTS text and the render-ready HTML. Returns None when the submission
+    couldn't be fetched (404 / retries exhausted). The batch fetcher reuses
+    ``build_session`` / ``fetch_submission`` / ``extract_primary`` directly so it
+    can share one session across many requests.
     """
     session = build_session(email)
     raw = fetch_submission(session, url)
     if raw is None:
         return None
-    return extract_primary_document(raw, form_type)
+    return extract_primary(raw, form_type)

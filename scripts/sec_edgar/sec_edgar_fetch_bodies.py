@@ -32,7 +32,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from rag.sec_filing import (  # noqa: E402
     DEFAULT_DELAY,
     build_session,
-    extract_primary_document,
+    extract_primary,
     fetch_submission,
 )
 
@@ -40,14 +40,19 @@ DEFAULT_DB = "data/sec_edgar/sec_edgar.db"
 
 
 def ensure_columns(cur: sqlite3.Cursor) -> None:
-    """Add the `body` / `status` columns and a status index if missing.
+    """Add the `body` / `body_html` / `status` columns and a status index if missing.
 
     Lets this script run against a sec_edgar.db produced by the metadata-only
-    downloader without forcing a re-download.
+    downloader without forcing a re-download. `body` holds the cleaned text used
+    by the FTS and RAG indexers; `body_html` holds the render-ready HTML served
+    to the Content view — adding it never touches `body`, so existing indexes
+    stay valid.
     """
     cols = {row[1] for row in cur.execute("PRAGMA table_info(filings)")}
     if "body" not in cols:
         cur.execute("ALTER TABLE filings ADD COLUMN body TEXT")
+    if "body_html" not in cols:
+        cur.execute("ALTER TABLE filings ADD COLUMN body_html TEXT")
     if "status" not in cols:
         cur.execute("ALTER TABLE filings ADD COLUMN status TEXT")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_status ON filings(status)")
@@ -112,7 +117,8 @@ def main() -> int:
     else:
         if args.reset_status:
             cur.execute(
-                "UPDATE filings SET status = NULL, body = NULL WHERE form_type = ?",
+                "UPDATE filings SET status = NULL, body = NULL, body_html = NULL "
+                "WHERE form_type = ?",
                 (args.form_type,),
             )
             con.commit()
@@ -142,11 +148,12 @@ def main() -> int:
             )
             errored += 1
         else:
-            body = extract_primary_document(text, form_type)
+            body, body_html = extract_primary(text, form_type)
             if body.strip():
                 cur.execute(
-                    "UPDATE filings SET body = ?, status = 'fetched' WHERE accession_number = ?",
-                    (body, accession_number),
+                    "UPDATE filings SET body = ?, body_html = ?, status = 'fetched' "
+                    "WHERE accession_number = ?",
+                    (body, body_html, accession_number),
                 )
                 fetched += 1
             else:

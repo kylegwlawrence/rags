@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import Article, EmbedResult, Page
 from rag import Doc
@@ -151,6 +152,14 @@ def list_articles(
         0,
         description="MediaWiki namespace id (0 = main article namespace, the default).",
     ),
+    embedded: bool | None = Query(
+        None,
+        description=(
+            "Filter by RAG embedding state: true = only articles with chunks "
+            "in simplewiki_rag.db, false = only articles not yet embedded. "
+            "Omit to list all (the default)."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.simplewiki),
@@ -172,6 +181,19 @@ def list_articles(
     if title is not None:
         clauses.append("articles.title LIKE ?")
         params.append(f"%{title}%")
+    if embedded is not None:
+        # docs_meta stores stringified page_ids; cast to int since
+        # articles.page_id is INTEGER.
+        c, p, empty = embedded_clauses(
+            db.simplewiki_rag,
+            embedded=embedded,
+            column="articles.page_id",
+            id_transform=int,
+        )
+        if empty:
+            return Page[Article](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
     where = "WHERE " + " AND ".join(clauses)
 
     with translate_table_errors("simplewiki", "simplewiki_parse.py", "data/simplewiki/simplewiki.db"):

@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 
 from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
+from api._embedded import embedded_clauses
 from api.models import EmbedResult, GutenbergText, Page
 from rag import Doc
 from rag.cleaner import CLEANER_VERSION
@@ -71,29 +72,18 @@ def list_texts(
         clauses.append("language = ?")
         params.append(language)
     if embedded is not None:
-        # doc_id is stored as TEXT in gutenberg_rag.db (values are stringified
-        # int text ids). Pull the distinct set once and inline it as a literal
-        # IN-list — the rag corpus is small (low thousands at most) so this
-        # stays well under SQLite's parameter and expression limits.
-        rag_conn = db.gutenberg_rag()
-        embedded_ids = [
-            int(r[0]) for r in rag_conn.execute("SELECT DISTINCT doc_id FROM chunks")
-        ]
-        if embedded:
-            if not embedded_ids:
-                # No texts are embedded yet → empty page without touching the
-                # main DB at all.
-                return Page[GutenbergText](items=[], total=0, limit=limit, offset=offset)
-            placeholders = ",".join("?" * len(embedded_ids))
-            clauses.append(f"id IN ({placeholders})")
-            params.extend(embedded_ids)
-        else:
-            if embedded_ids:
-                placeholders = ",".join("?" * len(embedded_ids))
-                clauses.append(f"id NOT IN ({placeholders})")
-                params.extend(embedded_ids)
-            # else: nothing is embedded → every row qualifies as "unembedded",
-            # so no extra clause needed.
+        # docs_meta stores stringified int text ids; cast to int since
+        # texts.id is INTEGER.
+        c, p, empty = embedded_clauses(
+            db.gutenberg_rag,
+            embedded=embedded,
+            column="id",
+            id_transform=int,
+        )
+        if empty:
+            return Page[GutenbergText](items=[], total=0, limit=limit, offset=offset)
+        clauses.extend(c)
+        params.extend(p)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
     total = conn.execute(f"SELECT COUNT(*) FROM texts {where}", params).fetchone()[0]
