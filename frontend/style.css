@@ -1075,6 +1075,25 @@ select.filter-bar__input {
   color: var(--text-primary);
 }
 
+/* PDF viewer: the original file rendered in-browser (pdfs source). */
+.pdf-frame {
+  width: 100%;
+  height: 80vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+/* A scanned PDF can carry very long Subject/Keywords metadata that would push
+   the viewer far down the page — and since the wheel scrolls the PDF, not the
+   page, the metadata becomes impossible to move out of the way. Cap the grid's
+   height and give it its own scrollbar so the PDF always sits just below the
+   header. */
+.meta-grid--compact {
+  max-height: 4.5rem;
+  overflow-y: auto;
+}
+
 /* Prose: container for rendered HTML content (arxiv). */
 .prose {
   line-height: 1.65;

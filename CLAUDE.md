@@ -46,6 +46,7 @@ python scripts/ceps/ceps_download.py                  # CEPS EurLex dump (Harvar
 python scripts/eurlex/eurlex_index_rag.py             # data/eurlex/eurlex_rag.db
 python scripts/ecfr/ecfr_download.py                  # eCFR titles + section text → data/ecfr/ecfr.db
 python scripts/ecfr/ecfr_index_fts.py                 # regulations_fts FTS5 index
+python scripts/pdfs/pdfs_ingest.py                    # PDFs in data/pdfs/incoming/ → data/pdfs/pdfs.db
 ```
 
 ## Running the API
@@ -75,6 +76,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 - `/worldbank/indicators` (`?q=`, `?topic=`), `/indicators/{id}`, `/indicators/{id}/values` (`?country=`, `?year=`), `/worldbank/countries`, `/countries/{id}/data` (`?topic=`, `?year=`)
 - `/billstatus/bills` (`?q=`, `?congress=`, `?bill_type=`, `?sponsor=`, `?policy_area=`, `?subject=`, `?sort=`), `/{bill_id}`, `/{bill_id}/content` — bill_id format is `{congress}-{TYPE}-{number}`, e.g. `118-HR-1234`. No RAG/chunks.
 - `/ecfr/regulations` (`?q=`, `?title=`, `?part=`, `?embedded=`, `?sort=`), `/{reg_id}`, `/{reg_id}/content`, `POST /{reg_id}/embed`, `/ecfr/chunks` — one row per CFR section; `reg_id` is the integer row id. `?q=` is FTS5 over heading + content; `sort=relevance` requires `q`, else document (reading) order. RAG is on-demand only: there is no batch indexer (the full corpus is ~509k chunks ≈ 8 days on local Ollama), so sections are embedded one at a time via the embed button into `ecfr_rag.db`. `?embedded=` filters by chunk presence.
+- `/pdfs/documents` (`?title=`, `?author=`), `/{doc_id}`, `/{doc_id}/content` — one row per ingested PDF; `doc_id` is the source filename stem. `/content` streams the **original PDF file** from `data/pdfs/incoming/` as `application/pdf` (inline disposition) so the frontend renders it in an in-browser viewer. No FTS, RAG, or chunks for this source.
 
 The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings whose body hasn't been downloaded — `?downloaded=` narrows to fetched/unfetched. `POST /simplewiki/.../embed` and `POST /sec_edgar/.../download` are the only write paths in the API.
 
@@ -148,6 +150,9 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 - `ecfr_download.py` — Fetches the current Electronic Code of Federal Regulations from the `ecfr.gov` versioner API. Walks all 50 CFR titles (Title 35 is reserved/empty), then stores one row per section in `regulations` (`title_num`, `title_name`, `chapter`, `part`, `section`, `heading`, `content`; `UNIQUE(title_num, section)`). Single current snapshot — no amendment history. Set `MAILTO`. Resumes via `ingest_state.completed_titles`.
 - `ecfr_index_fts.py` — Rebuilds `regulations_fts` (porter, external-content) over `heading + content`, keyed on the `id` INTEGER PK. Required for `?q=`. ~20 s. Restart after.
 - **No batch RAG indexer.** The full corpus is ~509k chunks (~8 days on local Ollama), so semantic search is on-demand: `POST /ecfr/regulations/{id}/embed` chunks one section (flat prose via `chunk_doc`, DEFAULT profile) into `data/ecfr/ecfr_rag.db`, the same live-embed pattern as enwiki. `ecfr_rag.db` is created empty (schema only) so the read-only opener and `/health` stay green before the first embed.
+
+**pdfs**
+- `pdfs_ingest.py` — Drop-folder ingester. Scans `data/pdfs/incoming/` for `*.pdf`, extracts per-page text + document metadata via **pdfplumber** into `pdfs.db` (`documents` + `pages` tables; `doc_id` = filename stem). Originals stay in the drop folder — the API's `/pdfs/documents/{doc_id}/content` route streams them in place. Idempotent: skips already-ingested `doc_id`s unless `--force`. Flags: `--db`, `--incoming`, `--force`. **No FTS/RAG indexer** — the frontend renders the original PDF in an `<iframe>` (`contentType: 'pdf'` in `frontend/sources.js`); there is no embed/chunks layer.
 
 ### Re-indexing notes
 

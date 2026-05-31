@@ -52,6 +52,7 @@ HEALTH_DBS = (
     "eurlex", "eurlex_rag",
     "ecfr", "ecfr_rag",
     "enwiki_rag",
+    "pdfs",
     # enwiki is remote (HTTP probe in main.py) so it shows up too unless the
     # ENWIKI_REMOTE_URL env var is unset, in which case the entry says
     # "skipped:". Either way it's a key in body["databases"], so include it.

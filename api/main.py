@@ -20,6 +20,7 @@ from api.routers import (  # noqa: E402
     github_readmes,
     gutenberg,
     openalex,
+    pdfs,
     python_docs,
     sec_edgar,
     simplewiki,
@@ -42,6 +43,7 @@ app.include_router(geonames.router)
 app.include_router(billstatus.router)
 app.include_router(eurlex.router)
 app.include_router(ecfr.router)
+app.include_router(pdfs.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
@@ -97,6 +99,7 @@ def health(response: Response) -> dict:
         ("ecfr_rag", db.ecfr_rag),
         ("eurlex_rag", db.eurlex_rag),
         ("enwiki_rag", db.enwiki_rag),
+        ("pdfs", db.pdfs),
     ):
         try:
             opener().execute("SELECT 1").fetchone()

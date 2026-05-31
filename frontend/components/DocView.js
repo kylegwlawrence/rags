@@ -287,7 +287,12 @@ export default defineComponent({
       loadDetail();
       if (props.source.contentType === 'values') {
         loadValues();
-      } else if (props.source.contentType !== 'none') {
+      } else if (
+        props.source.contentType !== 'none' &&
+        props.source.contentType !== 'pdf'
+      ) {
+        // 'pdf' renders the original file in an <iframe> pointed at the content
+        // endpoint, so there's no text body to fetch.
         loadContent();
       }
       // Preload chunks when the source supports embedding so the header button
@@ -358,7 +363,10 @@ export default defineComponent({
         <p v-if="doc.redirectedFrom" class="redirect-note">
           Redirected from "{{ doc.redirectedFrom }}"
         </p>
-        <dl class="meta-grid">
+        <dl
+          class="meta-grid"
+          :class="{ 'meta-grid--compact': source.contentType === 'pdf' }"
+        >
           <template v-for="f in visibleMetaFields()" :key="f.label">
             <dt class="meta-grid__key">{{ f.label }}</dt>
             <dd class="meta-grid__val">{{ f.value(doc) }}</dd>
@@ -433,6 +441,12 @@ export default defineComponent({
         </div>
         <div v-else-if="source.contentType === 'html' && content" class="prose" v-html="content" />
         <pre v-else-if="source.contentType === 'text' && content" class="content-pre">{{ content }}</pre>
+        <iframe
+          v-else-if="source.contentType === 'pdf'"
+          :src="source.contentEndpoint(doc[source.idField])"
+          class="pdf-frame"
+          title="PDF document"
+        />
         </template>
       </div>
 

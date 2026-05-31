@@ -600,10 +600,48 @@ export const SOURCES = {
       ]},
     ],
   },
+
+  pdfs: {
+    key: 'pdfs',
+    label: 'PDFs',
+    subtitle: 'Dropped PDF documents',
+    listEndpoint: '/pdfs/documents',
+    detailEndpoint: (id) => `/pdfs/documents/${encodeURIComponent(id)}`,
+    contentEndpoint: (id) => `/pdfs/documents/${encodeURIComponent(id)}/content`,
+    chunksEndpoint: null,
+    // idField is the filename stem; embedded PDF `title` metadata is often
+    // blank, so the stem doubles as the reliable display title and the parsed
+    // title (when present) shows as a meta field.
+    idField: 'doc_id',
+    titleField: 'doc_id',
+    subtitle_fn: (item) => item.title || item.author || '',
+    meta_fn: (item) => [
+      item.num_pages ? `${item.num_pages} pp` : '',
+      item.file_size ? `${Math.round(item.file_size / 1024)} KB` : '',
+    ].filter(Boolean).join(' · '),
+    // Rendered in an in-browser PDF viewer (an <iframe> pointed straight at
+    // contentEndpoint — see DocView's 'pdf' branch). No text fetch, no embed.
+    contentType: 'pdf',
+    metaFields: [
+      { label: 'File',     value: (d) => d.doc_id },
+      { label: 'Title',    value: (d) => d.title },
+      { label: 'Author',   value: (d) => d.author },
+      { label: 'Pages',    value: (d) => d.num_pages },
+      { label: 'Size',     value: (d) => d.file_size ? `${Math.round(d.file_size / 1024)} KB` : '' },
+      { label: 'Created',  value: (d) => d.creation_date },
+      { label: 'Producer', value: (d) => d.producer },
+      { label: 'Ingested', value: (d) => d.ingested_at },
+    ],
+    filters: [
+      { key: 'title',  label: 'Title',  type: 'text', placeholder: 'substring' },
+      { key: 'author', label: 'Author', type: 'text', placeholder: 'substring' },
+    ],
+  },
 };
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
   'pydocs', 'factbook', 'worldbank', 'geonames',
   'federal_register', 'github_readmes', 'sec_edgar', 'billstatus', 'eurlex', 'ecfr',
+  'pdfs',
 ];

@@ -111,6 +111,25 @@ class EmbedResult(BaseModel):
     embedded: bool
 
 
+class PdfDocument(BaseModel):
+    """One ingested PDF from `pdfs.documents`. The original file is served at
+    /content; `doc_id` is the source filename stem (used as the display title
+    since embedded PDF `title` metadata is frequently missing)."""
+
+    doc_id: str
+    title: str | None
+    author: str | None
+    subject: str | None
+    keywords: str | None
+    creator: str | None
+    producer: str | None
+    creation_date: str | None
+    mod_date: str | None
+    num_pages: int | None
+    file_size: int | None
+    ingested_at: str | None
+
+
 class FederalRegisterDoc(BaseModel):
     document_number: str
     title: str | None

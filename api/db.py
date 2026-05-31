@@ -51,6 +51,10 @@ EURLEX_DB = DATA_DIR / "eurlex" / "eurlex.db"
 EURLEX_RAG_DB = DATA_DIR / "eurlex" / "eurlex_rag.db"
 ECFR_DB = DATA_DIR / "ecfr" / "ecfr.db"
 ECFR_RAG_DB = DATA_DIR / "ecfr" / "ecfr_rag.db"
+PDFS_DB = DATA_DIR / "pdfs" / "pdfs.db"
+# Original PDF files live in the drop folder; the /content route streams them
+# straight from here, so the path is needed alongside the metadata DB.
+PDFS_INCOMING = DATA_DIR / "pdfs" / "incoming"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -161,6 +165,7 @@ _eurlex: sqlite3.Connection | None = None
 _eurlex_rag: sqlite3.Connection | None = None
 _ecfr: sqlite3.Connection | None = None
 _ecfr_rag: sqlite3.Connection | None = None
+_pdfs: sqlite3.Connection | None = None
 
 
 def arxiv() -> sqlite3.Connection:
@@ -369,3 +374,11 @@ def ecfr_rag() -> sqlite3.Connection:
     if _ecfr_rag is None:
         _ecfr_rag = _connect_ro_with_vec(ECFR_RAG_DB)
     return _ecfr_rag
+
+
+def pdfs() -> sqlite3.Connection:
+    """Cached read-only connection to pdfs.db (built by scripts/pdfs/pdfs_ingest.py)."""
+    global _pdfs
+    if _pdfs is None:
+        _pdfs = _connect_ro(PDFS_DB)
+    return _pdfs
