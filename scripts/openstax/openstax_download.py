@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Download OpenStax textbooks from their GitHub `osbooks-*` repos into
+`data/openstax/openstax.db`.
+
+OpenStax publishes every book as a public, CC-licensed GitHub repo of XML:
+`collections/<slug>.collection.xml` is the table of contents and
+`modules/<mNNNNN>/index.cnxml` is each section's content (see `rag.openstax`).
+For each repo this script shallow-clones it into a temp working dir, parses the
+COLLXML for chapter/section order, renders each section's CNXML to plain text
+with inline `$…$` LaTeX (formulas are presentation MathML, rebuilt by
+`rag.mathml`), loads three tables — `books`, `chapters`, `sections` — and then
+deletes the clone so nothing large lands on the (often full) `/home` disk.
+
+Idempotent: re-running replaces every row for each book. After a run, build the
+search index with `openstax_index_fts.py` and restart uvicorn.
+
+Starts with the mathematics shelf; add repos to `MATH_REPOS` (or pass
+`--repos`) to cover more subjects. The clone is shallow + sparse (only
+`collections/` and `modules/`, skipping the large `media/` image folder).
+"""
+
+import argparse
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from rag.openstax import cnxml_to_markdown, parse_collection  # noqa: E402
+from rag.schema import connect_rag  # noqa: E402
+
+DB_PATH = REPO_ROOT / "data" / "openstax" / "openstax.db"
+RAG_DB_PATH = REPO_ROOT / "data" / "openstax" / "openstax_rag.db"
+
+GITHUB_BASE = "https://github.com/openstax"
+
+# (repo, subject). Slugs are auto-discovered from each repo's collections/
+# folder, so adding a subject is just adding its osbooks-* repo here.
+MATH_REPOS = [
+    ("osbooks-prealgebra-bundle", "mathematics"),
+    ("osbooks-college-algebra-bundle", "mathematics"),
+    ("osbooks-calculus-bundle", "mathematics"),
+    ("osbooks-introductory-statistics-bundle", "mathematics"),
+    ("osbooks-statistics", "mathematics"),
+    ("osbooks-contemporary-mathematics", "mathematics"),
+]
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS books (
+    book_id      TEXT PRIMARY KEY,   -- collection slug, e.g. 'calculus-volume-1'
+    title        TEXT NOT NULL,
+    subject      TEXT NOT NULL,
+    repo         TEXT NOT NULL,
+    uuid         TEXT,
+    license      TEXT,
+    commit_sha   TEXT,
+    num_chapters INTEGER NOT NULL DEFAULT 0,
+    num_sections INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS chapters (
+    chapter_id   TEXT PRIMARY KEY,   -- '{book_id}#ch{seq}'
+    book_id      TEXT NOT NULL REFERENCES books(book_id),
+    number       INTEGER,            -- chapter ordinal; NULL for front/back matter
+    title        TEXT,
+    seq          INTEGER NOT NULL    -- absolute order within the book
+);
+
+CREATE TABLE IF NOT EXISTS sections (
+    id             INTEGER PRIMARY KEY,  -- rowid the FTS index keys on
+    section_id     TEXT UNIQUE NOT NULL, -- '{book_id}/{module_id}'
+    book_id        TEXT NOT NULL REFERENCES books(book_id),
+    chapter_id     TEXT NOT NULL REFERENCES chapters(chapter_id),
+    chapter_number INTEGER,
+    chapter_title  TEXT,
+    module_id      TEXT NOT NULL,
+    title          TEXT,
+    objectives     TEXT,                 -- one learning objective per line
+    body           TEXT NOT NULL,        -- section prose w/ inline $…$ LaTeX
+    seq            INTEGER NOT NULL      -- absolute order within the book
+);
+
+CREATE INDEX IF NOT EXISTS idx_chapters_book ON chapters(book_id, seq);
+CREATE INDEX IF NOT EXISTS idx_sections_book ON sections(book_id, seq);
+CREATE INDEX IF NOT EXISTS idx_sections_chapter ON sections(chapter_id, seq);
+CREATE INDEX IF NOT EXISTS idx_sections_subject ON sections(book_id);
+"""
+
+
+def _clone(repo: str, dest: Path) -> str:
+    """Shallow + sparse clone `repo` into `dest`; return its HEAD commit sha.
+
+    Uses a blobless partial clone with a sparse checkout limited to
+    `collections/` and `modules/` so the large `media/` image folder is never
+    fetched. Falls back to a plain shallow clone if the git version doesn't
+    support partial/sparse clone.
+    """
+    url = f"{GITHUB_BASE}/{repo}.git"
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--filter=blob:none",
+             "--sparse", url, str(dest)],
+            check=True, capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(dest), "sparse-checkout", "set",
+             "collections", "modules"],
+            check=True, capture_output=True, text=True,
+        )
+    except subprocess.CalledProcessError:
+        # Older git: fall back to a full shallow clone (pulls media too).
+        if dest.exists():
+            shutil.rmtree(dest)
+        subprocess.run(
+            ["git", "clone", "--depth", "1", url, str(dest)],
+            check=True,
+        )
+    sha = subprocess.run(
+        ["git", "-C", str(dest), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    return sha
+
+
+def _load_book(
+    cur: sqlite3.Cursor,
+    clone_dir: Path,
+    collection_file: Path,
+    repo: str,
+    subject: str,
+    commit_sha: str,
+) -> tuple[str, int, int]:
+    """Parse one collection + its modules and (re)insert its rows.
+
+    Returns `(book_id, num_chapters, num_sections)`.
+    """
+    info = parse_collection(collection_file.read_text(encoding="utf-8"))
+    book_id = info.slug or collection_file.stem.replace(".collection", "")
+
+    # Idempotent: clear any prior rows for this book first.
+    cur.execute("DELETE FROM sections WHERE book_id = ?", (book_id,))
+    cur.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
+    cur.execute("DELETE FROM books WHERE book_id = ?", (book_id,))
+
+    cur.execute(
+        "INSERT INTO books (book_id, title, subject, repo, uuid, license, "
+        "commit_sha, num_chapters, num_sections) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)",
+        (book_id, info.title, subject, repo, info.uuid, info.license, commit_sha),
+    )
+
+    modules_root = clone_dir / "modules"
+    seq = 0
+    section_count = 0
+    for ch_idx, chapter in enumerate(info.chapters, start=1):
+        chapter_id = f"{book_id}#ch{ch_idx}"
+        cur.execute(
+            "INSERT INTO chapters (chapter_id, book_id, number, title, seq) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (chapter_id, book_id, chapter.number,
+             chapter.title or "Front/Back Matter", ch_idx),
+        )
+        for module_id in chapter.module_ids:
+            cnxml_path = modules_root / module_id / "index.cnxml"
+            if not cnxml_path.is_file():
+                print(f"  ! missing module {module_id} in {book_id}", file=sys.stderr)
+                continue
+            parsed = cnxml_to_markdown(cnxml_path.read_text(encoding="utf-8"))
+            if not parsed.body.strip():
+                continue  # nothing useful to store (e.g. a stub)
+            seq += 1
+            cur.execute(
+                "INSERT INTO sections (section_id, book_id, chapter_id, "
+                "chapter_number, chapter_title, module_id, title, objectives, "
+                "body, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (f"{book_id}/{module_id}", book_id, chapter_id, chapter.number,
+                 chapter.title, module_id, parsed.title, parsed.objectives,
+                 parsed.body, seq),
+            )
+            section_count += 1
+
+    num_chapters = len(info.chapters)
+    cur.execute(
+        "UPDATE books SET num_chapters = ?, num_sections = ? WHERE book_id = ?",
+        (num_chapters, section_count, book_id),
+    )
+    return book_id, num_chapters, section_count
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", type=Path, default=DB_PATH,
+                        help=f"Output SQLite DB (default {DB_PATH}).")
+    parser.add_argument("--repos", nargs="*",
+                        help="Override the repo list (subject defaults to "
+                             "'mathematics' for repos passed here).")
+    parser.add_argument("--work-dir", type=Path, default=None,
+                        help="Temp dir for clones (default: a system temp dir on "
+                             "the root filesystem). Removed on success.")
+    parser.add_argument("--keep-clones", action="store_true",
+                        help="Don't delete the cloned repos (for debugging).")
+    args = parser.parse_args()
+
+    repos = ([(r, "mathematics") for r in args.repos]
+             if args.repos else MATH_REPOS)
+
+    args.db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(args.db)
+    con.executescript(SCHEMA)
+    cur = con.cursor()
+
+    # Clone into a temp dir on the root filesystem (where there's space), one
+    # repo at a time so peak disk use is a single repo's clone.
+    work_root = Path(tempfile.mkdtemp(prefix="openstax_", dir=args.work_dir))
+    total_books = total_sections = 0
+    try:
+        for repo, subject in repos:
+            print(f"\n=== {repo} ({subject}) ===")
+            clone_dir = work_root / repo
+            sha = _clone(repo, clone_dir)
+            collections = sorted((clone_dir / "collections").glob("*.collection.xml"))
+            if not collections:
+                print(f"  ! no collections found in {repo}", file=sys.stderr)
+            for coll in collections:
+                book_id, n_ch, n_sec = _load_book(
+                    cur, clone_dir, coll, repo, subject, sha
+                )
+                con.commit()
+                total_books += 1
+                total_sections += n_sec
+                print(f"  {book_id}: {n_ch} chapters, {n_sec} sections")
+            if not args.keep_clones:
+                shutil.rmtree(clone_dir, ignore_errors=True)
+    finally:
+        con.close()
+        if not args.keep_clones:
+            shutil.rmtree(work_root, ignore_errors=True)
+
+    print(f"\nDone. {total_books} books, {total_sections} sections → {args.db}")
+
+    # Create the RAG DB (schema only) so the read-only opener and /health stay
+    # green before the first batch-index or live embed — same as eCFR.
+    RAG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connect_rag(RAG_DB_PATH).close()
+    print(f"Ensured empty RAG DB at {RAG_DB_PATH}")
+    print("Next: run scripts/openstax/openstax_index_fts.py, then restart uvicorn.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

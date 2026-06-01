@@ -325,6 +325,40 @@ class GeonamesPlace(BaseModel):
     sentence: str | None
 
 
+class OpenstaxBook(BaseModel):
+    """One OpenStax textbook from `openstax.books`. Sections live at
+    /openstax/sections?book_id=… in reading order."""
+
+    book_id: str
+    title: str
+    subject: str
+    repo: str
+    uuid: str | None
+    license: str | None
+    num_chapters: int
+    num_sections: int
+
+
+class OpenstaxSection(BaseModel):
+    """One section from `openstax.sections`. Body served at /content.
+
+    `objectives` is the section's learning objectives (one per line) — the pure
+    "outline" signal — included on list rows since it's short. The full body is
+    fetched separately. `content_chars` is `length(body)` (character count).
+    """
+
+    section_id: str
+    book_id: str
+    book_title: str | None
+    subject: str | None
+    chapter_number: int | None
+    chapter_title: str | None
+    module_id: str
+    title: str | None
+    objectives: str | None
+    content_chars: int | None
+
+
 class EcfrRegulation(BaseModel):
     """One section from `ecfr.regulations`. Regulation body served at /content.
 

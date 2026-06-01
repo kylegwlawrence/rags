@@ -51,6 +51,8 @@ EURLEX_DB = DATA_DIR / "eurlex" / "eurlex.db"
 EURLEX_RAG_DB = DATA_DIR / "eurlex" / "eurlex_rag.db"
 ECFR_DB = DATA_DIR / "ecfr" / "ecfr.db"
 ECFR_RAG_DB = DATA_DIR / "ecfr" / "ecfr_rag.db"
+OPENSTAX_DB = DATA_DIR / "openstax" / "openstax.db"
+OPENSTAX_RAG_DB = DATA_DIR / "openstax" / "openstax_rag.db"
 PDFS_DB = DATA_DIR / "pdfs" / "pdfs.db"
 PDFS_RAG_DB = DATA_DIR / "pdfs" / "pdfs_rag.db"
 # Original PDF files live in the drop folder; the /content route streams them
@@ -166,6 +168,8 @@ _eurlex: sqlite3.Connection | None = None
 _eurlex_rag: sqlite3.Connection | None = None
 _ecfr: sqlite3.Connection | None = None
 _ecfr_rag: sqlite3.Connection | None = None
+_openstax: sqlite3.Connection | None = None
+_openstax_rag: sqlite3.Connection | None = None
 _pdfs: sqlite3.Connection | None = None
 _pdfs_rag: sqlite3.Connection | None = None
 
@@ -376,6 +380,22 @@ def ecfr_rag() -> sqlite3.Connection:
     if _ecfr_rag is None:
         _ecfr_rag = _connect_ro_with_vec(ECFR_RAG_DB)
     return _ecfr_rag
+
+
+def openstax() -> sqlite3.Connection:
+    """Cached read-only connection to openstax.db (FTS index built by scripts/openstax/openstax_index_fts.py)."""
+    global _openstax
+    if _openstax is None:
+        _openstax = _connect_ro(OPENSTAX_DB)
+    return _openstax
+
+
+def openstax_rag() -> sqlite3.Connection:
+    """Cached read-only connection to openstax_rag.db (built by scripts/openstax/openstax_index_rag.py or the embed button)."""
+    global _openstax_rag
+    if _openstax_rag is None:
+        _openstax_rag = _connect_ro_with_vec(OPENSTAX_RAG_DB)
+    return _openstax_rag
 
 
 def pdfs() -> sqlite3.Connection:
