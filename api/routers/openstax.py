@@ -195,44 +195,46 @@ def list_sections(
     )
 
 
-def _lookup_section(
-    conn: sqlite3.Connection, book_id: str, module_id: str
-) -> sqlite3.Row:
-    """Fetch one section's full row (incl. body) by book + module, or 404."""
+def _lookup_section(conn: sqlite3.Connection, section_id: str) -> sqlite3.Row:
+    """Fetch one section's full row (incl. body) by `section_id`, or 404.
+
+    `section_id` is `{book_id}/{module_id}` — it contains a slash, so the
+    routes below address it with a greedy `{section_id:path}` converter (same
+    pattern as pydocs' `doc_path`).
+    """
     row = conn.execute(
         "SELECT s.section_id, s.book_id, b.title AS book_title, b.subject AS subject, "
         "s.chapter_number, s.chapter_title, s.module_id, s.title, s.objectives, "
         "s.body, length(s.body) AS content_chars "
         "FROM sections s JOIN books b ON b.book_id = s.book_id "
-        "WHERE s.book_id = ? AND s.module_id = ?",
-        [book_id, module_id],
+        "WHERE s.section_id = ?",
+        [section_id],
     ).fetchone()
     if row is None:
         raise HTTPException(
-            status_code=404,
-            detail=f"section {book_id}/{module_id} not found",
+            status_code=404, detail=f"section {section_id!r} not found"
         )
     return row
 
 
-# Content/embed routes come before the section detail route — same prefix depth.
-@router.get("/books/{book_id}/sections/{module_id}/content")
+# Content/embed routes come BEFORE the section detail route because all three
+# use `{section_id:path}`, which is greedy and would otherwise consume the
+# `.../content` and `.../embed` suffixes as part of the id (same as pydocs).
+@router.get("/sections/{section_id:path}/content")
 def get_section_content(
-    book_id: str,
-    module_id: str,
+    section_id: str,
     conn: sqlite3.Connection = Depends(db.openstax),
 ) -> Response:
     """Return one section's body (plain text with inline `$…$` LaTeX)."""
-    row = _lookup_section(conn, book_id, module_id)
+    row = _lookup_section(conn, section_id)
     if not row["body"]:
         raise HTTPException(status_code=404, detail="section has no body text")
     return Response(content=row["body"], media_type="text/plain; charset=utf-8")
 
 
-@router.post("/books/{book_id}/sections/{module_id}/embed", response_model=EmbedResult)
+@router.post("/sections/{section_id:path}/embed", response_model=EmbedResult)
 def embed_section(
-    book_id: str,
-    module_id: str,
+    section_id: str,
     conn: sqlite3.Connection = Depends(db.openstax),
 ) -> EmbedResult:
     """Embed one section into openstax_rag.db on demand (synchronous).
@@ -244,9 +246,9 @@ def embed_section(
     mode, so the cached read-only connection sees the new rows without a uvicorn
     restart). A 503 means Ollama was unreachable; existing chunks are untouched.
     """
-    row = _lookup_section(conn, book_id, module_id)
+    row = _lookup_section(conn, section_id)
     doc = build_doc(row)
-    title = (row["title"] or "").strip() or f"{book_id}/{module_id}"
+    title = (row["title"] or "").strip() or section_id
     if doc is None:
         return EmbedResult(
             doc_id=row["section_id"], title=title, chunk_count=0, embedded=False
@@ -277,14 +279,13 @@ def embed_section(
     )
 
 
-@router.get("/books/{book_id}/sections/{module_id}", response_model=OpenstaxSection)
+@router.get("/sections/{section_id:path}", response_model=OpenstaxSection)
 def get_section(
-    book_id: str,
-    module_id: str,
+    section_id: str,
     conn: sqlite3.Connection = Depends(db.openstax),
 ) -> OpenstaxSection:
     """Return metadata + learning objectives for one section (body at /content)."""
-    return _row_to_section(_lookup_section(conn, book_id, module_id))
+    return _row_to_section(_lookup_section(conn, section_id))
 
 
 add_chunks_route(

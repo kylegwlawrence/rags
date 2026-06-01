@@ -219,6 +219,48 @@ export const SOURCES = {
     ],
   },
 
+  openstax: {
+    key: 'openstax',
+    label: 'OpenStax',
+    subtitle: 'Textbook sections',
+    listEndpoint: '/openstax/sections',
+    detailEndpoint: (id) => `/openstax/sections/${id}`,
+    contentEndpoint: (id) => `/openstax/sections/${id}/content`,
+    chunksEndpoint: '/openstax/chunks',
+    docChunksEndpoint: '/openstax/doc-chunks',
+    embedEndpoint: (id) => `/openstax/sections/${id}/embed`,
+    idField: 'section_id',
+    titleField: 'title',
+    subtitle_fn: (item) => item.book_title || '',
+    meta_fn: (item) => item.chapter_number
+      ? `Ch. ${item.chapter_number}. ${item.chapter_title || ''}`
+      : (item.chapter_title || ''),
+    contentType: 'text',
+    metaFields: [
+      { label: 'Book',       value: (d) => d.book_title },
+      { label: 'Subject',    value: (d) => d.subject },
+      { label: 'Chapter',    value: (d) => d.chapter_number
+          ? `${d.chapter_number}. ${d.chapter_title || ''}`
+          : d.chapter_title },
+      { label: 'Section',    value: (d) => d.title },
+      { label: 'Objectives', value: (d) => d.objectives },
+      { label: 'Size',       value: (d) => d.content_chars ? `${d.content_chars} chars` : '' },
+    ],
+    filters: [
+      { key: 'q',       label: 'Search',  type: 'text', placeholder: 'FTS5 query…' },
+      { key: 'book_id', label: 'Book',    type: 'text', placeholder: 'e.g. calculus-volume-1' },
+      { key: 'sort', label: 'Sort', type: 'select', options: [
+        { value: '',          label: 'Document order' },
+        { value: 'relevance', label: 'Relevance' },
+      ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
+    ],
+  },
+
   federal_register: {
     key: 'federal_register',
     label: 'Federal Register',
@@ -653,7 +695,7 @@ export const SOURCES = {
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
-  'pydocs', 'factbook', 'worldbank', 'geonames',
+  'pydocs', 'openstax', 'factbook', 'worldbank', 'geonames',
   'federal_register', 'github_readmes', 'sec_edgar', 'billstatus', 'eurlex', 'ecfr',
   'pdfs',
 ];
