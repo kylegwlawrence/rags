@@ -74,8 +74,19 @@ def health(response: Response) -> dict:
     per-DB detail so a probe can tell which one failed without a second call.
     """
     status: dict[str, str] = {}
+
+    # arxiv is sharded by parent category: ping every present shard. Kept out of
+    # the uniform opener loop below because its opener returns a dict of
+    # connections, not one. The value stays exactly "ok" so the 503 gate passes.
+    try:
+        shards = db.arxiv_shards()
+        for shard_conn in shards.values():
+            shard_conn.execute("SELECT 1").fetchone()
+        status["arxiv"] = "ok"
+    except Exception as e:
+        status["arxiv"] = f"error: {e.__class__.__name__}: {e}"
+
     for name, opener in (
-        ("arxiv", db.arxiv),
         ("arxiv_rag", db.arxiv_rag),
         ("factbook", db.factbook),
         ("factbook_rag", db.factbook_rag),

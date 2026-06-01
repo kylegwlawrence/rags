@@ -33,6 +33,36 @@ SORTS = {
 }
 Sort = Literal["submitted_desc", "submitted_asc", "updated_desc", "relevance"]
 
+# arxiv is sharded by parent category across data/arxiv/{parent}.db, so a list
+# query fans out to every shard and the rows are re-merged here. Each shard
+# query also selects its sort key as `_sortkey` so we can re-sort the combined
+# rows. Maps sort -> (key expression, reverse-for-Python-sort).
+#
+# Date sorts merge on the exact value. `relevance` is special: bm25 scores come
+# from each shard's own FTS index and are NOT comparable across shards (a term
+# that is rare in a small shard scores "better" there than the same term in the
+# big shard where it's common), so merging on raw bm25 lets a small shard hijack
+# the ranking. Instead relevance merges on each row's RANK within its shard
+# (best-of-each-shard first), tie-broken by raw bm25 — scale-independent.
+_SORT_KEY = {
+    "submitted_desc": ("submitted_date", True),
+    "submitted_asc": ("submitted_date", False),
+    "updated_desc": ("updated_date", True),
+    "relevance": ("bm25(papers_fts)", False),
+}
+
+
+def _merge_sort_key(row: sqlite3.Row):
+    """Date-sort key for a row by its `_sortkey` column.
+
+    None sorts lowest as ``(0, "")`` vs ``(1, value)`` for present values. Paired
+    with ``reverse`` from `_SORT_KEY`, this reproduces SQLite's NULL ordering
+    (NULLs last under DESC, first under ASC). Within one sort every `_sortkey`
+    is the same type (all dates), so the values never cross-compare.
+    """
+    value = row["_sortkey"]
+    return (0, "") if value is None else (1, value)
+
 
 def _row_to_paper(row: sqlite3.Row, authors: list[str]) -> Paper:
     """Map a `papers` row + its ordered author display_names to the response model.
@@ -66,34 +96,28 @@ _META_COLS = (
 )
 
 
-def _lookup_meta(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
-    """Fetch a `papers` row's metadata (no body) by id or raise 404.
+def _find_shard(
+    shards: dict[str, sqlite3.Connection],
+    paper_id: str,
+    *,
+    with_body: bool = False,
+) -> tuple[sqlite3.Connection | None, sqlite3.Row | None]:
+    """Locate the shard holding `paper_id` and return ``(conn, row)``.
 
-    Used by the detail endpoint, which only reports `has_html` from
-    `download_status` — fetching `html_content` here would pull a multi-MB
-    body off disk on every detail request just to throw it away.
+    A paper lives in exactly one shard (home = its primary-category parent), so
+    we probe shards in turn and stop at the first hit, returning ``(None, None)``
+    when no shard has it. `with_body` pulls `html_content` too (the content
+    route needs the body; the detail route only reports `has_html`, so it skips
+    the multi-MB column).
     """
-    row = conn.execute(
-        f"SELECT {_META_COLS} FROM papers WHERE id = ?",
-        [paper_id],
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
-    return row
-
-
-def _lookup_with_body(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row:
-    """Fetch a `papers` row including `html_content` by id or raise 404.
-
-    Used by the content endpoint where the body is the response payload.
-    """
-    row = conn.execute(
-        f"SELECT {_META_COLS}, html_content FROM papers WHERE id = ?",
-        [paper_id],
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
-    return row
+    cols = f"{_META_COLS}, html_content" if with_body else _META_COLS
+    for conn in shards.values():
+        row = conn.execute(
+            f"SELECT {cols} FROM papers WHERE id = ?", [paper_id]
+        ).fetchone()
+        if row is not None:
+            return conn, row
+    return None, None
 
 
 def _fetch_authors_one(conn: sqlite3.Connection, paper_id: str) -> list[str]:
@@ -182,9 +206,14 @@ def list_papers(
     ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    conn: sqlite3.Connection = Depends(db.arxiv),
+    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
 ) -> Page[Paper]:
-    """List papers with category / date / author / has_html / FTS filters."""
+    """List papers with category / date / author / has_html / FTS filters.
+
+    arxiv is sharded by parent category, so this runs the same filtered query
+    against every present shard, merges the per-shard tops, re-sorts globally,
+    and returns the requested page. `total` is the summed count across shards.
+    """
     if sort is None:
         sort = "relevance" if q is not None else "submitted_desc"
     if sort == "relevance" and q is None:
@@ -238,33 +267,64 @@ def list_papers(
         params.extend(p)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
+    key_expr, reverse = _SORT_KEY[sort]
+    select_cols = (
+        "papers.id, papers.title, papers.abstract, "
+        "papers.primary_category, papers.categories, "
+        "papers.submitted_date, papers.updated_date, papers.doi, "
+        "papers.journal_ref, papers.comments, papers.download_status"
+    )
 
-    with translate_table_errors("arxiv", "arxiv_index_fts.py", "data/arxiv/arxiv.db"):
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM {from_clause} {where}", params
-        ).fetchone()[0]
-        rows = conn.execute(
-            f"SELECT papers.id, papers.title, papers.abstract, "
-            f"       papers.primary_category, papers.categories, "
-            f"       papers.submitted_date, papers.updated_date, papers.doi, "
-            f"       papers.journal_ref, papers.comments, papers.download_status "
-            f"FROM {from_clause} {where} ORDER BY {order} LIMIT ? OFFSET ?",
-            [*params, limit, offset],
-        ).fetchall()
+    # Fan out: from each shard take its own count and its top (offset+limit) rows
+    # in the requested order. The global page is a subset of the union of those
+    # per-shard tops, so re-sorting and slicing here yields the correct page.
+    # Each row keeps its 0-based rank within its shard for the relevance merge.
+    fetch_n = offset + limit
+    total = 0
+    collected: list[tuple[str, int, sqlite3.Row]] = []
+    for parent, sconn in shards.items():
+        with translate_table_errors(
+            "arxiv", "arxiv_index_fts.py", f"data/arxiv/{parent}.db"
+        ):
+            total += sconn.execute(
+                f"SELECT COUNT(*) FROM {from_clause} {where}", params
+            ).fetchone()[0]
+            srows = sconn.execute(
+                f"SELECT {select_cols}, {key_expr} AS _sortkey "
+                f"FROM {from_clause} {where} ORDER BY {order} LIMIT ?",
+                [*params, fetch_n],
+            ).fetchall()
+        collected.extend((parent, rank, r) for rank, r in enumerate(srows))
 
-    # Re-use translate_table_errors for the paper_authors / authors join: if a
-    # legacy DB predates Phase-3 normalization, the tables don't exist and we
-    # want a 503 with the right hint. sql_error_is_user_input=False because a
-    # malformed-SQL error here is the codebase's bug, not the caller's.
-    with translate_table_errors(
-        "arxiv",
-        "arxiv_normalize_authors.py",
-        "data/arxiv/arxiv.db",
-        sql_error_is_user_input=False,
-    ):
-        authors_by_paper = _fetch_authors_many(conn, [r["id"] for r in rows])
+    if sort == "relevance":
+        # Rank-within-shard first (best of each shard interleaved), bm25 as the
+        # tiebreak. Scale-independent, so no shard dominates on raw bm25.
+        collected.sort(key=lambda t: (t[1], t[2]["_sortkey"]))
+    else:
+        collected.sort(key=lambda t: _merge_sort_key(t[2]), reverse=reverse)
+    page = collected[offset : offset + limit]
+
+    # Authors are joined within the shard each row came from, so group page rows
+    # by shard and batch-fetch per shard. translate_table_errors here gives a 503
+    # with the right hint if a shard predates Phase-3 author normalization;
+    # sql_error_is_user_input=False because malformed SQL would be our bug.
+    ids_by_shard: dict[str, list[str]] = {}
+    for parent, _rank, r in page:
+        ids_by_shard.setdefault(parent, []).append(r["id"])
+    authors_by_paper: dict[str, list[str]] = {}
+    for parent, ids in ids_by_shard.items():
+        with translate_table_errors(
+            "arxiv",
+            "arxiv_normalize_authors.py",
+            f"data/arxiv/{parent}.db",
+            sql_error_is_user_input=False,
+        ):
+            authors_by_paper.update(_fetch_authors_many(shards[parent], ids))
     return Page[Paper](
-        items=[_row_to_paper(r, authors_by_paper.get(r["id"], [])) for r in rows],
+        items=[
+            _row_to_paper(r, authors_by_paper.get(r["id"], []))
+            for _parent, _rank, r in page
+        ],
         total=total,
         limit=limit,
         offset=offset,
@@ -276,7 +336,7 @@ def list_papers(
 @router.get("/papers/{paper_id:path}/content")
 def get_paper_content(
     paper_id: str,
-    conn: sqlite3.Connection = Depends(db.arxiv),
+    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
 ) -> Response:
     """Return the downloaded HTML body for one paper as text/html.
 
@@ -284,7 +344,9 @@ def get_paper_content(
     why. Content lives in the DB column, not on disk — gutenberg's FileResponse
     pattern doesn't apply here.
     """
-    row = _lookup_with_body(conn, paper_id)
+    _conn, row = _find_shard(shards, paper_id, with_body=True)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
     if row["html_content"] is None:
         raise HTTPException(status_code=404, detail="paper has no downloaded HTML")
     return Response(content=row["html_content"], media_type="text/html; charset=utf-8")
@@ -293,7 +355,7 @@ def get_paper_content(
 @router.post("/papers/{paper_id:path}/embed", response_model=EmbedResult)
 def embed_paper(
     paper_id: str,
-    conn: sqlite3.Connection = Depends(db.arxiv),
+    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
 ) -> EmbedResult:
     """Embed one arxiv paper into arxiv_rag.db on demand (synchronous).
 
@@ -308,11 +370,16 @@ def embed_paper(
     body and abstract). A 503 means Ollama was unreachable; any existing
     chunks are left untouched.
     """
-    row = conn.execute(
-        "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
-        "FROM papers WHERE id = ?",
-        [paper_id],
-    ).fetchone()
+    # Find the shard holding this paper, pulling the columns the Doc needs.
+    row = None
+    for sconn in shards.values():
+        row = sconn.execute(
+            "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
+            "FROM papers WHERE id = ?",
+            [paper_id],
+        ).fetchone()
+        if row is not None:
+            break
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
 
@@ -363,18 +430,20 @@ def embed_paper(
 @router.get("/papers/{paper_id:path}", response_model=Paper)
 def get_paper(
     paper_id: str,
-    conn: sqlite3.Connection = Depends(db.arxiv),
+    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
 ) -> Paper:
     """Return one paper by its arxiv id.
 
     `{paper_id:path}` so old-style ids with embedded slashes (e.g.
     `cond-mat/0204015`) match cleanly.
     """
-    row = _lookup_meta(conn, paper_id)
+    conn, row = _find_shard(shards, paper_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
     with translate_table_errors(
         "arxiv",
         "arxiv_normalize_authors.py",
-        "data/arxiv/arxiv.db",
+        "data/arxiv/*.db",
         sql_error_is_user_input=False,
     ):
         authors = _fetch_authors_one(conn, paper_id)

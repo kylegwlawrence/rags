@@ -52,6 +52,7 @@ HEALTH_DBS = (
     "eurlex", "eurlex_rag",
     "ecfr", "ecfr_rag",
     "enwiki_rag",
+    "openstax", "openstax_rag",
     "pdfs", "pdfs_rag",
     # enwiki is remote (HTTP probe in main.py) so it shows up too unless the
     # ENWIKI_REMOTE_URL env var is unset, in which case the entry says
@@ -96,7 +97,7 @@ def test_health_503_when_any_db_broken(client, monkeypatch):
     def broken():
         raise RuntimeError("simulated DB outage")
 
-    monkeypatch.setattr(db, "arxiv", broken)
+    monkeypatch.setattr(db, "arxiv_shards", broken)
     r = client.get("/health")
     assert r.status_code == 503
     body = r.json()
@@ -442,12 +443,15 @@ def test_arxiv_papers_503_when_paper_authors_missing(client, tmp_path):
     )
     ro_conn.row_factory = sqlite3.Row
 
-    app.dependency_overrides[db.arxiv] = lambda: ro_conn
+    # arxiv is sharded: the dependency returns a {parent: conn} dict. One shard
+    # whose paper_authors table is missing is enough to hit the author-join 503.
+    app.dependency_overrides[db.arxiv_shards] = lambda: {"no_authors": ro_conn}
     try:
         r = client.get("/arxiv/papers?limit=1")
         assert r.status_code == 503, r.text
         assert "arxiv_normalize_authors.py" in r.json()["detail"]
     finally:
+        app.dependency_overrides.pop(db.arxiv_shards, None)
         ro_conn.close()
 
 

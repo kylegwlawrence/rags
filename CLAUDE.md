@@ -15,7 +15,9 @@ source .venv/bin/activate
 python scripts/arxiv/arxiv_ingest.py                # OAI-PMH metadata → data/arxiv/arxiv.db
 python scripts/arxiv/arxiv_download.py              # HTML bodies for papers
 python scripts/arxiv/arxiv_normalize_authors.py     # one-shot backfill for legacy DBs only
-python scripts/arxiv/arxiv_index_fts.py             # papers_fts FTS5 index
+python scripts/arxiv/arxiv_split_categories.py      # split arxiv.db → data/arxiv/{parent}.db per category
+python scripts/arxiv/arxiv_archive.py               # zstd-archive non-kept shards → data/arxiv/archives/
+python scripts/arxiv/arxiv_index_fts.py             # papers_fts FTS5 index (--db <shard> for a per-category shard)
 python scripts/arxiv/arxiv_index_rag.py             # data/arxiv/arxiv_rag.db
 python scripts/factbook/factbook_download.py
 python scripts/factbook/factbook_index_rag.py       # data/factbook/factbook_rag.db
@@ -70,7 +72,7 @@ Port 8002 is fixed (8000/8001 occupied). Tailscale ACLs gate access; no app-leve
 
 All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total, limit, offset}`. Chunk endpoints: `q` (required), `top_k`, `candidate_k` → `{items, used_dense, top_k, candidate_k}` (RRF, not paginated). Missing FTS table → 503 with script name; bad FTS syntax → 400; Ollama down → sparse-only (`used_dense=false`).
 
-- `/arxiv/papers`, `/{id:path}`, `/{id:path}/content`, `/arxiv/chunks`
+- `/arxiv/papers`, `/{id:path}`, `/{id:path}/content`, `/arxiv/chunks` — served from per-category shards (`data/arxiv/{parent}.db`), fanned out and merged in the router. `sort=relevance` merges by rank-within-shard (bm25 isn't comparable across separate indexes), not raw bm25; date sorts are exact. `/chunks` stays the single global `arxiv_rag.db`.
 - `/openalex/works`, `/{short_id}`, `/openalex/chunks`
 - `/factbook/countries`, `/{id}`, `/factbook/chunks`
 - `/gutenberg/texts`, `/{id}`, `/{id}/content`, `/gutenberg/chunks`
@@ -89,11 +91,16 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 ## Script notes
 
 **arxiv**
+
+arxiv is **sharded by parent category**: the corpus lives as one `data/arxiv/{parent}.db` per top-level category (`math.db`, `cs.db`, …) rather than a single monolith. The API auto-discovers whichever shard files are present in `data/arxiv/` (see `api/db.py` `arxiv_shards()`) and fans queries out across them, so the *live* set is just the shards on disk. Archived categories are zstd-compressed under `data/arxiv/archives/`; unarchiving = decompress its `{parent}.db` back into `data/arxiv/` and restart uvicorn. A paper's home shard is the parent of its `primary_category` (so each paper lives in exactly one shard, and counts sum across shards). The original monolith `arxiv.db` is gone — the ingest/download/normalize scripts below still default to `--db data/arxiv/arxiv.db`, so re-running them means re-pointing `--db` at a shard (or re-harvesting a fresh monolith and re-splitting).
+
 - `arxiv_ingest.py` — OAI-PMH harvester. Rate: 3 s/req. Set `DATASETS_EMAIL`. Flags: `--from`, `--until`, `--db`, `--from-cache`, `--reset`. Restart after.
 - `arxiv_download.py` — HTML body fetcher. Flags: `--db`, `--limit`, `--force`. Restart after.
 - `arxiv_normalize_authors.py` — Backfill only for arxiv.db files predating Phase 3; idempotent.
-- `arxiv_index_fts.py` — Rebuilds `papers_fts` (porter, external-content). Required for `?q=`.
-- `arxiv_index_rag.py` — `arxiv_rag.db`. Chunks full HTML body (section-tagged markdown) when available; falls back to abstract-only for papers without downloaded HTML. Flags: `--limit`, `--reset`, `--batch`, `--chunk-size` (1500), `--max-chunk-size` (1800), `--overlap` (150). Restart after.
+- `arxiv_split_categories.py` — Splits a monolith `arxiv.db` into self-contained per-parent shards (papers + sliced authors/paper_authors + indexes). Home shard = parent of `primary_category`; legacy no-dot codes are their own parent. Flags: `--db`, `--output-dir` (default `data/arxiv/categories`; point at a roomy filesystem to dodge `/home` pressure, then move keepers into `data/arxiv/`), `--parents`, `--exclude` (build all but these), `--force`. Read-only on the source; idempotent (skips existing shards).
+- `arxiv_archive.py` — zstd-compresses shards (default level 10) to `data/arxiv/archives/{parent}.db.zst`, **keeping** the parents in `--keep` (default `math,math-ph,physics`) live. Verifies each archive with `zstd -t`, then deletes the verified original unless `--keep-originals`. Flags: `--base-dir` (default `data/arxiv/categories`), `--out-dir`, `--keep`, `--level`, `--threads`, `--keep-originals`, `--force`. Mirrors `gutenberg_archive.py`.
+- `arxiv_index_fts.py` — Rebuilds `papers_fts` (porter, external-content) over title + abstract. Required for `?q=` **per shard** — pass `--db data/arxiv/{parent}.db` to index a shard (default is `data/arxiv/arxiv.db`).
+- `arxiv_index_rag.py` — `arxiv_rag.db` (single global RAG DB, not sharded). Chunks full HTML body (section-tagged markdown) when available; falls back to abstract-only for papers without downloaded HTML. Flags: `--limit`, `--reset`, `--batch`, `--chunk-size` (1500), `--max-chunk-size` (1800), `--overlap` (150). Restart after.
 
 **factbook**
 - `factbook_download.py` — Clones `github.com/factbook/factbook.json` → `factbook.db`.
@@ -109,6 +116,7 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 - `gutenberg_download.py` — Fetches PG catalog CSV, filters by language, rsyncs matching files from ibiblio mirror. Flags: `--language` (default `en`; comma-separated codes or `all`), `--dry-run`.
 - `gutenberg_index.py` — Walks `.txt` files, joins PG catalog CSV → `gutenberg.db`.
 - `gutenberg_index_rag.py` — `gutenberg_rag.db`. Flags: `--language` (en), `--limit` (100), `--chunk-size` (2000), `--max-chunk-size` (2400), `--overlap` (300). Restart after.
+- `gutenberg_archive.py` — tar + zstd (default level 10) each shard folder `data/gutenberg/{0..9}` into `data/gutenberg/archives/{n}.tar.zst`. Leaves originals in place — delete manually after verifying. Flags: `--base-dir`, `--out-dir`, `--level`, `--threads`, `--folder`, `--force`. (Template for `arxiv_archive.py`.)
 
 **simplewiki**
 - `simplewiki_download.py` — Downloads + SHA-1 verifies dump to `data/simplewiki/dumps/`.
