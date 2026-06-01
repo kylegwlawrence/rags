@@ -9,8 +9,8 @@ record header so the embed pipeline can detect "this paper changed").
 
 arXiv asks bulk harvesters for >= 3 s between requests and a contact
 ``mailto:`` in the User-Agent. Both are honored; the email is overridable
-via the ``ARXIV_EMAIL`` environment variable (shared with
-``scripts/arxiv_download.py``).
+via the ``DATASETS_EMAIL`` environment variable (the project-wide contact
+address, shared with ``scripts/arxiv_download.py`` and the other sources).
 
 Ported from ``local_wikipedia/arxiv/oai.py``. Two intentional deviations:
 
@@ -19,8 +19,8 @@ Ported from ``local_wikipedia/arxiv/oai.py``. Two intentional deviations:
   ``<affiliation>`` into a single string. ``_parse_authors`` returns
   ``list[dict]`` with the structured fields plus a convenience
   ``display_name``.
-* **Email is env-var driven.** Mirrors the ``OPENALEX_EMAIL`` pattern in
-  ``scripts/openalex_download.py``.
+* **Email is env-var driven.** Reads the project-wide ``DATASETS_EMAIL``,
+  the shared contact address used by every source's downloader.
 
 The HTTP layer (retry with ``Retry-After``, 5xx exponential backoff)
 is kept as a local helper rather than routed through ``rag.retry.with_retry``
@@ -41,10 +41,15 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
 
 OAI_ENDPOINT = "https://oaipmh.arxiv.org/oai"
-ARXIV_EMAIL = os.environ.get("ARXIV_EMAIL", "kylegwlawrence@gmail.com")
-USER_AGENT = f"datasets/0.1 (mailto:{ARXIV_EMAIL})"
+# Required, no fallback. May be None here (e.g. for --from-cache runs that make
+# no network calls); the requirement is enforced in _fetch_with_retry, the only
+# place an actual request — and thus a User-Agent — is built.
+ARXIV_EMAIL = os.environ.get("DATASETS_EMAIL")
 MIN_REQUEST_INTERVAL = 3.0
 MAX_ATTEMPTS = 3
 BACKOFF_BASE = 5.0
@@ -167,7 +172,12 @@ def _fetch_with_retry(
     the retry strategy depends on response headers (``Retry-After``)
     that ``with_retry`` doesn't model.
     """
-    headers = {"User-Agent": USER_AGENT}
+    if not ARXIV_EMAIL:
+        raise RuntimeError(
+            "DATASETS_EMAIL env var is not set; arXiv requires a contact "
+            "mailto: in the User-Agent. Set it and re-run."
+        )
+    headers = {"User-Agent": f"datasets/0.1 (mailto:{ARXIV_EMAIL})"}
     for attempt in range(MAX_ATTEMPTS):
         with httpx.Client(timeout=REQUEST_TIMEOUT, headers=headers) as client:
             resp = client.get(endpoint, params=params)

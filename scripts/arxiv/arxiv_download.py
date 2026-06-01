@@ -13,7 +13,7 @@ or leaves ``download_status`` unchanged on transient errors so the next run
 retries.
 
 Rate-limited to one request per 3 s per arxiv's polite bulk-fetcher policy.
-User-Agent includes a ``mailto:`` overridable via ``ARXIV_EMAIL``.
+User-Agent includes a ``mailto:`` overridable via ``DATASETS_EMAIL``.
 
 Restart uvicorn after this runs so the cached connection in ``api/db.py``
 reopens against the new file.
@@ -261,6 +261,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if not ARXIV_EMAIL:
+        _print_stderr(
+            "DATASETS_EMAIL env var is not set; arXiv requires a contact "
+            "mailto: in the User-Agent. Set it and re-run."
+        )
+        return 1
 
     if not args.db.is_file():
         _print_stderr(f"missing DB: {args.db}")

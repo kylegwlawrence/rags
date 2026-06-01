@@ -28,6 +28,9 @@ import time
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_URL = "https://api.worldbank.org/v2"
 DELAY = 0.3         # seconds between requests — WB API has no hard rate limit but be polite
@@ -170,6 +173,10 @@ def main() -> None:
                              "the iso2_code column after a schema migration.")
     args = parser.parse_args()
 
+    email = os.environ.get("DATASETS_EMAIL")
+    if not email:
+        parser.error("DATASETS_EMAIL env var is required for the User-Agent contact address.")
+
     os.makedirs(os.path.dirname(args.db), exist_ok=True)
 
     con = sqlite3.connect(args.db)
@@ -191,7 +198,7 @@ def main() -> None:
     con.commit()
 
     session = requests.Session()
-    session.headers.update({"User-Agent": "worldbank-downloader kylegwlawrence@gmail.com"})
+    session.headers.update({"User-Agent": f"worldbank-downloader {email}"})
 
     # -------------------------------------------------------------------------
     # Phase 1: Topics

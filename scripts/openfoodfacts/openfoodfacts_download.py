@@ -9,15 +9,20 @@ Requires: requests
 import argparse
 import gzip
 import json
+import os
 import sqlite3
 from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 JSONL_URL = "https://static.openfoodfacts.org/data/openfoodfacts-products.jsonl.gz"
 # static.openfoodfacts.org blocks the default python-requests UA with a 403;
 # a descriptive UA is also courteous per their bulk-data usage guidelines.
-USER_AGENT = "openfoodfacts-downloader/1.0 (personal research; kylegwlawrence@gmail.com)"
+_EMAIL = os.environ.get("DATASETS_EMAIL")
+USER_AGENT = f"openfoodfacts-downloader/1.0 (personal research; {_EMAIL})"
 
 # 55 selected fields
 FIELDS = [
@@ -203,6 +208,9 @@ def main() -> None:
         help="Stop after inserting this many products (useful for testing)."
     )
     args = parser.parse_args()
+
+    if not _EMAIL:
+        parser.error("DATASETS_EMAIL env var is required for the User-Agent contact address.")
 
     db_path = Path(args.db)
     download_dir = Path(args.download_dir)

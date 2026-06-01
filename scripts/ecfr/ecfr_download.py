@@ -15,10 +15,19 @@ import os
 import time
 import xml.etree.ElementTree as ET
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Configuration
 DB_PATH = "data/ecfr/ecfr.db"
 DELAY = 0.5                         # Seconds between API calls
-MAILTO = "kylegwlawrence@gmail.com"
+MAILTO = os.environ.get("DATASETS_EMAIL")
+if not MAILTO:
+    raise SystemExit(
+        "DATASETS_EMAIL env var is not set; required for the eCFR API "
+        "User-Agent. Set it and re-run."
+    )
 
 API_BASE = "https://www.ecfr.gov/api"
 

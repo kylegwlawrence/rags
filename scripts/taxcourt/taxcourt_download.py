@@ -106,6 +106,10 @@ def main() -> None:
             "CourtListener API token required. Set COURTLISTENER_API_TOKEN or pass --token."
         )
 
+    email = os.environ.get("DATASETS_EMAIL")
+    if not email:
+        parser.error("DATASETS_EMAIL env var is required for the User-Agent contact address.")
+
     os.makedirs(os.path.dirname(args.db), exist_ok=True)
 
     con = sqlite3.connect(args.db)
@@ -121,7 +125,7 @@ def main() -> None:
     session = requests.Session()
     session.headers.update({
         "Authorization": f"Token {args.token}",
-        "User-Agent": "taxcourt-fetcher/1.0 (kylegwlawrence@gmail.com)",
+        "User-Agent": f"taxcourt-fetcher/1.0 ({email})",
     })
 
     total = 0

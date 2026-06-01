@@ -26,7 +26,7 @@ router = APIRouter(prefix="/sec_edgar", tags=["sec_edgar"])
 # rejects requests without an identifying User-Agent, so this is required —
 # resolved at request time rather than import so an unset env var doesn't
 # break the rest of the router.
-_SEC_EMAIL_ENV = "SEC_EMAIL"
+_SEC_EMAIL_ENV = "DATASETS_EMAIL"
 
 
 def _require_sec_email() -> str:

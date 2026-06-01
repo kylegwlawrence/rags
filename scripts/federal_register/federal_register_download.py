@@ -10,6 +10,9 @@ import time
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DEFAULT_DB = "./data/federal_register/federal_register.db"
 START_YEAR = 1994  # Federal Register API coverage starts here
@@ -137,6 +140,10 @@ def main() -> None:
                         help=f"End year inclusive (default: {current_year})")
     args = parser.parse_args()
 
+    email = os.environ.get("DATASETS_EMAIL")
+    if not email:
+        parser.error("DATASETS_EMAIL env var is required for the User-Agent contact address.")
+
     db_dir = os.path.dirname(args.db)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
@@ -166,9 +173,7 @@ def main() -> None:
         start_page = 1
 
     session = requests.Session()
-    session.headers["User-Agent"] = (
-        "datasets-bot/1.0 (mailto:kylegwlawrence@gmail.com)"
-    )
+    session.headers["User-Agent"] = f"datasets-bot/1.0 (mailto:{email})"
 
     total_inserted = 0
 

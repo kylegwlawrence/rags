@@ -35,6 +35,9 @@ import urllib.parse
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DEFAULT_FORMAT = "manuscript/mixed material"
 DEFAULT_LANGUAGE = "english"
@@ -42,7 +45,8 @@ BASE_URL = "https://www.loc.gov/search/"
 PER_PAGE = 100
 MAX_RETRIES = 3
 REQUEST_DELAY = 3  # seconds between pages; LOC search API is lenient but be polite
-USER_AGENT = "datasets-bot/1.0 (mailto:kylegwlawrence@gmail.com)"
+_EMAIL = os.environ.get("DATASETS_EMAIL")
+USER_AGENT = f"datasets-bot/1.0 (mailto:{_EMAIL})"
 
 
 def _slugify(text: str) -> str:
@@ -181,6 +185,9 @@ def main() -> None:
         help="Path to SQLite database (default: data/loc/loc_<format_slug>.db)",
     )
     args = parser.parse_args()
+
+    if not _EMAIL:
+        parser.error("DATASETS_EMAIL env var is required for the User-Agent contact address.")
 
     db_path = args.db or default_db(args.format)
     db_dir  = os.path.dirname(db_path)

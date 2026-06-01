@@ -18,6 +18,9 @@ import time
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 GHCND_BASE = "https://www.ncei.noaa.gov/pub/data/ghcn/daily"
 DELAY = 0.5
@@ -210,10 +213,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--email",
-        default=os.environ.get("NOAA_EMAIL", "kylegwlawrence@gmail.com"),
-        help="Contact email for User-Agent header (or set NOAA_EMAIL env var)",
+        default=os.environ.get("DATASETS_EMAIL"),
+        help="Contact email for User-Agent header. Required (or set DATASETS_EMAIL env var).",
     )
     args = parser.parse_args()
+
+    if not args.email:
+        parser.error("--email is required (or set DATASETS_EMAIL env var)")
 
     os.makedirs(os.path.dirname(args.db), exist_ok=True)
 

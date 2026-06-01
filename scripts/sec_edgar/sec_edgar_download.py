@@ -17,6 +17,9 @@ import time
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_URL = "https://www.sec.gov/Archives/edgar/full-index"
 FORM_TYPES = {"10-K", "10-Q", "8-K"}
@@ -158,11 +161,14 @@ def main() -> None:
     parser.add_argument("--end-year", type=int, default=current_year,
                         help="Last year to fetch (default: current year)")
     parser.add_argument("--email",
-                        default=os.environ.get("SEC_EMAIL", "kylegwlawrence@gmail.com"),
-                        help="Contact email for SEC User-Agent header (or set SEC_EMAIL env var)")
+                        default=os.environ.get("DATASETS_EMAIL"),
+                        help="Contact email for SEC User-Agent header. Required (or set DATASETS_EMAIL env var).")
     parser.add_argument("--reset", action="store_true",
                         help="Drop and recreate tables before downloading")
     args = parser.parse_args()
+
+    if not args.email:
+        parser.error("--email is required (or set DATASETS_EMAIL env var)")
 
     os.makedirs(os.path.dirname(args.db), exist_ok=True)
 

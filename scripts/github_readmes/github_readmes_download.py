@@ -13,6 +13,9 @@ import time
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DEFAULT_DB = "./data/github/readmes.db"
 DEFAULT_DELAY = 0.7

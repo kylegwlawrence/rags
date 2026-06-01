@@ -85,7 +85,7 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 ## Script notes
 
 **arxiv**
-- `arxiv_ingest.py` — OAI-PMH harvester. Rate: 3 s/req. Set `ARXIV_EMAIL`. Flags: `--from`, `--until`, `--db`, `--from-cache`, `--reset`. Restart after.
+- `arxiv_ingest.py` — OAI-PMH harvester. Rate: 3 s/req. Set `DATASETS_EMAIL`. Flags: `--from`, `--until`, `--db`, `--from-cache`, `--reset`. Restart after.
 - `arxiv_download.py` — HTML body fetcher. Flags: `--db`, `--limit`, `--force`. Restart after.
 - `arxiv_normalize_authors.py` — Backfill only for arxiv.db files predating Phase 3; idempotent.
 - `arxiv_index_fts.py` — Rebuilds `papers_fts` (porter, external-content). Required for `?q=`.
@@ -96,7 +96,7 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 - `factbook_index_rag.py` — `factbook_rag.db`. Flags: `--chunk-size` (1000), `--max-chunk-size` (1200), `--overlap` (100). Restart after.
 
 **openalex**
-- `openalex_download.py` — OpenAlex `/works` API. Set `OPENALEX_EMAIL` for polite-pool rate limit.
+- `openalex_download.py` — OpenAlex `/works` API. Set `DATASETS_EMAIL` for polite-pool rate limit. Stores open-access location fields (`is_oa`, `oa_status`, `oa_url`, `pdf_url`); upserts so a re-run backfills them onto existing rows.
 - `openalex_normalize_authors.py` — Builds `authors` / `work_authors`. Required for `?author=`. Re-runnable.
 - `openalex_index_fts.py` — Rebuilds `works_fts` (~20 s, ~150 MB). Required for `?q=`.
 - `openalex_index_rag.py` — `openalex_rag.db` (top-5k by citation count). Same flags as arxiv rag. Restart after.
@@ -129,7 +129,7 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 - `loc_books_marc.py` — MARC bulk files from `data/loc/raw/`. Requires `pymarc`. Not resumable.
 
 **sec_edgar**
-- `sec_edgar_download.py` — Quarterly full-index harvester (1993–present). Stores filing **metadata + URLs only**, no body text. Flags: `--db`, `--start-year`, `--end-year`, `--email` (`SEC_EMAIL` env), `--reset`. Resumes via `ingest_state`.
+- `sec_edgar_download.py` — Quarterly full-index harvester (1993–present). Stores filing **metadata + URLs only**, no body text. Flags: `--db`, `--start-year`, `--end-year`, `--email` (`DATASETS_EMAIL` env), `--reset`. Resumes via `ingest_state`.
 - `sec_edgar_fetch_bodies.py` — **Standalone** body fetcher: downloads filing `.txt` from `filing_url`, extracts the primary document, and stores **two** forms of it — the HTML-stripped clean text in `body` (used by FTS + RAG) and the render-ready HTML in `body_html` (served to the Content view); `status` tracks fetched/missing/error. Does **not** build any index. Defaults to 10-K, newest first, `--limit 200`. Flags: `--db`, `--accession` (fetch one filing by accession number, ignoring form-type/limit/status — always refetches), `--form-type`, `--limit`, `--email`, `--delay`, `--reset-status`. The fetch + extraction logic lives in `rag/sec_filing.py`; the API's `POST /sec_edgar/.../download` route reuses it in-process to fetch a single filing on demand (the "Download full filing" button). `body_html` only feeds rendering — adding/refilling it never changes `body`, so existing FTS / RAG indexes stay valid. Rows fetched before `body_html` existed render as `<pre>`-wrapped text until re-fetched (`--reset-status`).
 - `sec_edgar_index_fts.py` — Rebuilds `filings_fts` (company_name + body, fetched rows only). Required for `?q=`.
 - `sec_edgar_index_rag.py` — `sec_edgar_rag.db` over fetched bodies (`chunk_doc`, flat prose). Same flags as other RAG indexers. Restart after.
@@ -149,7 +149,7 @@ The `/sec_edgar/filings` list (and detail) now surfaces metadata-only filings wh
 - `ceps_download.py` — The **only** downloader for the EUR-Lex source. Pulls the CEPS EurLex dataset (142k EU laws, 1952–2019; a frozen snapshot, not incremental) from Harvard Dataverse (DOI `10.7910/DVN/0EGYWY`) into `data/eurlex/raw/`, then bulk-loads every CSV/tab into a dynamically-typed `laws` table (header columns sanitized to TEXT). The CSV ships the full law text in `act_raw_text`, so there is no separate body-fetch step. Flags: `--db` (default `data/eurlex/eurlex.db`), `--download-dir` (default `data/eurlex/raw`), `--reset` (drops + reimports `laws`). Idempotent: skips already-downloaded files and refuses to reimport a non-empty `laws` table without `--reset`. The `raw/` CSVs are only needed for a `--reset` reimport — safe to delete once `laws` is populated. There is no updater for laws past 2019.
 
 **ecfr**
-- `ecfr_download.py` — Fetches the current Electronic Code of Federal Regulations from the `ecfr.gov` versioner API. Walks all 50 CFR titles (Title 35 is reserved/empty), then stores one row per section in `regulations` (`title_num`, `title_name`, `chapter`, `part`, `section`, `heading`, `content`; `UNIQUE(title_num, section)`). Single current snapshot — no amendment history. Set `MAILTO`. Resumes via `ingest_state.completed_titles`.
+- `ecfr_download.py` — Fetches the current Electronic Code of Federal Regulations from the `ecfr.gov` versioner API. Walks all 50 CFR titles (Title 35 is reserved/empty), then stores one row per section in `regulations` (`title_num`, `title_name`, `chapter`, `part`, `section`, `heading`, `content`; `UNIQUE(title_num, section)`). Single current snapshot — no amendment history. Set `DATASETS_EMAIL`. Resumes via `ingest_state.completed_titles`.
 - `ecfr_index_fts.py` — Rebuilds `regulations_fts` (porter, external-content) over `heading + content`, keyed on the `id` INTEGER PK. Required for `?q=`. ~20 s. Restart after.
 - **No batch RAG indexer.** The full corpus is ~509k chunks (~8 days on local Ollama), so semantic search is on-demand: `POST /ecfr/regulations/{id}/embed` chunks one section (flat prose via `chunk_doc`, DEFAULT profile) into `data/ecfr/ecfr_rag.db`, the same live-embed pattern as enwiki. `ecfr_rag.db` is created empty (schema only) so the read-only opener and `/health` stay green before the first embed.
 
