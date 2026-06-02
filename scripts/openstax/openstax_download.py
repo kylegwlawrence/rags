@@ -47,6 +47,8 @@ MATH_REPOS = [
     ("osbooks-introductory-statistics-bundle", "mathematics"),
     ("osbooks-statistics", "mathematics"),
     ("osbooks-contemporary-mathematics", "mathematics"),
+    ("osbooks-algebra-1", "mathematics"),
+    ("osbooks-principles-data-science", "mathematics"),
 ]
 
 SCHEMA = """
