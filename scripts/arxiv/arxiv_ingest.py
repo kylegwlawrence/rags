@@ -282,6 +282,32 @@ def _has_legacy_authors_column(conn: sqlite3.Connection) -> bool:
     return any(row[1] == "authors" for row in rows)
 
 
+def _filter_by_categories(
+    records: Iterable[dict[str, Any]],
+    categories: list[str] | None,
+    category_prefixes: list[str] | None,
+) -> Iterable[dict[str, Any]]:
+    """Yield only records whose ``categories`` field matches any filter.
+
+    ``categories`` tests for an exact token match (e.g. ``cs.LG``).
+    ``category_prefixes`` matches any token that starts with ``<prefix>.``
+    (e.g. ``physics`` matches ``physics.flu-dyn``). Both lists are combined
+    with OR; if neither is provided, every record is yielded unchanged.
+    """
+    if not categories and not category_prefixes:
+        yield from records
+        return
+    for record in records:
+        cats = set(record.get("categories", "").split())
+        if categories and cats.intersection(categories):
+            yield record
+            continue
+        if category_prefixes and any(
+            cat.startswith(f"{p}.") for cat in cats for p in category_prefixes
+        ):
+            yield record
+
+
 def ingest_records(
     conn: sqlite3.Connection,
     records: Iterable[dict[str, Any]],
@@ -356,6 +382,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Delete all rows in papers / authors / paper_authors / ingest_state before harvesting.",
     )
+    parser.add_argument(
+        "--category",
+        dest="categories",
+        action="append",
+        default=None,
+        metavar="CAT",
+        help=(
+            "Only ingest papers in this exact category (e.g. cs.LG). "
+            "Repeat to allow multiple categories."
+        ),
+    )
+    parser.add_argument(
+        "--category-prefix",
+        dest="category_prefixes",
+        action="append",
+        default=None,
+        metavar="PREFIX",
+        help=(
+            "Only ingest papers whose categories include any subcategory "
+            "starting with PREFIX (e.g. physics matches physics.flu-dyn, "
+            "physics.optics, etc.). Repeat to allow multiple prefixes. "
+            "The first prefix is also passed as the OAI-PMH set for "
+            "server-side filtering."
+        ),
+    )
     args = parser.parse_args(argv)
 
     args.db.parent.mkdir(parents=True, exist_ok=True)
@@ -364,6 +415,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.reset:
         _print_stderr("Resetting papers / authors / paper_authors / ingest_state...")
         reset_data(conn)
+
+    # Derive OAI-PMH set spec for server-side filtering: first prefix wins;
+    # fall back to the parent of the first --category value (e.g. cs.LG → cs).
+    set_spec: str | None = None
+    if args.category_prefixes:
+        set_spec = args.category_prefixes[0]
+    elif args.categories:
+        first = args.categories[0]
+        set_spec = first.split(".")[0] if "." in first else first
 
     if args.from_cache:
         if not args.cache_dir.exists():
@@ -379,12 +439,16 @@ def main(argv: list[str] | None = None) -> int:
             or DEFAULT_FROM
         )
         suffix = f" until={args.until_date}" if args.until_date else ""
-        source = f"OAI-PMH from={from_date}{suffix}"
+        set_suffix = f" set={set_spec}" if set_spec else ""
+        source = f"OAI-PMH from={from_date}{suffix}{set_suffix}"
         records = arxiv_oai.harvest_records(
             from_date=from_date,
             until_date=args.until_date,
+            set_spec=set_spec,
             cache_dir=args.cache_dir,
         )
+
+    records = _filter_by_categories(records, args.categories, args.category_prefixes)
 
     _print_stderr(f"Ingesting from {source}...")
     stats = ingest_records(conn, records, progress=_print_stderr)

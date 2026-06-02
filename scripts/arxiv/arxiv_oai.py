@@ -85,6 +85,7 @@ def cache_filename(params: dict[str, str]) -> str:
 def harvest_records(
     from_date: str,
     until_date: str | None = None,
+    set_spec: str | None = None,
     cache_dir: pathlib.Path | None = None,
     endpoint: str = OAI_ENDPOINT,
     sleep: Callable[[float], None] = time.sleep,
@@ -94,6 +95,9 @@ def harvest_records(
     Args:
         from_date: ISO ``YYYY-MM-DD``; records modified on/after this date.
         until_date: Optional upper bound, inclusive.
+        set_spec: OAI-PMH set name for server-side subject filtering, e.g.
+            ``"cs"`` for all CS papers or ``"cs:LG"`` for just cs.LG.
+            See https://info.arxiv.org/help/oa/index.html for the full list.
         cache_dir: If provided, raw XML responses are cached here keyed by
             request params; replayed transparently on the next run.
         endpoint: OAI-PMH base URL (overridable for tests).
@@ -107,6 +111,8 @@ def harvest_records(
     }
     if until_date:
         params["until"] = until_date
+    if set_spec:
+        params["set"] = set_spec
 
     while True:
         xml_text = fetch_page(endpoint, params, cache_dir=cache_dir, sleep=sleep)
