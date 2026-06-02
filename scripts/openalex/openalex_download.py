@@ -18,6 +18,7 @@ separate one-shot, `scripts/openalex_normalize_authors.py`; FTS over title +
 abstract is built by `scripts/openalex_index_fts.py`. Run both after this.
 """
 
+import argparse
 import os
 import sqlite3
 import sys
@@ -56,6 +57,25 @@ def fetch_with_retry(url: str, params: dict) -> requests.Response:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=DB_PATH,
+        help=f"Output DB (default: {DB_PATH.relative_to(REPO_ROOT)}).",
+    )
+    parser.add_argument(
+        "--min-citations",
+        type=int,
+        default=MIN_CITATIONS,
+        help=(
+            f"Only pull works with more than this many citations "
+            f"(default: {MIN_CITATIONS}). Lowering it greatly enlarges the "
+            "corpus — e.g. >100 is ~3.3M works, >50 is ~7.8M."
+        ),
+    )
+    args = parser.parse_args()
+
     if not EMAIL:
         print(
             "DATASETS_EMAIL env var is not set; required for the OpenAlex "
@@ -64,9 +84,10 @@ def main() -> int:
         )
         return 1
 
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db_path = args.db
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS works (
@@ -96,7 +117,7 @@ def main() -> int:
 
     base_url = "https://api.openalex.org/works"
     params = {
-        "filter": f"cited_by_count:>{MIN_CITATIONS},has_abstract:true",
+        "filter": f"cited_by_count:>{args.min_citations},has_abstract:true",
         "select": "id,title,abstract_inverted_index,publication_year,cited_by_count,doi,authorships,primary_location,open_access,best_oa_location",
         "per_page": 200,
         "cursor": "*",
