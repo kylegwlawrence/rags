@@ -579,6 +579,44 @@ def test_gutenberg_content_rejects_path_traversal(client, monkeypatch):
     assert r.status_code == 404
 
 
+def test_arxiv_drop_archived_chunk_hits(monkeypatch):
+    """`_drop_archived_chunk_hits` keeps only hits whose paper lives in a live shard.
+
+    The global arxiv_rag.db retains chunks for papers whose category shard was
+    later archived off disk. A hit pointing at such a paper is dangling and must
+    be dropped, while RRF order is preserved for the survivors. Uses two
+    in-memory `papers` shards so it runs without the real arxiv DBs.
+    """
+    import sqlite3
+
+    from api.routers.arxiv import _drop_archived_chunk_hits
+    from rag import Hit
+
+    def shard(ids):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE papers (id TEXT PRIMARY KEY)")
+        conn.executemany("INSERT INTO papers (id) VALUES (?)", [(i,) for i in ids])
+        return conn
+
+    # math shard holds 2401.0001; cs shard holds 2401.0003. 2401.0002 lives in
+    # an archived (absent) shard, so it must be dropped.
+    shards = {"math": shard(["2401.0001"]), "cs": shard(["2401.0003"])}
+    monkeypatch.setattr(db, "arxiv_shards", lambda: shards)
+
+    def hit(doc_id, chunk_id):
+        return Hit(
+            chunk_id=chunk_id, doc_id=doc_id, title="t", section=None,
+            chunk_index=0, text="x", text_length=1, score=1.0 / chunk_id,
+        )
+
+    hits = [hit("2401.0001", 1), hit("2401.0002", 2), hit("2401.0003", 3)]
+    kept = _drop_archived_chunk_hits(hits)
+    assert [h.doc_id for h in kept] == ["2401.0001", "2401.0003"]
+    # Empty input short-circuits without touching the shards.
+    assert _drop_archived_chunk_hits([]) == []
+
+
 def test_arxiv_content_endpoint(client):
     """/arxiv/papers/{id}/content returns 200 text/html when has_html, 404 otherwise."""
     r = client.get("/arxiv/papers?limit=1")

@@ -9,7 +9,7 @@ from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EmbedResult, Page, Paper
-from rag import Doc, content_hash
+from rag import Doc, Hit, content_hash
 from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
 from rag.embed_one import embed_doc
@@ -450,11 +450,38 @@ def get_paper(
     return _row_to_paper(row, authors)
 
 
+def _drop_archived_chunk_hits(hits: list[Hit]) -> list[Hit]:
+    """Drop chunk hits whose paper lives in an archived (offline) shard.
+
+    The global `arxiv_rag.db` keeps chunks for every paper ever embedded,
+    including ones whose category shard was later zstd-archived out of
+    `data/arxiv/shards/`. Those papers can't be served (no live shard holds
+    them), so a hit pointing at one is a dangling reference — drop it.
+
+    A paper is "live" iff its id is present in some on-disk shard. We probe the
+    shards once for the page's distinct doc_ids (a single `IN (...)` per shard)
+    and keep only hits whose paper turned up, preserving RRF order.
+    """
+    if not hits:
+        return hits
+    shards = db.arxiv_shards()
+    doc_ids = list({h.doc_id for h in hits})
+    placeholders = ",".join("?" * len(doc_ids))
+    live: set[str] = set()
+    for sconn in shards.values():
+        rows = sconn.execute(
+            f"SELECT id FROM papers WHERE id IN ({placeholders})", doc_ids
+        ).fetchall()
+        live.update(r["id"] for r in rows)
+    return [h for h in hits if h.doc_id in live]
+
+
 add_chunks_route(
     router,
     opener=db.arxiv_rag,
     source_name="arxiv",
     indexer_script="arxiv_index_rag.py",
+    hit_filter=_drop_archived_chunk_hits,
 )
 add_doc_chunks_route(
     router,
