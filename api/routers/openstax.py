@@ -21,10 +21,19 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from api import db
-from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
-from api.models import EmbedResult, OpenstaxBook, OpenstaxSection, Page
+from api.models import (
+    EmbedResult,
+    OpenstaxBook,
+    OpenstaxChunk,
+    OpenstaxChunksResponse,
+    OpenstaxSection,
+    OpenstaxStoredChunk,
+    Page,
+)
+from rag import retriever
+from rag.retriever import is_operational_error
 from rag.embed_one import embed_doc
 from rag.openstax import build_doc
 from rag.profiles import DEFAULT as _PROFILE
@@ -288,15 +297,108 @@ def get_section(
     return _row_to_section(_lookup_section(conn, section_id))
 
 
-add_chunks_route(
-    router,
-    opener=db.openstax_rag,
-    source_name="openstax",
-    indexer_script="openstax/openstax_index_rag.py",
-)
-add_doc_chunks_route(
-    router,
-    opener=db.openstax_rag,
-    source_name="openstax",
-    indexer_script="openstax/openstax_index_rag.py",
-)
+def _objectives_map(
+    conn: sqlite3.Connection, doc_ids: list[str]
+) -> dict[str, str | None]:
+    """Batch-fetch objectives from openstax.db keyed by section_id (= doc_id)."""
+    if not doc_ids:
+        return {}
+    placeholders = ",".join("?" * len(doc_ids))
+    rows = conn.execute(
+        f"SELECT section_id, objectives FROM sections WHERE section_id IN ({placeholders})",
+        doc_ids,
+    ).fetchall()
+    return {row["section_id"]: row["objectives"] for row in rows}
+
+
+@router.get("/chunks", response_model=OpenstaxChunksResponse)
+def search_chunks(
+    q: str = Query(..., description="Natural-language query. Empty → 400."),
+    top_k: int = Query(20, ge=1, le=100),
+    candidate_k: int = Query(50, ge=10, le=200),
+    rag_conn: sqlite3.Connection = Depends(db.openstax_rag),
+    conn: sqlite3.Connection = Depends(db.openstax),
+) -> OpenstaxChunksResponse:
+    """Semantic search over embedded OpenStax sections. Each result includes the
+    section's learning objectives as a separate field."""
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="q must not be empty")
+    try:
+        result = retriever.retrieve(q, rag_conn, top_k=top_k, candidate_k=candidate_k)
+    except sqlite3.OperationalError as e:
+        if is_operational_error(e):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "openstax RAG data not ready. "
+                    "Run scripts/openstax/openstax_index_rag.py or restore "
+                    "data/openstax/openstax_rag.db."
+                ),
+            ) from e
+        raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
+
+    obj_map = _objectives_map(conn, [h.doc_id for h in result.hits])
+    items = [
+        OpenstaxChunk(
+            chunk_id=h.chunk_id,
+            doc_id=h.doc_id,
+            title=h.title,
+            section=h.section,
+            chunk_index=h.chunk_index,
+            text=h.text,
+            text_length=h.text_length,
+            score=h.score,
+            objectives=obj_map.get(h.doc_id),
+        )
+        for h in result.hits
+    ]
+    return OpenstaxChunksResponse(
+        items=items,
+        used_dense=result.used_dense,
+        top_k=top_k,
+        candidate_k=candidate_k,
+    )
+
+
+@router.get("/doc-chunks", response_model=list[OpenstaxStoredChunk])
+def get_doc_chunks(
+    doc_id: str = Query(..., description="Section ID whose chunks to fetch."),
+    rag_conn: sqlite3.Connection = Depends(db.openstax_rag),
+    conn: sqlite3.Connection = Depends(db.openstax),
+) -> list[OpenstaxStoredChunk]:
+    """All stored chunks for a section in document order, with objectives."""
+    try:
+        rows = rag_conn.execute(
+            """
+            SELECT chunk_id, doc_id, section, chunk_index, text, text_length
+            FROM chunks
+            WHERE doc_id = ?
+            ORDER BY chunk_id
+            """,
+            (doc_id,),
+        ).fetchall()
+    except sqlite3.OperationalError as e:
+        if is_operational_error(e):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "openstax RAG data not ready. "
+                    "Run scripts/openstax/openstax_index_rag.py."
+                ),
+            ) from e
+        raise
+
+    obj_map = _objectives_map(conn, [doc_id])
+    objectives = obj_map.get(doc_id)
+    return [
+        OpenstaxStoredChunk(
+            chunk_id=row["chunk_id"],
+            doc_id=row["doc_id"],
+            section=row["section"],
+            chunk_index=row["chunk_index"],
+            text=row["text"],
+            text_length=row["text_length"],
+            objectives=objectives,
+        )
+        for row in rows
+    ]

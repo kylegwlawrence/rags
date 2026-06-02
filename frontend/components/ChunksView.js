@@ -121,6 +121,12 @@ export default defineComponent({
             >{{ chunk.title }}</button>
             <span class="chunk-card__score">{{ chunk.score.toFixed(3) }}</span>
           </div>
+          <div v-if="chunk.objectives" class="chunk-card__objectives">
+            <span class="chunk-card__objectives-label">Learning objectives</span>
+            <ul>
+              <li v-for="obj in chunk.objectives.split('\n')" :key="obj">{{ obj }}</li>
+            </ul>
+          </div>
           <p class="chunk-card__text">{{ chunkText(chunk) }}</p>
           <button
             v-if="chunk.text.length > 400"

@@ -1369,6 +1369,34 @@ select.filter-bar__input {
   flex-shrink: 0;
 }
 
+.chunk-card__objectives {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--surface-alt, #f5f5f5);
+  border-left: 3px solid var(--accent-tonal, #aaa);
+  border-radius: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chunk-card__objectives-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.chunk-card__objectives ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.chunk-card__objectives li {
+  line-height: 1.5;
+}
+
 .chunk-card__text {
   font-size: 13px;
   line-height: 1.6;

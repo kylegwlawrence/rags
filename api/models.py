@@ -359,6 +359,28 @@ class OpenstaxSection(BaseModel):
     content_chars: int | None
 
 
+class OpenstaxChunk(Chunk):
+    """A `Chunk` with the section's learning objectives (one per line)."""
+
+    objectives: str | None = None
+
+
+class OpenstaxStoredChunk(StoredChunk):
+    """A `StoredChunk` with the section's learning objectives (one per line)."""
+
+    objectives: str | None = None
+
+
+class OpenstaxChunksResponse(BaseModel):
+    """Hybrid-search response for OpenStax — same shape as `ChunksResponse` but
+    each item carries its section's learning objectives."""
+
+    items: list[OpenstaxChunk]
+    used_dense: bool
+    top_k: int
+    candidate_k: int
+
+
 class EcfrRegulation(BaseModel):
     """One section from `ecfr.regulations`. Regulation body served at /content.
 
