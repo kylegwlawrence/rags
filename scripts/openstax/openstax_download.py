@@ -14,9 +14,10 @@ deletes the clone so nothing large lands on the (often full) `/home` disk.
 Idempotent: re-running replaces every row for each book. After a run, build the
 search index with `openstax_index_fts.py` and restart uvicorn.
 
-Starts with the mathematics shelf; add repos to `MATH_REPOS` (or pass
-`--repos`) to cover more subjects. The clone is shallow + sparse (only
-`collections/` and `modules/`, skipping the large `media/` image folder).
+Covers every English OpenStax title across all shelves; add or remove repos in
+`OPENSTAX_REPOS` (or pass `--repos`) to change the set. The clone is shallow +
+sparse (only `collections/` and `modules/`, skipping the large `media/` image
+folder).
 """
 
 import argparse
@@ -39,8 +40,12 @@ RAG_DB_PATH = REPO_ROOT / "data" / "openstax" / "openstax_rag.db"
 GITHUB_BASE = "https://github.com/openstax"
 
 # (repo, subject). Slugs are auto-discovered from each repo's collections/
-# folder, so adding a subject is just adding its osbooks-* repo here.
-MATH_REPOS = [
+# folder, so adding a subject is just adding its osbooks-* repo here. The full
+# set of English OpenStax titles across every shelf; non-English translation
+# repos (calculo, precalculo, fizyka, makroekonomia, …) and the non-book
+# `playground` repo are deliberately omitted.
+OPENSTAX_REPOS = [
+    # --- mathematics & statistics ---
     ("osbooks-prealgebra-bundle", "mathematics"),
     ("osbooks-college-algebra-bundle", "mathematics"),
     ("osbooks-calculus-bundle", "mathematics"),
@@ -49,6 +54,49 @@ MATH_REPOS = [
     ("osbooks-contemporary-mathematics", "mathematics"),
     ("osbooks-algebra-1", "mathematics"),
     ("osbooks-principles-data-science", "mathematics"),
+    # --- science ---
+    ("osbooks-anatomy-physiology", "science"),
+    ("osbooks-astronomy", "science"),
+    ("osbooks-biology-bundle", "science"),
+    ("osbooks-chemistry-bundle", "science"),
+    ("osbooks-college-physics-bundle", "science"),
+    ("osbooks-microbiology", "science"),
+    ("osbooks-neuroscience", "science"),
+    ("osbooks-organic-chemistry", "science"),
+    ("osbooks-physics", "science"),
+    ("osbooks-university-physics-bundle", "science"),
+    # --- social sciences ---
+    ("osbooks-american-government", "social-sciences"),
+    ("osbooks-introduction-anthropology", "social-sciences"),
+    ("osbooks-introduction-political-science", "social-sciences"),
+    ("osbooks-introduction-sociology", "social-sciences"),
+    ("osbooks-life-liberty-and-pursuit-happiness", "social-sciences"),
+    ("osbooks-lifespan-development", "social-sciences"),
+    ("osbooks-psychology", "social-sciences"),
+    # --- business & economics ---
+    ("osbooks-business-ethics", "business"),
+    ("osbooks-business-law", "business"),
+    ("osbooks-entrepreneurship", "business"),
+    ("osbooks-foundations-information-systems", "business"),
+    ("osbooks-introduction-business", "business"),
+    ("osbooks-introduction-intellectual-property", "business"),
+    ("osbooks-principles-accounting-bundle", "business"),
+    ("osbooks-principles-economics-bundle", "economics"),
+    ("osbooks-principles-finance", "business"),
+    ("osbooks-principles-marketing", "business"),
+    ("osbooks-principles-of-management-bundle", "business"),
+    # --- humanities ---
+    ("osbooks-introduction-philosophy", "humanities"),
+    ("osbooks-us-history", "humanities"),
+    ("osbooks-world-history", "humanities"),
+    ("osbooks-writing-guide", "humanities"),
+    # --- computer science / career / engineering ---
+    ("osbooks-introduction-python-programming", "computer-science"),
+    ("osbooks-workplace-software-skills", "computer-science"),
+    ("osbooks-additive-manufacturing", "engineering"),
+    # --- other ---
+    ("osbooks-college-success-bundle", "college-success"),
+    ("osbooks-nursing-external-bundle", "nursing"),
 ]
 
 SCHEMA = """
@@ -207,7 +255,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repos = ([(r, "mathematics") for r in args.repos]
-             if args.repos else MATH_REPOS)
+             if args.repos else OPENSTAX_REPOS)
 
     args.db.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(args.db)
