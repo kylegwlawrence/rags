@@ -34,6 +34,7 @@ from api.models import (
 )
 from rag import retriever
 from rag.retriever import is_operational_error
+from rag.chunker import chunk_markdown
 from rag.embed_one import embed_doc
 from rag.openstax import build_doc
 from rag.profiles import DEFAULT as _PROFILE
@@ -248,9 +249,9 @@ def embed_section(
 ) -> EmbedResult:
     """Embed one section into openstax_rag.db on demand (synchronous).
 
-    Reuses the shared `rag.openstax.build_doc` + flat `chunk_doc` (DEFAULT
-    profile) so a button-embedded section chunks identically to a batch-indexed
-    one. Replaces any chunks already stored for this section, becoming
+    Reuses the shared `rag.openstax.build_doc` + section-aware `chunk_markdown`
+    (DEFAULT profile) so a button-embedded section chunks identically to a
+    batch-indexed one. Replaces any chunks already stored for this section, becoming
     searchable through `/openstax/chunks` immediately (the RAG DB runs in WAL
     mode, so the cached read-only connection sees the new rows without a uvicorn
     restart). A 503 means Ollama was unreachable; existing chunks are untouched.
@@ -268,6 +269,7 @@ def embed_section(
         chunk_count = embed_doc(
             rag_conn,
             doc,
+            chunk_fn=chunk_markdown,
             chunk_size=_PROFILE.chunk_size,
             overlap=_PROFILE.overlap,
             max_chunk_size=_PROFILE.max_chunk_size,
