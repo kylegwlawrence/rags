@@ -117,10 +117,25 @@ def split_parent(src_path: str, parent: str, out_path: str) -> int:
         dst.execute(f"ATTACH DATABASE 'file:{abs_src}?mode=ro' AS src")
 
         # 1) Papers whose primary-category parent is this shard.
-        dst.execute(
-            f"INSERT INTO papers SELECT * FROM src.papers WHERE {PARENT_EXPR} = ?",
-            (parent,),
-        )
+        # Older source DBs lack the `authors` denormalised column; supply '' when missing.
+        src_cols = {r[1] for r in dst.execute("PRAGMA src.table_info(papers)").fetchall()}
+        if "authors" in src_cols:
+            dst.execute(
+                f"INSERT INTO papers SELECT * FROM src.papers WHERE {PARENT_EXPR} = ?",
+                (parent,),
+            )
+        else:
+            dst.execute(
+                "INSERT INTO papers "
+                "(id, oai_datestamp, title, abstract, authors, categories, "
+                "primary_category, submitted_date, updated_date, doi, "
+                "journal_ref, comments, html_content, download_status, downloaded_at) "
+                f"SELECT id, oai_datestamp, title, abstract, '' AS authors, categories, "
+                "primary_category, submitted_date, updated_date, doi, "
+                "journal_ref, comments, html_content, download_status, downloaded_at "
+                f"FROM src.papers WHERE {PARENT_EXPR} = ?",
+                (parent,),
+            )
         # 2) Links for those papers (papers are now in the local table).
         dst.execute(
             "INSERT INTO paper_authors "
