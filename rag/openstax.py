@@ -189,13 +189,24 @@ def _render(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
         # problems) for formulas.
         return f" \\({latex}\\) " if latex else ""
     if tag == "equation":
-        # Display equation on its own line, delimited by `\[…\]`.
-        inner = "".join(_render(c, level) for c in elem).strip()
-        # _render of the inner <m:math> already wrapped it as \(…\); promote to
-        # display by swapping the inline delimiters for display ones.
-        if inner.startswith("\\(") and inner.endswith("\\)"):
-            inner = inner[2:-2].strip()
-        return f"\n\n\\[{inner}\\]\n\n" if inner else ""
+        # An <equation> usually holds a single <m:math>, but can also carry
+        # prose (a lead-in like "The standard error is:"). Render each <m:math>
+        # as a display block `\[…\]` and anything else as ordinary text *outside*
+        # the math delimiters — otherwise the prose lands inside math mode and
+        # the whole formula fails to render.
+        parts: list[str] = []
+        if elem.text and elem.text.strip():
+            parts.append(elem.text.strip())
+        for child in elem:
+            if _local(child.tag) == "math":
+                latex = mathml_to_latex(child)
+                if latex:
+                    parts.append(f"\n\n\\[{latex}\\]\n\n")
+            else:
+                parts.append(_render(child, level))
+            if child.tail and child.tail.strip():
+                parts.append(child.tail)
+        return "".join(parts)
     if tag in _SKIP_TAGS:
         return ""
     if tag == "newline":
