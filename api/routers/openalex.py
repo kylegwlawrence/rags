@@ -119,6 +119,21 @@ def list_works(
     cited_by_min: int | None = Query(None, ge=0),
     cited_by_max: int | None = Query(None, ge=0),
     venue: str | None = Query(None, description="Exact venue match"),
+    domain: str | None = Query(
+        None,
+        description=(
+            "Exact match against the work's primary-topic domain, the top of "
+            "the OpenAlex topic hierarchy (one of: 'Physical Sciences', "
+            "'Social Sciences', 'Health Sciences', 'Life Sciences')."
+        ),
+    ),
+    field: str | None = Query(
+        None,
+        description=(
+            "Exact match against the work's primary-topic field, e.g. "
+            "'Computer Science', 'Physics and Astronomy' (the level below domain)."
+        ),
+    ),
     author: str | None = Query(
         None,
         description="Substring match against any of the work's authors (normalized table)",
@@ -150,7 +165,7 @@ def list_works(
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.openalex),
 ) -> Page[Work]:
-    """List works with year / citation / venue / author / full-text filters."""
+    """List works with year / citation / venue / domain / field / author / full-text filters."""
     if sort is None:
         sort = "relevance" if q is not None else "cited_by_count_desc"
     if sort == "relevance" and q is None:
@@ -176,6 +191,12 @@ def list_works(
     if venue is not None:
         clauses.append("venue = ?")
         params.append(venue)
+    if domain is not None:
+        clauses.append("domain = ?")
+        params.append(domain)
+    if field is not None:
+        clauses.append("field = ?")
+        params.append(field)
     if author is not None:
         clauses.append(
             "EXISTS (SELECT 1 FROM work_authors wa "

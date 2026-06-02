@@ -73,7 +73,7 @@ Port 8002 is fixed (8000/8001 occupied). Tailscale ACLs gate access; no app-leve
 All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total, limit, offset}`. Chunk endpoints: `q` (required), `top_k`, `candidate_k` → `{items, used_dense, top_k, candidate_k}` (RRF, not paginated). Missing FTS table → 503 with script name; bad FTS syntax → 400; Ollama down → sparse-only (`used_dense=false`).
 
 - `/arxiv/papers`, `/{id:path}`, `/{id:path}/content`, `/arxiv/chunks` — served from per-category shards (`data/arxiv/shards/{parent}.db`), fanned out and merged in the router. `sort=relevance` merges by rank-within-shard (bm25 isn't comparable across separate indexes), not raw bm25; date sorts are exact. `/chunks` stays the single global `arxiv_rag.db`.
-- `/openalex/works`, `/{short_id}`, `/openalex/chunks`
+- `/openalex/works` (`?q=`, `?year=`, `?cited_by_min/max=`, `?venue=`, `?domain=`, `?field=`, `?author=`, `?embedded=`, `?sort=`), `/{short_id}`, `/openalex/chunks` — `?domain=`/`?field=` are exact matches on the work's primary-topic hierarchy (domain/subfield/field/domain columns captured by the downloader).
 - `/factbook/countries`, `/{id}`, `/factbook/chunks`
 - `/gutenberg/texts`, `/{id}`, `/{id}/content`, `/gutenberg/chunks`
 - `/simplewiki/articles`, `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks`
