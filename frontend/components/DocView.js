@@ -1,4 +1,4 @@
-import { defineComponent, ref, computed, onMounted, inject } from '/ui/vendor/vue.esm-browser.js';
+import { defineComponent, ref, computed, onMounted, nextTick, watch, inject } from '/ui/vendor/vue.esm-browser.js';
 import { getDoc, getContent, getDocChunks, embedDoc, downloadDoc, getValues } from '/ui/api.js';
 
 export default defineComponent({
@@ -149,6 +149,56 @@ export default defineComponent({
         console.error('Failed to fetch detail:', e);
       }
     }
+
+    // --- Markdown + math content (contentType: 'markdown', e.g. OpenStax) ---
+    // The body is light Markdown (paragraphs, ## headings, - lists) with LaTeX
+    // formulas delimited by \(…\) inline and \[…\] display. We render it in two
+    // passes: Markdown → HTML via `marked`, then KaTeX typesets the formulas in
+    // the live DOM. The formulas are pulled out into placeholders *before*
+    // marked runs so it can't mangle LaTeX backslashes/underscores, then put
+    // back verbatim for KaTeX to find.
+    const contentEl = ref(null);
+    const MATH_RE = /\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g;
+    const KATEX_DELIMITERS = [
+      { left: '\\[', right: '\\]', display: true },
+      { left: '\\(', right: '\\)', display: false },
+    ];
+
+    function renderMarkdownWithMath(text) {
+      if (typeof window.marked === 'undefined') return text;
+      const math = [];
+      const protectedText = text.replace(MATH_RE, (m) => {
+        math.push(m);
+        return `@@KMATH${math.length - 1}@@`;  // markdown-inert, prose-unlikely placeholder
+      });
+      let html = window.marked.parse(protectedText);
+      html = html.replace(/@@KMATH(\d+)@@/g, (_, i) => math[Number(i)]);
+      return html;
+    }
+
+    const markdownHtml = computed(() =>
+      props.source.contentType === 'markdown' && content.value
+        ? renderMarkdownWithMath(content.value)
+        : ''
+    );
+
+    function typesetMath() {
+      const el = contentEl.value;
+      if (!el || typeof window.renderMathInElement !== 'function') return;
+      window.renderMathInElement(el, {
+        delimiters: KATEX_DELIMITERS,
+        throwOnError: false,
+      });
+    }
+
+    // Re-typeset whenever the rendered HTML changes or the user returns to the
+    // Content tab (v-html resets innerHTML back to the raw \(…\) on re-render).
+    watch([markdownHtml, activeTab], async () => {
+      if (props.source.contentType !== 'markdown') return;
+      if (activeTab.value !== 'content' || !markdownHtml.value) return;
+      await nextTick();
+      typesetMath();
+    });
 
     const profileHtml = computed(() => {
       const data = detail.value && detail.value.data;
@@ -319,7 +369,7 @@ export default defineComponent({
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel, showEmbed,
       downloading, downloadError, showDownload, downloadLabel, downloadFiling,
-      profileHtml, pdfSrc,
+      profileHtml, pdfSrc, contentEl, markdownHtml,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
     };
   },
@@ -448,6 +498,7 @@ export default defineComponent({
           {{ contentError }}
         </div>
         <div v-else-if="source.contentType === 'html' && content" class="prose" v-html="content" />
+        <div v-else-if="source.contentType === 'markdown' && content" ref="contentEl" class="prose" v-html="markdownHtml" />
         <pre v-else-if="source.contentType === 'text' && content" class="content-pre">{{ content }}</pre>
         <iframe
           v-else-if="source.contentType === 'pdf'"

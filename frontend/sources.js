@@ -278,7 +278,9 @@ export const SOURCES = {
     meta_fn: (item) => item.chapter_number
       ? `Ch. ${item.chapter_number}. ${item.chapter_title || ''}`
       : (item.chapter_title || ''),
-    contentType: 'text',
+    // Section bodies are light Markdown with inline \(…\) / display \[…\]
+    // LaTeX; the viewer renders the Markdown and typesets the math (KaTeX).
+    contentType: 'markdown',
     metaFields: [
       { label: 'Book',       value: (d) => d.book_title },
       { label: 'Subject',    value: (d) => d.subject },

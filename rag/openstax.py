@@ -1,4 +1,4 @@
-"""OpenStax CNXML/COLLXML parsing + Doc-builder, shared by script and API.
+r"""OpenStax CNXML/COLLXML parsing + Doc-builder, shared by script and API.
 
 OpenStax ships each textbook as a GitHub `osbooks-*` repo of XML:
 
@@ -15,7 +15,7 @@ This module turns that XML into plain rows + a `Doc`:
 
 * `parse_collection` — COLLXML → book metadata + ordered (chapter, [module_id]).
 * `cnxml_to_markdown` — one module's CNXML → (title, objectives, body markdown),
-  with every `<m:math>` rebuilt as inline `$…$` LaTeX via `rag.mathml`.
+  with every `<m:math>` rebuilt as inline `\(…\)` LaTeX via `rag.mathml`.
 * `build_doc` — a stored `sections` row → a `Doc` ready to chunk/embed.
 
 Parsing uses the stdlib `xml.etree` (CNXML is well-formed XML), so the only new
@@ -151,58 +151,99 @@ class ParsedModule:
 
     title: str
     objectives: str | None   # one objective per line, or None when absent
-    body: str                # plain-text/markdown with inline `$…$` LaTeX
+    body: str                # plain-text/markdown with inline `\(…\)` LaTeX
 
 
 # Block-level CNXML elements that should be followed by a paragraph break.
 _BLOCK_TAGS = {"para", "title", "note", "example", "exercise", "problem",
                "solution", "definition", "equation", "figure", "table"}
-# Wrappers we descend into without emitting any markup of their own.
-_TRANSPARENT_TAGS = {"content", "section", "document", "tgroup", "tbody",
+# Wrappers we descend into without emitting any markup of their own. (A
+# `<section>` is handled explicitly in `_render` — its `<title>` becomes a
+# Markdown heading — so it is deliberately absent here.)
+_TRANSPARENT_TAGS = {"content", "document", "tgroup", "tbody",
                      "thead", "commentary", "labeled-item", "glossary"}
 # Elements whose content we drop entirely (images carry no useful text here).
 _SKIP_TAGS = {"media", "image", "label", "metadata"}
 
+# Heading level for a top-level `<section>` in a module's body. The module's
+# own title is the page heading (level 1, stored separately), so its first tier
+# of sub-sections starts at `##`; nested sections deepen by one each level,
+# clamped to `######` (Markdown's deepest).
+_BASE_HEADING_LEVEL = 2
+_MAX_HEADING_LEVEL = 6
 
-def _render(elem: Element) -> str:
-    """Recursively render a CNXML element to plain text with inline LaTeX."""
+
+def _render(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
+    """Recursively render a CNXML element to plain text with inline LaTeX.
+
+    `level` is the Markdown heading depth to use for a `<section>` title at this
+    point in the tree; it deepens by one for each nested section.
+    """
     tag = _local(elem.tag)
 
     if tag == "math":
         latex = mathml_to_latex(elem)
-        return f" ${latex}$ " if latex else ""
+        # Inline math uses LaTeX `\(…\)` delimiters rather than `$…$`: these
+        # never occur in ordinary prose, so the viewer can detect math without
+        # mistaking literal dollar amounts (common in stats/algebra word
+        # problems) for formulas.
+        return f" \\({latex}\\) " if latex else ""
     if tag == "equation":
-        # Display equation on its own line.
-        inner = "".join(_render(c) for c in elem).strip()
-        # _render of the inner <m:math> already wrapped it as $…$; promote to
-        # display by swapping the single delimiters for double ones.
-        if inner.startswith("$") and inner.endswith("$"):
-            inner = inner[1:-1].strip()
-        return f"\n\n$${inner}$$\n\n" if inner else ""
+        # Display equation on its own line, delimited by `\[…\]`.
+        inner = "".join(_render(c, level) for c in elem).strip()
+        # _render of the inner <m:math> already wrapped it as \(…\); promote to
+        # display by swapping the inline delimiters for display ones.
+        if inner.startswith("\\(") and inner.endswith("\\)"):
+            inner = inner[2:-2].strip()
+        return f"\n\n\\[{inner}\\]\n\n" if inner else ""
     if tag in _SKIP_TAGS:
         return ""
     if tag == "newline":
         return "\n"
+    if tag == "section":
+        return _render_section(elem, level)
     if tag == "item":
-        return "\n- " + _inline(elem).strip()
+        return "\n- " + _inline(elem, level).strip()
     if tag == "entry":
-        return _inline(elem).strip() + " | "
+        return _inline(elem, level).strip() + " | "
     if tag == "row":
-        return "\n" + "".join(_render(c) for c in elem).rstrip(" |")
+        return "\n" + "".join(_render(c, level) for c in elem).rstrip(" |")
 
-    text = _inline(elem)
+    text = _inline(elem, level)
     if tag in _BLOCK_TAGS:
         return "\n\n" + text.strip() + "\n\n"
     return text
 
 
-def _inline(elem: Element) -> str:
+def _render_section(elem: Element, level: int) -> str:
+    """Render a `<section>`: its `<title>` as a `#`-heading, then its body.
+
+    The heading uses `min(level, 6)` hashes; the section's other children render
+    one level deeper so nested sub-sections nest their headings too.
+    """
+    parts: list[str] = []
+    title_el = _find_local(elem, "title")
+    if title_el is not None:
+        heading = _inline(title_el, level).strip()
+        if heading:
+            hashes = "#" * min(level, _MAX_HEADING_LEVEL)
+            parts.append(f"\n\n{hashes} {heading}\n\n")
+    for child in elem:
+        if child is title_el:  # already emitted as the heading above
+            continue
+        parts.append(_render(child, level + 1))
+        if child.tail:
+            parts.append(child.tail)
+    return "".join(parts)
+
+
+def _inline(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
     """Concatenate an element's text, rendered children, and their tails."""
     parts: list[str] = []
     if elem.text:
         parts.append(elem.text)
     for child in elem:
-        parts.append(_render(child))
+        parts.append(_render(child, level))
         if child.tail:
             parts.append(child.tail)
     return "".join(parts)
@@ -232,10 +273,10 @@ def _extract_objectives(metadata: Element) -> str | None:
 
 
 def cnxml_to_markdown(xml_text: str) -> ParsedModule:
-    """Parse one module's CNXML into title, objectives, and body markdown.
+    r"""Parse one module's CNXML into title, objectives, and body markdown.
 
-    Every `<m:math>` formula is rebuilt as inline `$…$` LaTeX (display
-    `<equation>` as `$$…$$`); images are dropped; tables flatten to
+    Every `<m:math>` formula is rebuilt as inline `\(…\)` LaTeX (display
+    `<equation>` as `\[…\]`); images are dropped; tables flatten to
     `cell | cell` rows. Whitespace is normalised so the chunker's paragraph
     boundaries line up.
     """
