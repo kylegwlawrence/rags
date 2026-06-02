@@ -102,14 +102,21 @@ def main() -> int:
             is_oa INTEGER,
             oa_status TEXT,
             oa_url TEXT,
-            pdf_url TEXT
+            pdf_url TEXT,
+            topic TEXT,
+            subfield TEXT,
+            field TEXT,
+            domain TEXT
         )
     """)
-    # Migrate DBs created before the open-access columns existed. CREATE TABLE
-    # IF NOT EXISTS leaves an existing table untouched, so add any missing
-    # columns explicitly (idempotent — skip the ones already present).
+    # Migrate DBs created before later columns existed. CREATE TABLE IF NOT
+    # EXISTS leaves an existing table untouched, so add any missing columns
+    # explicitly (idempotent — skip the ones already present). All but is_oa
+    # are TEXT; the topic-hierarchy columns (topic/subfield/field/domain) come
+    # from each work's primary_topic and stay NULL until a re-run backfills them.
     existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(works)")}
-    for col in ("is_oa", "oa_status", "oa_url", "pdf_url"):
+    for col in ("is_oa", "oa_status", "oa_url", "pdf_url",
+                "topic", "subfield", "field", "domain"):
         if col not in existing_cols:
             col_type = "INTEGER" if col == "is_oa" else "TEXT"
             cur.execute(f"ALTER TABLE works ADD COLUMN {col} {col_type}")
@@ -118,7 +125,7 @@ def main() -> int:
     base_url = "https://api.openalex.org/works"
     params = {
         "filter": f"cited_by_count:>{args.min_citations},has_abstract:true",
-        "select": "id,title,abstract_inverted_index,publication_year,cited_by_count,doi,authorships,primary_location,open_access,best_oa_location",
+        "select": "id,title,abstract_inverted_index,publication_year,cited_by_count,doi,authorships,primary_location,open_access,best_oa_location,primary_topic",
         "per_page": 200,
         "cursor": "*",
         "mailto": EMAIL,
@@ -173,15 +180,25 @@ def main() -> int:
             best_oa = work.get("best_oa_location") or {}
             pdf_url = best_oa.get("pdf_url")
 
-            # Upsert so a re-run refreshes every column (including the OA
-            # fields) on rows that already exist — `INSERT OR IGNORE` would
-            # silently skip them and leave the OA columns NULL forever.
+            # Topic hierarchy from primary_topic: topic name plus its
+            # subfield / field / domain (each a nested {id, display_name}).
+            # Any may be absent for works OpenAlex hasn't classified.
+            primary_topic = work.get("primary_topic") or {}
+            topic = primary_topic.get("display_name")
+            subfield = (primary_topic.get("subfield") or {}).get("display_name")
+            field = (primary_topic.get("field") or {}).get("display_name")
+            domain = (primary_topic.get("domain") or {}).get("display_name")
+
+            # Upsert so a re-run refreshes every column (including the OA and
+            # topic fields) on rows that already exist — `INSERT OR IGNORE`
+            # would silently skip them and leave those columns NULL forever.
             cur.execute("""
                 INSERT INTO works (
                     id, title, abstract, year, cited_by_count, doi, authors, venue,
-                    is_oa, oa_status, oa_url, pdf_url
+                    is_oa, oa_status, oa_url, pdf_url,
+                    topic, subfield, field, domain
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     abstract=excluded.abstract,
@@ -193,7 +210,11 @@ def main() -> int:
                     is_oa=excluded.is_oa,
                     oa_status=excluded.oa_status,
                     oa_url=excluded.oa_url,
-                    pdf_url=excluded.pdf_url
+                    pdf_url=excluded.pdf_url,
+                    topic=excluded.topic,
+                    subfield=excluded.subfield,
+                    field=excluded.field,
+                    domain=excluded.domain
             """, (
                 work.get("id"),
                 work.get("title"),
@@ -207,6 +228,10 @@ def main() -> int:
                 oa_status,
                 oa_url,
                 pdf_url,
+                topic,
+                subfield,
+                field,
+                domain,
             ))
 
         con.commit()
