@@ -91,6 +91,35 @@ export default defineComponent({
       load();
     }
 
+    /**
+     * Options to show for a `select` filter. For a cascading select
+     * (`f.dependsOn` set), once the parent filter has a value, only options
+     * whose `group` matches it are shown; options without a `group` (e.g. the
+     * empty "Any …" default) always show.
+     */
+    function visibleOptions(f) {
+      if (!f.dependsOn) return f.options;
+      const parentVal = filters[f.dependsOn];
+      if (!parentVal) return f.options;
+      return f.options.filter(opt => !opt.group || opt.group === parentVal);
+    }
+
+    /**
+     * Handle a <select> change. Before re-searching, clear any child select
+     * whose current value is no longer valid under the new parent value
+     * (synchronously, so the search runs with a consistent parent/child pair
+     * rather than an orphaned combo that returns zero rows).
+     */
+    function onSelectChange(f) {
+      for (const child of props.source.filters) {
+        if (child.type === 'select' && child.dependsOn === f.key) {
+          const allowed = new Set(visibleOptions(child).map(o => o.value));
+          if (!allowed.has(filters[child.key])) filters[child.key] = '';
+        }
+      }
+      applyFilters();
+    }
+
     function prevPage() {
       if (offset.value > 0) {
         offset.value = Math.max(0, offset.value - LIMIT);
@@ -130,7 +159,7 @@ export default defineComponent({
 
     return {
       filters, filterOptions, offset, results, total, loading, error, LIMIT,
-      applyFilters, prevPage, nextPage,
+      applyFilters, onSelectChange, visibleOptions, prevPage, nextPage,
       itemTitle, itemSubtitle, itemMeta, itemId,
     };
   },
@@ -151,8 +180,8 @@ export default defineComponent({
           </div>
           <div v-else-if="f.type === 'select'" class="filter-bar__field">
             <label class="filter-bar__label">{{ f.label }}</label>
-            <select v-model="filters[f.key]" class="filter-bar__input" @change="applyFilters">
-              <option v-for="opt in f.options" :key="opt.value" :value="opt.value">
+            <select v-model="filters[f.key]" class="filter-bar__input" @change="onSelectChange(f)">
+              <option v-for="opt in visibleOptions(f)" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
             </select>
