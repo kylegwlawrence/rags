@@ -33,7 +33,7 @@ SORTS = {
 }
 Sort = Literal["submitted_desc", "submitted_asc", "updated_desc", "relevance"]
 
-# arxiv is sharded by parent category across data/arxiv/{parent}.db, so a list
+# arxiv is sharded by parent category across data/arxiv/shards/{parent}.db, so a list
 # query fans out to every shard and the rows are re-merged here. Each shard
 # query also selects its sort key as `_sortkey` so we can re-sort the combined
 # rows. Maps sort -> (key expression, reverse-for-Python-sort).
@@ -284,7 +284,7 @@ def list_papers(
     collected: list[tuple[str, int, sqlite3.Row]] = []
     for parent, sconn in shards.items():
         with translate_table_errors(
-            "arxiv", "arxiv_index_fts.py", f"data/arxiv/{parent}.db"
+            "arxiv", "arxiv_index_fts.py", f"data/arxiv/shards/{parent}.db"
         ):
             total += sconn.execute(
                 f"SELECT COUNT(*) FROM {from_clause} {where}", params
@@ -316,7 +316,7 @@ def list_papers(
         with translate_table_errors(
             "arxiv",
             "arxiv_normalize_authors.py",
-            f"data/arxiv/{parent}.db",
+            f"data/arxiv/shards/{parent}.db",
             sql_error_is_user_input=False,
         ):
             authors_by_paper.update(_fetch_authors_many(shards[parent], ids))
@@ -443,7 +443,7 @@ def get_paper(
     with translate_table_errors(
         "arxiv",
         "arxiv_normalize_authors.py",
-        "data/arxiv/*.db",
+        "data/arxiv/shards/*.db",
         sql_error_is_user_input=False,
     ):
         authors = _fetch_authors_one(conn, paper_id)

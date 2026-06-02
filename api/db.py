@@ -24,10 +24,11 @@ from rag.schema import connect_rag
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 
-# arxiv is sharded by parent category: data/arxiv/{parent}.db. The live set is
-# whatever shard files are present (see `arxiv_shards()`), so unarchiving a
-# category is just dropping its {parent}.db here and restarting.
-ARXIV_DIR = DATA_DIR / "arxiv"
+# arxiv is sharded by parent category: data/arxiv/shards/{parent}.db. The live
+# set is whatever shard files are present in that folder (see `arxiv_shards()`),
+# so unarchiving a category is just dropping its {parent}.db into shards/ and
+# restarting.
+ARXIV_SHARDS_DIR = DATA_DIR / "arxiv" / "shards"
 ARXIV_RAG_DB = DATA_DIR / "arxiv" / "arxiv_rag.db"
 FACTBOOK_DB = DATA_DIR / "factbook" / "factbook.db"
 FACTBOOK_RAG_DB = DATA_DIR / "factbook" / "factbook_rag.db"
@@ -178,29 +179,27 @@ _pdfs_rag: sqlite3.Connection | None = None
 
 
 def arxiv_shards() -> dict[str, sqlite3.Connection]:
-    """Cached read-only connections to the per-category shards under data/arxiv/.
+    """Cached read-only connections to the per-category shards in data/arxiv/shards/.
 
     Keyed by parent-category name (the file stem, e.g. ``"math"``). The set is
-    discovered once at first call from ``data/arxiv/*.db`` (excluding the RAG
-    DB), so unarchiving a category is just decompressing its ``{parent}.db``
-    into ``data/arxiv/`` and restarting uvicorn — no code change.
+    discovered once at first call from ``data/arxiv/shards/*.db``, so unarchiving
+    a category is just decompressing its ``{parent}.db`` into that folder and
+    restarting uvicorn — no code change.
 
     Each shard carries its own ``papers`` / ``authors`` / ``paper_authors``
     tables and its own ``papers_fts`` index (built by
-    ``arxiv_index_fts.py --db data/arxiv/{parent}.db``). A paper lives in
+    ``arxiv_index_fts.py --db data/arxiv/shards/{parent}.db``). A paper lives in
     exactly one shard, so the router fans a query out across shards and merges.
 
     Raises 503 if no shard files are present (e.g. all categories archived).
     """
     global _arxiv_shards
     if _arxiv_shards is None:
-        paths = sorted(
-            p for p in ARXIV_DIR.glob("*.db") if p.name != ARXIV_RAG_DB.name
-        )
+        paths = sorted(ARXIV_SHARDS_DIR.glob("*.db"))
         if not paths:
             raise HTTPException(
                 status_code=503,
-                detail="no arxiv category shards found in data/arxiv/ "
+                detail="no arxiv category shards found in data/arxiv/shards/ "
                 "(all archived?) — decompress at least one {parent}.db there",
             )
         _arxiv_shards = {p.stem: _connect_ro(p) for p in paths}
