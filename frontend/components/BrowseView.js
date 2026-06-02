@@ -12,9 +12,10 @@ export default defineComponent({
 
   setup(props, { emit }) {
     const filters = reactive({});
-    // Per-filter resolved option lists for `type === 'multiselect'`. Populated
-    // by fetchMultiselectOptions on mount and whenever a parent filter (via
-    // dependsOn) changes value.
+    // Per-filter resolved option lists for filters with an `optionsEndpoint`
+    // (`type === 'multiselect'`, or a `select` populated from the API).
+    // Populated by fetchFilterOptions on mount and whenever a parent filter
+    // (via dependsOn) changes value.
     const filterOptions = reactive({});
     const offset = ref(0);
     const results = ref([]);
@@ -29,26 +30,31 @@ export default defineComponent({
         if (f.type === 'boolean') filters[f.key] = false;
         else if (f.type === 'multiselect') filters[f.key] = [];
         else filters[f.key] = '';
-        if (f.type === 'multiselect') filterOptions[f.key] = [];
+        if (f.optionsEndpoint) filterOptions[f.key] = [];
       }
     }
 
     /**
-     * Fetch options for one multiselect filter. If `f.dependsOn` is set,
-     * the parent filter's current value is forwarded as a query parameter
-     * (repeated for arrays via getJson's encoder).
+     * Fetch options for one filter with an `optionsEndpoint` (a multiselect, or
+     * a select populated from the API). If `f.dependsOn` is set, the parent
+     * filter's current value is forwarded as a query parameter (repeated for
+     * arrays via getJson's encoder). Handles both a bare-array response and a
+     * paginated `{items}` page (e.g. /openstax/books); a high limit is
+     * requested so every option is returned in one page.
      */
-    async function fetchMultiselectOptions(f) {
+    async function fetchFilterOptions(f) {
       if (!f.optionsEndpoint) return;
       try {
-        const params = {};
+        const params = { limit: 200 };
         if (f.dependsOn) params[f.dependsOn] = filters[f.dependsOn];
         const data = await getJson(f.optionsEndpoint, params);
-        filterOptions[f.key] = Array.isArray(data) ? data : [];
-        // Drop any currently-selected values that aren't in the new options
-        // (orphaned by a parent-filter change). Silent prune.
-        const allowed = new Set(filterOptions[f.key].map(o => o[f.valueField]));
-        filters[f.key] = filters[f.key].filter(v => allowed.has(v));
+        filterOptions[f.key] = Array.isArray(data) ? data : (data.items || []);
+        // For a multiselect, drop any currently-selected values that aren't in
+        // the new options (orphaned by a parent-filter change). Silent prune.
+        if (f.type === 'multiselect') {
+          const allowed = new Set(filterOptions[f.key].map(o => o[f.valueField]));
+          filters[f.key] = filters[f.key].filter(v => allowed.has(v));
+        }
       } catch (e) {
         console.error(`Failed to load options for ${f.key}:`, e);
         filterOptions[f.key] = [];
@@ -63,10 +69,10 @@ export default defineComponent({
      */
     function installCascades() {
       for (const f of props.source.filters) {
-        if (f.type !== 'multiselect' || !f.dependsOn) continue;
+        if (!f.optionsEndpoint || !f.dependsOn) continue;
         watch(
           () => filters[f.dependsOn],
-          () => fetchMultiselectOptions(f),
+          () => fetchFilterOptions(f),
           { deep: true },
         );
       }
@@ -98,6 +104,13 @@ export default defineComponent({
      * empty "Any …" default) always show.
      */
     function visibleOptions(f) {
+      // Select populated from the API: map fetched rows to {value, label} and
+      // prepend the default "all" option so the filter can be cleared.
+      if (f.optionsEndpoint) {
+        const rows = filterOptions[f.key] || [];
+        const mapped = rows.map(o => ({ value: o[f.valueField], label: f.labelFn(o) }));
+        return [{ value: '', label: f.defaultLabel || 'All' }, ...mapped];
+      }
       if (!f.dependsOn) return f.options;
       const parentVal = filters[f.dependsOn];
       if (!parentVal) return f.options;
@@ -147,12 +160,13 @@ export default defineComponent({
     initFilters();
 
     onMounted(async () => {
-      // Kick off initial option fetches for every multiselect filter. Cascades
-      // are installed AFTER the first fetch so the watcher doesn't fire
-      // redundantly during init. Don't await on the search — it can run while
-      // options are still streaming in.
-      const multiselectFilters = props.source.filters.filter(f => f.type === 'multiselect');
-      await Promise.all(multiselectFilters.map(fetchMultiselectOptions));
+      // Kick off initial option fetches for every filter with an
+      // optionsEndpoint (multiselects and API-populated selects). Cascades are
+      // installed AFTER the first fetch so the watcher doesn't fire redundantly
+      // during init. Don't await on the search — it can run while options are
+      // still streaming in.
+      const dynamicFilters = props.source.filters.filter(f => f.optionsEndpoint);
+      await Promise.all(dynamicFilters.map(fetchFilterOptions));
       installCascades();
       load();
     });

@@ -291,7 +291,9 @@ export const SOURCES = {
     ],
     filters: [
       { key: 'q',       label: 'Search',  type: 'text', placeholder: 'FTS5 query…' },
-      { key: 'book_id', label: 'Book',    type: 'text', placeholder: 'e.g. calculus-volume-1' },
+      { key: 'book_id', label: 'Book', type: 'select',
+        optionsEndpoint: '/openstax/books', valueField: 'book_id',
+        labelFn: (b) => b.title, defaultLabel: 'All books' },
       { key: 'sort', label: 'Sort', type: 'select', options: [
         { value: '',          label: 'Document order' },
         { value: 'relevance', label: 'Relevance' },
