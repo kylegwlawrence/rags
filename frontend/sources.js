@@ -32,7 +32,7 @@ export const SOURCES = {
     ],
     filters: [
       { key: 'q',              label: 'Search',     type: 'text',   placeholder: 'FTS5 query…' },
-      { key: 'primary_category', label: 'Category', type: 'text',   placeholder: 'e.g. cs.AI' },
+      { key: 'category',        label: 'Category', type: 'text',   placeholder: 'e.g. cs or cs.AI' },
       { key: 'author',         label: 'Author',     type: 'text',   placeholder: 'substring' },
       { key: 'submitted_year', label: 'Year',       type: 'number', placeholder: '2023' },
       { key: 'has_html',       label: 'Has HTML',   type: 'boolean' },
