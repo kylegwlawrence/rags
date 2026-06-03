@@ -26,7 +26,6 @@ Omit --format entirely to download all formats (7 M+ items).
 """
 
 import argparse
-import math
 import os
 import re
 import sqlite3
@@ -256,10 +255,12 @@ def main() -> None:
         )
         con.commit()
 
+        # LOC's pagination: "total" is the page count, "of" is the item count.
         pagination  = data.get("pagination", {})
-        total_items = pagination.get("total", 0)
-        total_pages = math.ceil(total_items / PER_PAGE) if total_items else page
-        print(f"  Page {page}/{total_pages} — inserted this run: {total_inserted}")
+        total_pages = pagination.get("total") or page
+        total_items = pagination.get("of", 0)
+        print(f"  Page {page}/{total_pages} ({total_items} items) — "
+              f"inserted this run: {total_inserted}")
 
         if page >= total_pages:
             break

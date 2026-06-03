@@ -12,6 +12,7 @@ Re-runnable: drops `pages_fts` and rebuilds from scratch. Run after every
 API caches the source connection at import time.
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -24,8 +25,17 @@ DB_PATH = REPO_ROOT / "data" / "pdfs" / "pdfs.db"
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=DB_PATH,
+        help=f"SQLite DB to index (default: {DB_PATH}). Pass a LOC-specific "
+             "DB, e.g. data/loc/loc_pdfs.db, to index PDFs ingested there.",
+    )
+    args = parser.parse_args()
     sys.exit(run_fts_indexer(
-        db_path=DB_PATH,
+        db_path=args.db,
         virtual_table="pages_fts",
         content_table="pages",
         columns=("text",),
