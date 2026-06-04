@@ -360,9 +360,15 @@ class OpenstaxSection(BaseModel):
 
 
 class OpenstaxChunk(Chunk):
-    """A `Chunk` with the section's learning objectives (one per line)."""
+    """A `Chunk` with the section's learning objectives plus book/subject/chapter
+    provenance, so a consumer can scope follow-up calls or read the
+    subject distribution of an unfiltered query (a lightweight router signal)."""
 
     objectives: str | None = None
+    book_id: str | None = None
+    subject: str | None = None
+    chapter_number: int | None = None
+    chapter_title: str | None = None
 
 
 class OpenstaxStoredChunk(StoredChunk):

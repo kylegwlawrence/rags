@@ -299,34 +299,112 @@ def get_section(
     return _row_to_section(_lookup_section(conn, section_id))
 
 
-def _objectives_map(
+def _section_meta_map(
     conn: sqlite3.Connection, doc_ids: list[str]
-) -> dict[str, str | None]:
-    """Batch-fetch objectives from openstax.db keyed by section_id (= doc_id)."""
+) -> dict[str, sqlite3.Row]:
+    """Batch-fetch section provenance from openstax.db keyed by section_id (= doc_id).
+
+    Each row carries `objectives`, `book_id`, `subject`, `chapter_number`, and
+    `chapter_title` — everything the chunk endpoints surface on a hit beyond the
+    chunk text itself. `doc_ids` is bounded by `top_k` (≤100), so a positional
+    IN-list stays well under SQLite's 999-variable cap.
+    """
     if not doc_ids:
         return {}
     placeholders = ",".join("?" * len(doc_ids))
     rows = conn.execute(
-        f"SELECT section_id, objectives FROM sections WHERE section_id IN ({placeholders})",
+        f"SELECT s.section_id, s.objectives, s.book_id, b.subject AS subject, "
+        f"s.chapter_number, s.chapter_title "
+        f"FROM sections s JOIN books b ON b.book_id = s.book_id "
+        f"WHERE s.section_id IN ({placeholders})",
         doc_ids,
     ).fetchall()
-    return {row["section_id"]: row["objectives"] for row in rows}
+    return {row["section_id"]: row for row in rows}
+
+
+def _resolve_allowed_doc_ids(
+    conn: sqlite3.Connection,
+    *,
+    subject: list[str] | None,
+    book_id: list[str] | None,
+    chapter_number: int | None,
+) -> set[str] | None:
+    """Translate the metadata filters into an allowlist of `section_id`s.
+
+    Returns `None` when no filter was supplied (caller should search the whole
+    corpus), otherwise the set of section ids matching every supplied filter —
+    AND across filter types, OR within a multi-value type (`subject`/`book_id`
+    use `IN`). An empty set means the filter matched nothing; the retriever
+    turns that into an empty result.
+    """
+    if not subject and not book_id and chapter_number is None:
+        return None
+
+    clauses: list[str] = []
+    params: list = []
+    if subject:
+        clauses.append(f"b.subject IN ({','.join('?' * len(subject))})")
+        params.extend(subject)
+    if book_id:
+        clauses.append(f"s.book_id IN ({','.join('?' * len(book_id))})")
+        params.extend(book_id)
+    if chapter_number is not None:
+        clauses.append("s.chapter_number = ?")
+        params.append(chapter_number)
+
+    rows = conn.execute(
+        f"SELECT s.section_id FROM sections s JOIN books b ON b.book_id = s.book_id "
+        f"WHERE {' AND '.join(clauses)}",
+        params,
+    ).fetchall()
+    return {row["section_id"] for row in rows}
 
 
 @router.get("/chunks", response_model=OpenstaxChunksResponse)
 def search_chunks(
     q: str = Query(..., description="Natural-language query. Empty → 400."),
+    subject: list[str] | None = Query(
+        None,
+        description=(
+            "Scope the search to one or more subjects (repeatable, e.g. "
+            "`?subject=mathematics&subject=science`). OR within the list; "
+            "an unknown subject simply matches nothing."
+        ),
+    ),
+    book_id: list[str] | None = Query(
+        None,
+        description=(
+            "Scope the search to one or more books (repeatable collection slugs, "
+            "e.g. `?book_id=calculus-volume-1&book_id=college-algebra`). OR within "
+            "the list — use it to pull a course plus its prerequisite books in one "
+            "call. Combined with `subject` it intersects (AND across filter types)."
+        ),
+    ),
+    chapter_number: int | None = Query(
+        None,
+        description=(
+            "Scope to one chapter ordinal. Only meaningful alongside a single "
+            "book_id (chapter numbers repeat across books)."
+        ),
+    ),
     top_k: int = Query(20, ge=1, le=100),
     candidate_k: int = Query(50, ge=10, le=200),
     rag_conn: sqlite3.Connection = Depends(db.openstax_rag),
     conn: sqlite3.Connection = Depends(db.openstax),
 ) -> OpenstaxChunksResponse:
-    """Semantic search over embedded OpenStax sections. Each result includes the
-    section's learning objectives as a separate field."""
+    """Semantic search over embedded OpenStax sections, optionally scoped by
+    subject / book / chapter. Each result includes the section's learning
+    objectives plus its book/subject/chapter provenance."""
     if not q.strip():
         raise HTTPException(status_code=400, detail="q must not be empty")
+
+    allowed = _resolve_allowed_doc_ids(
+        conn, subject=subject, book_id=book_id, chapter_number=chapter_number
+    )
     try:
-        result = retriever.retrieve(q, rag_conn, top_k=top_k, candidate_k=candidate_k)
+        result = retriever.retrieve(
+            q, rag_conn, top_k=top_k, candidate_k=candidate_k, allowed_doc_ids=allowed
+        )
     except sqlite3.OperationalError as e:
         if is_operational_error(e):
             raise HTTPException(
@@ -339,21 +417,27 @@ def search_chunks(
             ) from e
         raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
 
-    obj_map = _objectives_map(conn, [h.doc_id for h in result.hits])
-    items = [
-        OpenstaxChunk(
-            chunk_id=h.chunk_id,
-            doc_id=h.doc_id,
-            title=h.title,
-            section=h.section,
-            chunk_index=h.chunk_index,
-            text=h.text,
-            text_length=h.text_length,
-            score=h.score,
-            objectives=obj_map.get(h.doc_id),
+    meta_map = _section_meta_map(conn, [h.doc_id for h in result.hits])
+    items = []
+    for h in result.hits:
+        m = meta_map.get(h.doc_id)
+        items.append(
+            OpenstaxChunk(
+                chunk_id=h.chunk_id,
+                doc_id=h.doc_id,
+                title=h.title,
+                section=h.section,
+                chunk_index=h.chunk_index,
+                text=h.text,
+                text_length=h.text_length,
+                score=h.score,
+                objectives=m["objectives"] if m else None,
+                book_id=m["book_id"] if m else None,
+                subject=m["subject"] if m else None,
+                chapter_number=m["chapter_number"] if m else None,
+                chapter_title=m["chapter_title"] if m else None,
+            )
         )
-        for h in result.hits
-    ]
     return OpenstaxChunksResponse(
         items=items,
         used_dense=result.used_dense,
@@ -390,8 +474,8 @@ def get_doc_chunks(
             ) from e
         raise
 
-    obj_map = _objectives_map(conn, [doc_id])
-    objectives = obj_map.get(doc_id)
+    meta = _section_meta_map(conn, [doc_id]).get(doc_id)
+    objectives = meta["objectives"] if meta else None
     return [
         OpenstaxStoredChunk(
             chunk_id=row["chunk_id"],
