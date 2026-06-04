@@ -44,7 +44,9 @@ BASE_URL = "https://www.loc.gov/search/"
 PER_PAGE = 100
 MAX_RETRIES = 3
 REQUEST_DELAY = 10  # seconds between pages; LOC throttles aggressively, so be generous
-RATE_LIMIT_SLEEP = 300  # seconds to wait after a 429 before retrying the page
+RATE_LIMIT_SLEEP = 300  # base seconds to wait after a throttle before retrying the page
+RATE_LIMIT_MAX = 3720   # cap on the escalating backoff — 1 h block + 2 min buffer so a
+                        # retry lands clear of the block instead of re-tripping it
 _EMAIL = os.environ.get("DATASETS_EMAIL")
 USER_AGENT = f"datasets-bot/1.0 (mailto:{_EMAIL})"
 
@@ -113,8 +115,28 @@ def _encode_fa(fa: str) -> str:
     return urllib.parse.quote(fa, safe=":").replace("%20", "+")
 
 
+def _retry_after_seconds(resp: requests.Response) -> Optional[int]:
+    """Return the Retry-After header as whole seconds, or None if absent/unparseable.
+
+    LOC usually sends Retry-After as an integer number of seconds; the HTTP spec
+    also allows an absolute date, which we don't try to parse (we fall back to the
+    escalating backoff instead).
+    """
+    value = resp.headers.get("Retry-After")
+    if value and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def fetch_page(session: requests.Session, page: int, fa: Optional[str]) -> dict:
-    """Fetch one page from the LOC search API, sleeping on 429."""
+    """Fetch one page from the LOC search API, backing off on throttling.
+
+    LOC throttles in two ways: an explicit 429, or — under heavy load — a 200
+    response carrying an HTML CAPTCHA page instead of JSON. Both are treated as
+    "wait and retry". A block can last up to an hour, so the wait escalates
+    (RATE_LIMIT_SLEEP, doubling, capped at RATE_LIMIT_MAX) unless the server
+    tells us exactly how long via the Retry-After header.
+    """
     params: dict = {
         "fo": "json",
         "c": PER_PAGE,
@@ -125,12 +147,25 @@ def fetch_page(session: requests.Session, page: int, fa: Optional[str]) -> dict:
     if fa:
         url += "&fa=" + _encode_fa(fa)
 
+    backoff = RATE_LIMIT_SLEEP
     while True:
         resp = session.get(url, timeout=60, allow_redirects=True)
+
+        throttled = False
+        reason = ""
         if resp.status_code == 429:
-            print(f"Rate limited — sleeping {RATE_LIMIT_SLEEP} s")
-            time.sleep(RATE_LIMIT_SLEEP)
+            throttled, reason = True, "429 rate limited"
+        elif "json" not in resp.headers.get("Content-Type", "").lower():
+            # A 200 with HTML (no JSON content type) is LOC's CAPTCHA / block page.
+            throttled, reason = True, "non-JSON response (likely CAPTCHA/block page)"
+
+        if throttled:
+            wait = _retry_after_seconds(resp) or backoff
+            print(f"Throttled ({reason}) — sleeping {wait} s")
+            time.sleep(wait)
+            backoff = min(backoff * 2, RATE_LIMIT_MAX)
             continue
+
         resp.raise_for_status()
         return resp.json()
 
