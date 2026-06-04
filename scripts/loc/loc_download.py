@@ -43,7 +43,8 @@ DEFAULT_LANGUAGE = "english"
 BASE_URL = "https://www.loc.gov/search/"
 PER_PAGE = 100
 MAX_RETRIES = 3
-REQUEST_DELAY = 3  # seconds between pages; LOC search API is lenient but be polite
+REQUEST_DELAY = 10  # seconds between pages; LOC throttles aggressively, so be generous
+RATE_LIMIT_SLEEP = 300  # seconds to wait after a 429 before retrying the page
 _EMAIL = os.environ.get("DATASETS_EMAIL")
 USER_AGENT = f"datasets-bot/1.0 (mailto:{_EMAIL})"
 
@@ -127,8 +128,8 @@ def fetch_page(session: requests.Session, page: int, fa: Optional[str]) -> dict:
     while True:
         resp = session.get(url, timeout=60, allow_redirects=True)
         if resp.status_code == 429:
-            print("Rate limited — sleeping 60 s")
-            time.sleep(60)
+            print(f"Rate limited — sleeping {RATE_LIMIT_SLEEP} s")
+            time.sleep(RATE_LIMIT_SLEEP)
             continue
         resp.raise_for_status()
         return resp.json()
