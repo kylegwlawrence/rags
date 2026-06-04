@@ -4,9 +4,9 @@
 Re-runnable: drops `papers_fts` and rebuilds from scratch.
 Restart uvicorn after — the API caches the source connection at import time.
 
-Pass `--db` to index a per-category shard instead of the monolith, e.g.::
+The live DB lives outside the repo, so point `--db` at it::
 
-    python scripts/arxiv/arxiv_index_fts.py --db data/arxiv/math.db
+    python scripts/arxiv/arxiv_index_fts.py --db /datasets/arxiv/arxiv.db
 """
 
 import argparse
@@ -28,7 +28,7 @@ if __name__ == "__main__":
         type=Path,
         default=DB_PATH,
         help="Database to build papers_fts in (default: data/arxiv/arxiv.db). "
-        "Point at a per-category shard, e.g. data/arxiv/math.db.",
+        "Point at the live monolith, e.g. /datasets/arxiv/arxiv.db.",
     )
     args = parser.parse_args()
 

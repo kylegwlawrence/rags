@@ -13,7 +13,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.models import Chunk, ChunksResponse, StoredChunk
-from rag import Hit, retriever
+from rag import retriever
 from rag.retriever import is_operational_error
 
 
@@ -24,7 +24,6 @@ def add_chunks_route(
     source_name: str,
     indexer_script: str,
     rag_db_path: str | None = None,
-    hit_filter: Callable[[list[Hit]], list[Hit]] | None = None,
 ) -> None:
     """Attach `GET /chunks` to `router`.
 
@@ -45,12 +44,6 @@ def add_chunks_route(
             `data/<source_name>/<source_name>_rag.db`; pass explicitly when
             the file name doesn't match the source name (e.g. pydocs uses
             `python_docs_rag.db`).
-        hit_filter: Optional post-retrieval filter that drops hits before they
-            become the page. Used by arxiv to drop chunks whose paper lives in
-            an archived (no-longer-on-disk) shard — the global `arxiv_rag.db`
-            still holds them but they can't be served. When set, the route
-            over-fetches (retrieves up to `candidate_k` merged hits instead of
-            `top_k`) so dropped hits don't shrink the page below `top_k`.
     """
     if rag_db_path is None:
         rag_db_path = f"data/{source_name}/{source_name}_rag.db"
@@ -64,13 +57,9 @@ def add_chunks_route(
     ) -> ChunksResponse:
         if not q.strip():
             raise HTTPException(status_code=400, detail="q must not be empty")
-        # With a hit_filter, retrieve the full merged candidate pool (capped by
-        # candidate_k) so that filtering still leaves up to top_k survivors;
-        # without one, top_k is all we need.
-        retrieve_k = max(top_k, candidate_k) if hit_filter else top_k
         try:
             result = retriever.retrieve(
-                q, rag_conn, top_k=retrieve_k, candidate_k=candidate_k
+                q, rag_conn, top_k=top_k, candidate_k=candidate_k
             )
         except sqlite3.OperationalError as e:
             if is_operational_error(e):
@@ -83,10 +72,7 @@ def add_chunks_route(
                 ) from e
             raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
 
-        hits = result.hits
-        if hit_filter is not None:
-            hits = hit_filter(hits)
-        hits = hits[:top_k]
+        hits = result.hits[:top_k]
 
         items = [
             Chunk(

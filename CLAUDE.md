@@ -15,9 +15,6 @@ source .venv/bin/activate
 python scripts/arxiv/arxiv_ingest.py                # OAI-PMH metadata → data/arxiv/arxiv.db
 python scripts/arxiv/arxiv_download.py              # HTML bodies for papers
 python scripts/arxiv/arxiv_normalize_authors.py     # one-shot backfill for legacy DBs only
-python scripts/arxiv/arxiv_split_categories.py      # legacy sharding tool: split arxiv.db → per-category shards
-python scripts/arxiv/arxiv_combine_shards.py        # legacy sharding tool: merge per-parent shards → monolith arxiv.db
-python scripts/arxiv/arxiv_archive.py               # legacy sharding tool: zstd-archive non-kept shards
 python scripts/arxiv/arxiv_index_fts.py             # papers_fts FTS5 index (--db /datasets/arxiv/arxiv.db)
 python scripts/arxiv/arxiv_index_rag.py             # data/arxiv/arxiv_rag.db
 python scripts/factbook/factbook_download.py
@@ -108,14 +105,11 @@ Write paths are the on-demand `/embed` routes (arxiv, openalex, gutenberg, simpl
 
 **arxiv**
 
-arxiv is a **single monolithic DB** at `/datasets/arxiv/arxiv.db` — it lives outside the repo because the ~80 GB file is too big for `/home` (often near-full). The API opens it read-only via `api/db.py` `arxiv()` (path constant `ARXIV_DB`); there is no sharding or query fan-out. The ingest/download/normalize/index scripts below still default to `--db data/arxiv/arxiv.db`, so pass `--db /datasets/arxiv/arxiv.db` to point them at the live monolith. `arxiv_split_categories.py` / `arxiv_combine_shards.py` / `arxiv_archive.py` are **legacy** per-category sharding tools — no longer on the live serving path, kept only for occasional corpus surgery.
+arxiv is a **single monolithic DB** at `/datasets/arxiv/arxiv.db` — it lives outside the repo because the ~80 GB file is too big for `/home` (often near-full). The API opens it read-only via `api/db.py` `arxiv()` (path constant `ARXIV_DB`); there is no sharding or query fan-out. The ingest/download/normalize/index scripts below still default to `--db data/arxiv/arxiv.db`, so pass `--db /datasets/arxiv/arxiv.db` to point them at the live monolith.
 
 - `arxiv_ingest.py` — OAI-PMH harvester. Rate: 3 s/req. Set `DATASETS_EMAIL`. Flags: `--from`, `--until`, `--db`, `--from-cache`, `--reset`. Restart after.
 - `arxiv_download.py` — HTML body fetcher. Flags: `--db`, `--limit`, `--force`. Restart after.
 - `arxiv_normalize_authors.py` — Backfill only for arxiv.db files predating Phase 3; idempotent.
-- `arxiv_split_categories.py` — **(Legacy sharding tool — the live API no longer reads shards.)** Splits a monolith `arxiv.db` into self-contained per-parent shards (papers + sliced authors/paper_authors + indexes). Home shard = parent of `primary_category`; legacy no-dot codes are their own parent. Flags: `--db`, `--output-dir` (default `data/arxiv/categories`; point at a roomy filesystem to dodge `/home` pressure, then move keepers into `data/arxiv/shards/`), `--parents`, `--exclude` (build all but these), `--force`. Read-only on the source; idempotent (skips existing shards).
-- `arxiv_combine_shards.py` — **(Legacy sharding tool.)** Inverse of the split: merges all per-parent shard DBs in `--shards-dir` (default `data/arxiv/shards`) back into one monolithic `--output` (default `/datasets/arxiv/arxiv.db` — a roomy filesystem, not `/home`). Author IDs differ across shards, so authors are re-normalised through the `UNIQUE(keyname, forenames, affiliation)` constraint and `paper_authors` re-linked to the new IDs (a plain `INSERT SELECT *` would duplicate them). Every insert is `INSERT OR IGNORE`, so it is idempotent; `--resume` reuses an existing output and skips shards already fully merged. Read-only on the shards.
-- `arxiv_archive.py` — **(Legacy sharding tool.)** zstd-compresses shards (default level 10) to `data/arxiv/archives/{parent}.db.zst`, **keeping** the parents in `--keep` (default `math,math-ph,physics`) live. Verifies each archive with `zstd -t`, then deletes the verified original unless `--keep-originals`. Flags: `--base-dir` (default `data/arxiv/categories`), `--out-dir`, `--keep`, `--level`, `--threads`, `--keep-originals`, `--force`. Mirrors `gutenberg_archive.py`.
 - `arxiv_index_fts.py` — Rebuilds `papers_fts` (porter, external-content) over title + abstract. Required for `?q=` (and for the default `relevance` sort when `q` is set). Pass `--db /datasets/arxiv/arxiv.db` to index the live monolith (the flag still defaults to `data/arxiv/arxiv.db`).
 - `arxiv_index_rag.py` — `arxiv_rag.db` (single global RAG DB, not sharded). Chunks full HTML body (section-tagged markdown) when available; falls back to abstract-only for papers without downloaded HTML. Flags: `--limit`, `--reset`, `--batch`, `--chunk-size` (1500), `--max-chunk-size` (1800), `--overlap` (150). Restart after.
 
@@ -133,7 +127,7 @@ arxiv is a **single monolithic DB** at `/datasets/arxiv/arxiv.db` — it lives o
 - `gutenberg_download.py` — Fetches PG catalog CSV, filters by language, rsyncs matching files from ibiblio mirror. Flags: `--language` (default `en`; comma-separated codes or `all`), `--dry-run`.
 - `gutenberg_index.py` — Walks `.txt` files, joins PG catalog CSV → `gutenberg.db`.
 - `gutenberg_index_rag.py` — `gutenberg_rag.db`. Flags: `--language` (en), `--limit` (100), `--chunk-size` (2000), `--max-chunk-size` (2400), `--overlap` (300). Restart after.
-- `gutenberg_archive.py` — tar + zstd (default level 10) each shard folder `data/gutenberg/{0..9}` into `data/gutenberg/archives/{n}.tar.zst`. Leaves originals in place — delete manually after verifying. Flags: `--base-dir`, `--out-dir`, `--level`, `--threads`, `--folder`, `--force`. (Template for `arxiv_archive.py`.)
+- `gutenberg_archive.py` — tar + zstd (default level 10) each shard folder `data/gutenberg/{0..9}` into `data/gutenberg/archives/{n}.tar.zst`. Leaves originals in place — delete manually after verifying. Flags: `--base-dir`, `--out-dir`, `--level`, `--threads`, `--folder`, `--force`.
 
 **simplewiki**
 - `simplewiki_download.py` — Downloads + SHA-1 verifies dump to `data/simplewiki/dumps/`.
