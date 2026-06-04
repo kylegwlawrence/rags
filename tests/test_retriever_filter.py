@@ -103,7 +103,7 @@ def test_sparse_filter_handles_large_id_list(rag_conn):
 
 
 def test_dense_filter_drops_out_of_scope(rag_conn):
-    """`_dense_search` over-fetches then keeps only allowed docs."""
+    """`_dense_search` keeps only allowed docs."""
     vec = [0.0] * embedder.EMBEDDING_DIM
     rows = retriever._dense_search(vec, rag_conn, 50, {"sci/s1"})
     ids = {
@@ -113,3 +113,85 @@ def test_dense_filter_drops_out_of_scope(rag_conn):
         for cid, _ in rows
     }
     assert ids == {"sci/s1"}
+
+
+def _unit(dim: int, axis: int) -> list[float]:
+    """A one-hot float vector of width `dim` with 1.0 on `axis`."""
+    v = [0.0] * dim
+    v[axis] = 1.0
+    return v
+
+
+def _insert_chunk(
+    conn: sqlite3.Connection, doc_id: str, text: str, embedding: list[float]
+) -> int:
+    """Insert one chunk with a hand-chosen embedding straight into the RAG tables.
+
+    Bypasses `embed_doc`/Ollama so a test can place chunks at exact distances
+    from a query vector — needed to reproduce the dense-side starvation bug,
+    which only shows up when many out-of-scope chunks sit nearer the query than
+    the in-scope ones.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO docs_meta(doc_id, version, title, chunk_count, "
+        "indexed_at) VALUES (?, 'v1', ?, 0, '2026-01-01')",
+        (doc_id, doc_id),
+    )
+    cur = conn.execute(
+        "INSERT INTO chunks(doc_id, section, chunk_index, text, text_length) "
+        "VALUES (?, NULL, 0, ?, ?)",
+        (doc_id, text, len(text)),
+    )
+    chunk_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)", (chunk_id, text)
+    )
+    conn.execute(
+        "INSERT INTO chunks_vec(chunk_id, embedding) VALUES (?, ?)",
+        (chunk_id, embedder.pack_embedding(embedding)),
+    )
+    conn.commit()
+    return chunk_id
+
+
+def test_dense_filter_recovers_narrow_scope_from_starvation(tmp_path):
+    """A narrow scope must return its chunks even when out-of-scope ones are nearer.
+
+    Reproduces the reported bug: with the old "global KNN then post-filter"
+    design, a candidate pool dominated by nearer out-of-scope chunks left zero
+    in-scope survivors. Here 400 out-of-scope chunks sit nearer the query than 5
+    in-scope chunks — far more than any fixed candidate pool — so only a
+    filter-before-rank dense search can recover the in-scope set.
+    """
+    dim = embedder.EMBEDDING_DIM
+    conn = connect_rag(tmp_path / "starve_rag.db")
+    query = _unit(dim, 0)
+    near = [0.95] + [0.0] * (dim - 1)  # ~0.05 from the query
+    far = _unit(dim, 1)  # ~1.41 from the query
+    for i in range(400):
+        _insert_chunk(conn, f"other/{i}", f"noise {i}", near)
+    for i in range(5):
+        _insert_chunk(conn, f"physics/{i}", f"torque {i}", far)
+
+    allowed = {f"physics/{i}" for i in range(5)}
+    rows = retriever._dense_search(query, conn, 50, allowed)
+    ids = {
+        conn.execute(
+            "SELECT doc_id FROM chunks WHERE chunk_id = ?", (cid,)
+        ).fetchone()["doc_id"]
+        for cid, _ in rows
+    }
+    conn.close()
+    assert ids == allowed  # all 5 in-scope recovered, none starved out
+
+
+def test_dense_search_clamps_k_above_engine_cap(rag_conn):
+    """A `k` past the sqlite-vec cap is clamped, not thrown (candidate_k bug #2).
+
+    sqlite-vec 0.1.9 rejects `k` above 4096 with an OperationalError; the old
+    code multiplied candidate_k by an oversample factor and could sail past it,
+    making large candidate_k values fail instead of returning more.
+    """
+    vec = [0.0] * embedder.EMBEDDING_DIM
+    rows = retriever._dense_search(vec, rag_conn, 10_000)  # no allowlist
+    assert rows  # returns results rather than raising "k too large"

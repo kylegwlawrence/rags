@@ -17,10 +17,19 @@ import httpx
 
 from rag import Hit, RetrievalResult, embedder
 
-# When a `doc_id` allowlist is active, the dense side can't filter inside the
-# sqlite-vec KNN scan (it has no access to the external `doc_id` column), so it
-# over-fetches by this factor and filters afterwards — see `_dense_search`.
-_DENSE_OVERSAMPLE = 6
+# sqlite-vec 0.1.9 rejects a KNN `k` above this hard cap ("k value in knn query
+# too large, provided N and the limit is 4096"), so every KNN we issue clamps to
+# it. This is also what made `candidate_k` non-monotonic before: a large
+# `candidate_k` pushed `k` past the cap and the query threw instead of returning
+# more candidates.
+_VEC_KNN_MAX = 4096
+
+# When a `doc_id` allowlist is active the dense side can't filter inside the
+# sqlite-vec KNN scan (the `doc_id` column lives on `chunks`, not the vec table).
+# For a scope of at most this many chunks we score every in-scope chunk directly
+# (exact, and cheap because the scan is bounded by the scope); above it we fall
+# back to a capped global KNN that we post-filter. See `_dense_search`.
+_BRUTE_FORCE_MAX_CHUNKS = 8000
 
 
 def is_operational_error(err: sqlite3.OperationalError) -> bool:
@@ -56,10 +65,12 @@ def retrieve(
         allowed_doc_ids: Optional metadata filter — restrict retrieval to chunks
             whose `doc_id` is in this set. `None` means no filter (search the
             whole corpus); an empty set means the filter matched no documents,
-            so the result is empty without touching the DB. The sparse side
-            applies the filter exactly in SQL; the dense side over-fetches and
-            filters afterwards (see `_dense_search`), so dense recall degrades
-            gracefully for a very selective filter while sparse stays exact.
+            so the result is empty without touching the DB. Both arms apply the
+            filter *before* ranking: the sparse side constrains the FTS match in
+            SQL, and the dense side either scores only in-scope chunks (narrow
+            scope) or post-filters a maxed-out KNN pool (broad scope) — see
+            `_dense_search`. This avoids the post-filter starvation where a
+            narrow scope's chunks never reach a fixed global candidate pool.
 
     Returns:
         RetrievalResult with `hits` sorted by descending RRF score and
@@ -103,19 +114,49 @@ def _dense_search(
 ) -> list[tuple[int, float]]:
     """ANN search over chunks_vec. Returns (chunk_id, distance) ordered ascending.
 
-    Without a filter this is a plain top-`k` KNN. With `allowed_doc_ids`, the
-    `doc_id` column lives on `chunks`, not on the `chunks_vec` virtual table, so
-    sqlite-vec can't constrain the KNN scan itself. Instead we over-fetch
-    `k * _DENSE_OVERSAMPLE` nearest chunks, join each to its `doc_id`, drop the
-    out-of-scope ones, and truncate back to `k`. Exact for the fetched window;
-    only approximate if in-scope chunks rank beyond it (the sparse arm, which
-    filters exactly in SQL, still covers those).
+    Without a filter this is a plain top-`k` KNN (k clamped to the sqlite-vec
+    cap, `_VEC_KNN_MAX`).
+
+    With `allowed_doc_ids`, the `doc_id` column lives on `chunks`, not on the
+    `chunks_vec` virtual table, so sqlite-vec can't constrain the KNN scan
+    itself. Post-filtering a fixed global pool would (and did) starve narrow
+    scopes: when the corpus-wide nearest neighbours are dominated by other docs,
+    no in-scope chunk survives. So the filter is applied *before* ranking, with
+    the method chosen by scope size:
+
+    * Scope of at most `_BRUTE_FORCE_MAX_CHUNKS` chunks — score every in-scope
+      chunk with `vec_distance_L2` (the same metric the KNN uses) and keep the
+      nearest `k`. Exact, and bounded by the scope rather than the corpus.
+    * Larger scope — run the global KNN at the maximum `k` the engine allows and
+      post-filter to the allowlist. A broad scope is well represented in that
+      pool so its nearest in-scope chunks survive; this only loses recall for a
+      scope that is both large and semantically far from the query, which the
+      sparse arm (exact in SQL) still covers.
     """
     packed = embedder.pack_embedding(query_embedding)
     if allowed_doc_ids is None:
         rows = rag_conn.execute(
             "SELECT chunk_id, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ?",
-            (packed, k),
+            (packed, min(k, _VEC_KNN_MAX)),
+        ).fetchall()
+        return [(r["chunk_id"], r["distance"]) for r in rows]
+
+    # One JSON parameter expanded via `json_each`, so a broad allowlist of
+    # thousands of ids stays one bound variable (under SQLite's 999-var cap).
+    ids_json = json.dumps(sorted(allowed_doc_ids))
+    in_scope = rag_conn.execute(
+        "SELECT count(*) FROM chunks WHERE doc_id IN (SELECT value FROM json_each(?))",
+        (ids_json,),
+    ).fetchone()[0]
+
+    if in_scope <= _BRUTE_FORCE_MAX_CHUNKS:
+        rows = rag_conn.execute(
+            "SELECT v.chunk_id AS chunk_id, "
+            "vec_distance_L2(v.embedding, ?) AS distance "
+            "FROM chunks_vec v JOIN chunks c ON c.chunk_id = v.chunk_id "
+            "WHERE c.doc_id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY distance LIMIT ?",
+            (packed, ids_json, k),
         ).fetchall()
         return [(r["chunk_id"], r["distance"]) for r in rows]
 
@@ -123,7 +164,7 @@ def _dense_search(
         "SELECT v.chunk_id AS chunk_id, v.distance AS distance, c.doc_id AS doc_id "
         "FROM chunks_vec v JOIN chunks c ON c.chunk_id = v.chunk_id "
         "WHERE v.embedding MATCH ? AND k = ?",
-        (packed, k * _DENSE_OVERSAMPLE),
+        (packed, _VEC_KNN_MAX),
     ).fetchall()
     filtered = [
         (r["chunk_id"], r["distance"]) for r in rows if r["doc_id"] in allowed_doc_ids
@@ -163,11 +204,16 @@ def _sparse_search(
                 (escaped, k),
             ).fetchall()
         else:
+            # JOIN to `chunks` rather than `rowid IN (subquery)`: the subquery
+            # form makes SQLite materialise every in-scope rowid into a temp
+            # b-tree before the FTS match, which costs seconds on a broad
+            # allowlist; the JOIN lets the FTS index drive and filters per hit,
+            # returning the identical rows ~600x faster.
             rows = rag_conn.execute(
-                "SELECT rowid, rank FROM chunks_fts "
-                "WHERE chunks_fts MATCH ? AND rowid IN ("
-                "  SELECT chunk_id FROM chunks "
-                "  WHERE doc_id IN (SELECT value FROM json_each(?))) "
+                "SELECT chunks_fts.rowid AS rowid, chunks_fts.rank AS rank "
+                "FROM chunks_fts JOIN chunks c ON c.chunk_id = chunks_fts.rowid "
+                "WHERE chunks_fts MATCH ? "
+                "AND c.doc_id IN (SELECT value FROM json_each(?)) "
                 "LIMIT ?",
                 (escaped, json.dumps(sorted(allowed_doc_ids)), k),
             ).fetchall()
