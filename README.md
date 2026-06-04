@@ -16,7 +16,7 @@ backed by one or more SQLite files in `data/<source>/`):
 
 | Source | What it is | Free-text (`q`) | Semantic (`/chunks`) |
 |--------|------------|:---:|:---:|
-| **arxiv** | arXiv paper metadata + HTML bodies, sharded by parent category | ✓ | ✓ |
+| **arxiv** | arXiv paper metadata + HTML bodies | ✓ | ✓ |
 | **factbook** | CIA World Factbook country profiles | — | ✓ |
 | **openalex** | OpenAlex scholarly works | ✓ | ✓ |
 | **gutenberg** | Project Gutenberg texts | — | ✓ |
@@ -109,19 +109,18 @@ Only the distinctive filters are listed below; every list endpoint also takes
 `candidate_k`. See `/docs` for the full schema.
 
 ### arXiv `/arxiv`
-Sharded by parent category — the corpus lives as one `data/arxiv/shards/{parent}.db`
-per top-level category, auto-discovered and fanned out / merged in the router.
+A single monolithic DB at `/datasets/arxiv/arxiv.db` (kept outside the repo — the
+~80 GB file is too big for `/home`), opened read-only via `api/db.py` `arxiv()`.
 
 - `GET /papers` — `?primary_category=` (exact), `?category=` (substring),
   `?submitted_year=`, `?submitted_from=`/`?submitted_to=` (ISO range),
   `?author=` (substring), `?has_html=`, `?q=` (FTS over title + abstract),
   `?sort=` (`submitted_desc|submitted_asc|updated_desc|relevance`). With `q`,
-  `sort=relevance` merges by rank-within-shard (bm25 isn't comparable across
-  separate indexes); date sorts are exact.
+  `sort=relevance` ranks by `bm25(papers_fts)`; date sorts are exact.
 - `GET /papers/{paper_id}` / `/{paper_id}/content` (raw HTML body) /
   `POST /{paper_id}/embed`. Old-style ids with slashes (e.g. `cond-mat/0204015`)
   are supported via a `:path` route.
-- `GET /arxiv/chunks` — the single global `arxiv_rag.db` (not sharded).
+- `GET /arxiv/chunks` — the global `arxiv_rag.db`.
 
 ### Factbook `/factbook`
 - `GET /countries` — `?region=` (exact); `GET /countries/{id}`.
@@ -244,8 +243,7 @@ its page label (`"p. 42"`), which deep-links the viewer (`#page=N`).
 
 - `api/main.py` — mounts every router and `/health`.
 - `api/db.py` — read-only module-level SQLite connections; `connect_rag_rw`
-  for live-embed writes; `connect_rw` for the SEC live body-download write;
-  `arxiv_shards()` auto-discovers the per-category shard files.
+  for live-embed writes; `connect_rw` for the SEC live body-download write.
 - `api/models.py` — `Page[T]` for list endpoints, `ChunksResponse` for RAG,
   `EmbedResult` for the embed routes.
 - `api/routers/` — one thin router per source; SQL is inline.

@@ -97,7 +97,7 @@ def test_health_503_when_any_db_broken(client, monkeypatch):
     def broken():
         raise RuntimeError("simulated DB outage")
 
-    monkeypatch.setattr(db, "arxiv_shards", broken)
+    monkeypatch.setattr(db, "arxiv", broken)
     r = client.get("/health")
     assert r.status_code == 503
     body = r.json()
@@ -443,15 +443,14 @@ def test_arxiv_papers_503_when_paper_authors_missing(client, tmp_path):
     )
     ro_conn.row_factory = sqlite3.Row
 
-    # arxiv is sharded: the dependency returns a {parent: conn} dict. One shard
-    # whose paper_authors table is missing is enough to hit the author-join 503.
-    app.dependency_overrides[db.arxiv_shards] = lambda: {"no_authors": ro_conn}
+    # A DB whose paper_authors table is missing hits the author-join 503.
+    app.dependency_overrides[db.arxiv] = lambda: ro_conn
     try:
         r = client.get("/arxiv/papers?limit=1")
         assert r.status_code == 503, r.text
         assert "arxiv_normalize_authors.py" in r.json()["detail"]
     finally:
-        app.dependency_overrides.pop(db.arxiv_shards, None)
+        app.dependency_overrides.pop(db.arxiv, None)
         ro_conn.close()
 
 
@@ -578,43 +577,6 @@ def test_gutenberg_content_rejects_path_traversal(client, monkeypatch):
     r = client.get("/gutenberg/texts/1/content")
     assert r.status_code == 404
 
-
-def test_arxiv_drop_archived_chunk_hits(monkeypatch):
-    """`_drop_archived_chunk_hits` keeps only hits whose paper lives in a live shard.
-
-    The global arxiv_rag.db retains chunks for papers whose category shard was
-    later archived off disk. A hit pointing at such a paper is dangling and must
-    be dropped, while RRF order is preserved for the survivors. Uses two
-    in-memory `papers` shards so it runs without the real arxiv DBs.
-    """
-    import sqlite3
-
-    from api.routers.arxiv import _drop_archived_chunk_hits
-    from rag import Hit
-
-    def shard(ids):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        conn.execute("CREATE TABLE papers (id TEXT PRIMARY KEY)")
-        conn.executemany("INSERT INTO papers (id) VALUES (?)", [(i,) for i in ids])
-        return conn
-
-    # math shard holds 2401.0001; cs shard holds 2401.0003. 2401.0002 lives in
-    # an archived (absent) shard, so it must be dropped.
-    shards = {"math": shard(["2401.0001"]), "cs": shard(["2401.0003"])}
-    monkeypatch.setattr(db, "arxiv_shards", lambda: shards)
-
-    def hit(doc_id, chunk_id):
-        return Hit(
-            chunk_id=chunk_id, doc_id=doc_id, title="t", section=None,
-            chunk_index=0, text="x", text_length=1, score=1.0 / chunk_id,
-        )
-
-    hits = [hit("2401.0001", 1), hit("2401.0002", 2), hit("2401.0003", 3)]
-    kept = _drop_archived_chunk_hits(hits)
-    assert [h.doc_id for h in kept] == ["2401.0001", "2401.0003"]
-    # Empty input short-circuits without touching the shards.
-    assert _drop_archived_chunk_hits([]) == []
 
 
 def test_arxiv_content_endpoint(client):

@@ -9,7 +9,7 @@ from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EmbedResult, Page, Paper
-from rag import Doc, Hit, content_hash
+from rag import Doc, content_hash
 from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
 from rag.embed_one import embed_doc
@@ -32,36 +32,6 @@ SORTS = {
     "relevance": "bm25(papers_fts) ASC",
 }
 Sort = Literal["submitted_desc", "submitted_asc", "updated_desc", "relevance"]
-
-# arxiv is sharded by parent category across data/arxiv/shards/{parent}.db, so a list
-# query fans out to every shard and the rows are re-merged here. Each shard
-# query also selects its sort key as `_sortkey` so we can re-sort the combined
-# rows. Maps sort -> (key expression, reverse-for-Python-sort).
-#
-# Date sorts merge on the exact value. `relevance` is special: bm25 scores come
-# from each shard's own FTS index and are NOT comparable across shards (a term
-# that is rare in a small shard scores "better" there than the same term in the
-# big shard where it's common), so merging on raw bm25 lets a small shard hijack
-# the ranking. Instead relevance merges on each row's RANK within its shard
-# (best-of-each-shard first), tie-broken by raw bm25 — scale-independent.
-_SORT_KEY = {
-    "submitted_desc": ("submitted_date", True),
-    "submitted_asc": ("submitted_date", False),
-    "updated_desc": ("updated_date", True),
-    "relevance": ("bm25(papers_fts)", False),
-}
-
-
-def _merge_sort_key(row: sqlite3.Row):
-    """Date-sort key for a row by its `_sortkey` column.
-
-    None sorts lowest as ``(0, "")`` vs ``(1, value)`` for present values. Paired
-    with ``reverse`` from `_SORT_KEY`, this reproduces SQLite's NULL ordering
-    (NULLs last under DESC, first under ASC). Within one sort every `_sortkey`
-    is the same type (all dates), so the values never cross-compare.
-    """
-    value = row["_sortkey"]
-    return (0, "") if value is None else (1, value)
 
 
 def _row_to_paper(row: sqlite3.Row, authors: list[str]) -> Paper:
@@ -94,30 +64,6 @@ _META_COLS = (
     "submitted_date, updated_date, doi, journal_ref, comments, "
     "download_status"
 )
-
-
-def _find_shard(
-    shards: dict[str, sqlite3.Connection],
-    paper_id: str,
-    *,
-    with_body: bool = False,
-) -> tuple[sqlite3.Connection | None, sqlite3.Row | None]:
-    """Locate the shard holding `paper_id` and return ``(conn, row)``.
-
-    A paper lives in exactly one shard (home = its primary-category parent), so
-    we probe shards in turn and stop at the first hit, returning ``(None, None)``
-    when no shard has it. `with_body` pulls `html_content` too (the content
-    route needs the body; the detail route only reports `has_html`, so it skips
-    the multi-MB column).
-    """
-    cols = f"{_META_COLS}, html_content" if with_body else _META_COLS
-    for conn in shards.values():
-        row = conn.execute(
-            f"SELECT {cols} FROM papers WHERE id = ?", [paper_id]
-        ).fetchone()
-        if row is not None:
-            return conn, row
-    return None, None
 
 
 def _fetch_authors_one(conn: sqlite3.Connection, paper_id: str) -> list[str]:
@@ -206,14 +152,9 @@ def list_papers(
     ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
+    conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> Page[Paper]:
-    """List papers with category / date / author / has_html / FTS filters.
-
-    arxiv is sharded by parent category, so this runs the same filtered query
-    against every present shard, merges the per-shard tops, re-sorts globally,
-    and returns the requested page. `total` is the summed count across shards.
-    """
+    """List papers with category / date / author / has_html / FTS filters."""
     if sort is None:
         sort = "relevance" if q is not None else "submitted_desc"
     if sort == "relevance" and q is None:
@@ -267,7 +208,6 @@ def list_papers(
         params.extend(p)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     order = SORTS[sort]
-    key_expr, reverse = _SORT_KEY[sort]
     select_cols = (
         "papers.id, papers.title, papers.abstract, "
         "papers.primary_category, papers.categories, "
@@ -275,56 +215,28 @@ def list_papers(
         "papers.journal_ref, papers.comments, papers.download_status"
     )
 
-    # Fan out: from each shard take its own count and its top (offset+limit) rows
-    # in the requested order. The global page is a subset of the union of those
-    # per-shard tops, so re-sorting and slicing here yields the correct page.
-    # Each row keeps its 0-based rank within its shard for the relevance merge.
-    fetch_n = offset + limit
-    total = 0
-    collected: list[tuple[str, int, sqlite3.Row]] = []
-    for parent, sconn in shards.items():
-        with translate_table_errors(
-            "arxiv", "arxiv_index_fts.py", f"data/arxiv/shards/{parent}.db"
-        ):
-            total += sconn.execute(
-                f"SELECT COUNT(*) FROM {from_clause} {where}", params
-            ).fetchone()[0]
-            srows = sconn.execute(
-                f"SELECT {select_cols}, {key_expr} AS _sortkey "
-                f"FROM {from_clause} {where} ORDER BY {order} LIMIT ?",
-                [*params, fetch_n],
-            ).fetchall()
-        collected.extend((parent, rank, r) for rank, r in enumerate(srows))
+    with translate_table_errors("arxiv", "arxiv_index_fts.py", "arxiv.db"):
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM {from_clause} {where}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT {select_cols} FROM {from_clause} {where} "
+            f"ORDER BY {order} LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
 
-    if sort == "relevance":
-        # Rank-within-shard first (best of each shard interleaved), bm25 as the
-        # tiebreak. Scale-independent, so no shard dominates on raw bm25.
-        collected.sort(key=lambda t: (t[1], t[2]["_sortkey"]))
-    else:
-        collected.sort(key=lambda t: _merge_sort_key(t[2]), reverse=reverse)
-    page = collected[offset : offset + limit]
-
-    # Authors are joined within the shard each row came from, so group page rows
-    # by shard and batch-fetch per shard. translate_table_errors here gives a 503
-    # with the right hint if a shard predates Phase-3 author normalization;
-    # sql_error_is_user_input=False because malformed SQL would be our bug.
-    ids_by_shard: dict[str, list[str]] = {}
-    for parent, _rank, r in page:
-        ids_by_shard.setdefault(parent, []).append(r["id"])
-    authors_by_paper: dict[str, list[str]] = {}
-    for parent, ids in ids_by_shard.items():
-        with translate_table_errors(
-            "arxiv",
-            "arxiv_normalize_authors.py",
-            f"data/arxiv/shards/{parent}.db",
-            sql_error_is_user_input=False,
-        ):
-            authors_by_paper.update(_fetch_authors_many(shards[parent], ids))
+    # translate_table_errors here gives a 503 with the right hint if the DB
+    # predates Phase-3 author normalization; sql_error_is_user_input=False
+    # because malformed SQL would be our bug.
+    with translate_table_errors(
+        "arxiv",
+        "arxiv_normalize_authors.py",
+        "arxiv.db",
+        sql_error_is_user_input=False,
+    ):
+        authors_by_paper = _fetch_authors_many(conn, [r["id"] for r in rows])
     return Page[Paper](
-        items=[
-            _row_to_paper(r, authors_by_paper.get(r["id"], []))
-            for _parent, _rank, r in page
-        ],
+        items=[_row_to_paper(r, authors_by_paper.get(r["id"], [])) for r in rows],
         total=total,
         limit=limit,
         offset=offset,
@@ -336,7 +248,7 @@ def list_papers(
 @router.get("/papers/{paper_id:path}/content")
 def get_paper_content(
     paper_id: str,
-    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
+    conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> Response:
     """Return the downloaded HTML body for one paper as text/html.
 
@@ -344,7 +256,9 @@ def get_paper_content(
     why. Content lives in the DB column, not on disk — gutenberg's FileResponse
     pattern doesn't apply here.
     """
-    _conn, row = _find_shard(shards, paper_id, with_body=True)
+    row = conn.execute(
+        f"SELECT {_META_COLS}, html_content FROM papers WHERE id = ?", [paper_id]
+    ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
     if row["html_content"] is None:
@@ -355,7 +269,7 @@ def get_paper_content(
 @router.post("/papers/{paper_id:path}/embed", response_model=EmbedResult)
 def embed_paper(
     paper_id: str,
-    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
+    conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> EmbedResult:
     """Embed one arxiv paper into arxiv_rag.db on demand (synchronous).
 
@@ -370,16 +284,11 @@ def embed_paper(
     body and abstract). A 503 means Ollama was unreachable; any existing
     chunks are left untouched.
     """
-    # Find the shard holding this paper, pulling the columns the Doc needs.
-    row = None
-    for sconn in shards.values():
-        row = sconn.execute(
-            "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
-            "FROM papers WHERE id = ?",
-            [paper_id],
-        ).fetchone()
-        if row is not None:
-            break
+    row = conn.execute(
+        "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
+        "FROM papers WHERE id = ?",
+        [paper_id],
+    ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
 
@@ -430,50 +339,26 @@ def embed_paper(
 @router.get("/papers/{paper_id:path}", response_model=Paper)
 def get_paper(
     paper_id: str,
-    shards: dict[str, sqlite3.Connection] = Depends(db.arxiv_shards),
+    conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> Paper:
     """Return one paper by its arxiv id.
 
     `{paper_id:path}` so old-style ids with embedded slashes (e.g.
     `cond-mat/0204015`) match cleanly.
     """
-    conn, row = _find_shard(shards, paper_id)
+    row = conn.execute(
+        f"SELECT {_META_COLS} FROM papers WHERE id = ?", [paper_id]
+    ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
     with translate_table_errors(
         "arxiv",
         "arxiv_normalize_authors.py",
-        "data/arxiv/shards/*.db",
+        "arxiv.db",
         sql_error_is_user_input=False,
     ):
         authors = _fetch_authors_one(conn, paper_id)
     return _row_to_paper(row, authors)
-
-
-def _drop_archived_chunk_hits(hits: list[Hit]) -> list[Hit]:
-    """Drop chunk hits whose paper lives in an archived (offline) shard.
-
-    The global `arxiv_rag.db` keeps chunks for every paper ever embedded,
-    including ones whose category shard was later zstd-archived out of
-    `data/arxiv/shards/`. Those papers can't be served (no live shard holds
-    them), so a hit pointing at one is a dangling reference — drop it.
-
-    A paper is "live" iff its id is present in some on-disk shard. We probe the
-    shards once for the page's distinct doc_ids (a single `IN (...)` per shard)
-    and keep only hits whose paper turned up, preserving RRF order.
-    """
-    if not hits:
-        return hits
-    shards = db.arxiv_shards()
-    doc_ids = list({h.doc_id for h in hits})
-    placeholders = ",".join("?" * len(doc_ids))
-    live: set[str] = set()
-    for sconn in shards.values():
-        rows = sconn.execute(
-            f"SELECT id FROM papers WHERE id IN ({placeholders})", doc_ids
-        ).fetchall()
-        live.update(r["id"] for r in rows)
-    return [h for h in hits if h.doc_id in live]
 
 
 add_chunks_route(
@@ -481,7 +366,6 @@ add_chunks_route(
     opener=db.arxiv_rag,
     source_name="arxiv",
     indexer_script="arxiv_index_rag.py",
-    hit_filter=_drop_archived_chunk_hits,
 )
 add_doc_chunks_route(
     router,

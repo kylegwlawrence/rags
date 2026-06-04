@@ -24,11 +24,9 @@ from rag.schema import connect_rag
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 
-# arxiv is sharded by parent category: data/arxiv/shards/{parent}.db. The live
-# set is whatever shard files are present in that folder (see `arxiv_shards()`),
-# so unarchiving a category is just dropping its {parent}.db into shards/ and
-# restarting.
-ARXIV_SHARDS_DIR = DATA_DIR / "arxiv" / "shards"
+# arxiv lives as one monolithic DB outside the repo (the ~80 GB file is too big
+# for /home), so it is an absolute path rather than DATA_DIR-relative.
+ARXIV_DB = Path("/datasets/arxiv/arxiv.db")
 ARXIV_RAG_DB = DATA_DIR / "arxiv" / "arxiv_rag.db"
 FACTBOOK_DB = DATA_DIR / "factbook" / "factbook.db"
 FACTBOOK_RAG_DB = DATA_DIR / "factbook" / "factbook_rag.db"
@@ -146,7 +144,7 @@ def _connect_ro_with_vec(path: Path) -> sqlite3.Connection:
     return conn
 
 
-_arxiv_shards: dict[str, sqlite3.Connection] | None = None
+_arxiv: sqlite3.Connection | None = None
 _federal_register: sqlite3.Connection | None = None
 _federal_register_rag: sqlite3.Connection | None = None
 _github: sqlite3.Connection | None = None
@@ -178,32 +176,17 @@ _pdfs: sqlite3.Connection | None = None
 _pdfs_rag: sqlite3.Connection | None = None
 
 
-def arxiv_shards() -> dict[str, sqlite3.Connection]:
-    """Cached read-only connections to the per-category shards in data/arxiv/shards/.
+def arxiv() -> sqlite3.Connection:
+    """Cached read-only connection to the monolithic arxiv.db.
 
-    Keyed by parent-category name (the file stem, e.g. ``"math"``). The set is
-    discovered once at first call from ``data/arxiv/shards/*.db``, so unarchiving
-    a category is just decompressing its ``{parent}.db`` into that folder and
-    restarting uvicorn — no code change.
-
-    Each shard carries its own ``papers`` / ``authors`` / ``paper_authors``
-    tables and its own ``papers_fts`` index (built by
-    ``arxiv_index_fts.py --db data/arxiv/shards/{parent}.db``). A paper lives in
-    exactly one shard, so the router fans a query out across shards and merges.
-
-    Raises 503 if no shard files are present (e.g. all categories archived).
+    Holds the ``papers`` / ``authors`` / ``paper_authors`` tables and the
+    ``papers_fts`` index (built by ``arxiv_index_fts.py``). The file lives
+    outside the repo at ``ARXIV_DB`` because it is too large for /home.
     """
-    global _arxiv_shards
-    if _arxiv_shards is None:
-        paths = sorted(ARXIV_SHARDS_DIR.glob("*.db"))
-        if not paths:
-            raise HTTPException(
-                status_code=503,
-                detail="no arxiv category shards found in data/arxiv/shards/ "
-                "(all archived?) — decompress at least one {parent}.db there",
-            )
-        _arxiv_shards = {p.stem: _connect_ro(p) for p in paths}
-    return _arxiv_shards
+    global _arxiv
+    if _arxiv is None:
+        _arxiv = _connect_ro(ARXIV_DB)
+    return _arxiv
 
 
 def arxiv_rag() -> sqlite3.Connection:
