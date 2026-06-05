@@ -53,6 +53,27 @@ _NAV_SECTIONS = frozenset({
 })
 
 
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+
+
+def normalize_category(name: str) -> str:
+    """Normalize a category name to its canonical MediaWiki form.
+
+    Applied both when building the page_categories table and when matching an
+    incoming ``?category=`` query, so the two always agree. MediaWiki treats
+    category titles as equal under these rules: underscores equal spaces, the
+    first letter is case-insensitive, surrounding whitespace is ignored. Any
+    sort-key suffix after a ``|`` should already be stripped by the caller.
+
+    Returns "" for an empty/whitespace-only name.
+    """
+    name = name.replace("_", " ")
+    name = _WHITESPACE_RUN_RE.sub(" ", name).strip()
+    if not name:
+        return ""
+    return name[0].upper() + name[1:]
+
+
 def is_redirect(wikitext: str) -> bool:
     """Return True if this article is a #REDIRECT stub."""
     return bool(_REDIRECT_RE.match(wikitext or ""))

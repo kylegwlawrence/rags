@@ -7,13 +7,13 @@ from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
-from api.models import Article, EmbedResult, Page
+from api.models import Article, CategorySummary, EmbedResult, Page
 from rag import Doc
 from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION
 from rag.embed_one import embed_doc
 from rag.profiles import SIMPLEWIKI as _PROFILE
-from rag.wikitext import redirect_target, wikitext_to_markdown
+from rag.wikitext import normalize_category, redirect_target, wikitext_to_markdown
 
 router = APIRouter(prefix="/simplewiki", tags=["simplewiki"])
 
@@ -152,6 +152,16 @@ def list_articles(
         0,
         description="MediaWiki namespace id (0 = main article namespace, the default).",
     ),
+    category: str | None = Query(
+        None,
+        description=(
+            "Exact-match filter: only articles belonging to this category "
+            "(normalized name, e.g. 'Living people'). Backed by the "
+            "page_categories table from simplewiki_index_categories.py. "
+            "Combine with q/title to search within a category. See "
+            "/simplewiki/categories for available names."
+        ),
+    ),
     embedded: bool | None = Query(
         None,
         description=(
@@ -181,6 +191,18 @@ def list_articles(
     if title is not None:
         clauses.append("articles.title LIKE ?")
         params.append(f"%{title}%")
+    if category is not None:
+        # Normalize the query the same way the table was built so casing /
+        # underscores / whitespace don't cause spurious misses (e.g.
+        # "living_people" matches the stored "Living people").
+        # IN-subquery over page_categories (indexed on category), same shape as
+        # the FTS filter: resolve the page_id allowlist first, then probe
+        # articles by (namespace, page_id).
+        clauses.append(
+            "articles.page_id IN "
+            "(SELECT page_id FROM page_categories WHERE category = ?)"
+        )
+        params.append(normalize_category(category))
     if embedded is not None:
         # docs_meta stores stringified page_ids; cast to int since
         # articles.page_id is INTEGER.
@@ -210,6 +232,55 @@ def list_articles(
 
     return Page[Article](
         items=[_row_to_article(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/categories", response_model=Page[CategorySummary])
+def list_categories(
+    q: str | None = Query(
+        None,
+        description="Substring filter on category name (case-insensitive LIKE).",
+    ),
+    sort: str = Query(
+        "count",
+        pattern="^(count|name)$",
+        description="Order by article count (desc, default) or category name (asc).",
+    ),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    conn: sqlite3.Connection = Depends(db.simplewiki),
+) -> Page[CategorySummary]:
+    """List distinct categories with their article counts.
+
+    Built from the page_categories table (simplewiki_index_categories.py). A 503
+    here means that table hasn't been built yet. Use a name from this list to
+    drive the `?category=` filter on /simplewiki/articles.
+    """
+    clauses: list[str] = []
+    params: list = []
+    if q is not None:
+        clauses.append("category LIKE ?")
+        params.append(f"%{q}%")
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    order = "ORDER BY n DESC, category ASC" if sort == "count" else "ORDER BY category ASC"
+
+    with translate_table_errors(
+        "simplewiki", "simplewiki_index_categories.py", "data/simplewiki/simplewiki.db"
+    ):
+        total = conn.execute(
+            f"SELECT COUNT(DISTINCT category) FROM page_categories {where}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT category, COUNT(*) AS n FROM page_categories {where} "
+            f"GROUP BY category {order} LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+
+    return Page[CategorySummary](
+        items=[CategorySummary(category=r["category"], article_count=r["n"]) for r in rows],
         total=total,
         limit=limit,
         offset=offset,
@@ -253,6 +324,18 @@ def get_article(
     # `head` is the first 300 chars — enough for redirect_target / _resolve_redirect
     # to recognise and follow a #REDIRECT stub without loading the full body.
     article.redirect_to = _resolve_redirect(conn, row["head"] or "", page_id)
+    # Attach this article's categories. The table is optional, so a missing
+    # page_categories just yields no categories rather than failing the lookup.
+    try:
+        article.categories = [
+            r["category"]
+            for r in conn.execute(
+                "SELECT category FROM page_categories WHERE page_id = ? ORDER BY category",
+                [page_id],
+            )
+        ]
+    except sqlite3.OperationalError:
+        article.categories = []
     return article
 
 

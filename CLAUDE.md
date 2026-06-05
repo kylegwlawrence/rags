@@ -28,6 +28,7 @@ python scripts/gutenberg/gutenberg_index_rag.py     # data/gutenberg/gutenberg_r
 python scripts/gutenberg/gutenberg_download.py      # rsync from ibiblio; --language (default en), --dry-run
 python scripts/simplewiki/simplewiki_download.py
 python scripts/simplewiki/simplewiki_parse.py
+python scripts/simplewiki/simplewiki_index_categories.py  # page_categories table (--db; also enwiki.db)
 python scripts/simplewiki/simplewiki_index_rag.py   # data/simplewiki/simplewiki_rag.db
 python scripts/python_docs/python_docs_download.py
 python scripts/python_docs/python_docs_index_fts.py
@@ -86,7 +87,7 @@ Routes below list the path family + query params; deep behavior is under "Script
 - `/openalex/works` (`?q=`, `?year=`, `?cited_by_min/max=`, `?venue=`, `?domain=`, `?field=`, `?author=`, `?embedded=`, `?sort=`), `/{short_id}`, `/openalex/chunks` — `?domain=`/`?field=` exact-match the work's primary-topic hierarchy.
 - `/factbook/countries`, `/{id}`, `/factbook/chunks`
 - `/gutenberg/texts`, `/{id}`, `/{id}/content`, `/gutenberg/chunks`
-- `/simplewiki/articles`, `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks`
+- `/simplewiki/articles` (`?q=`, `?title=`, `?namespace=`, `?category=`, `?embedded=`), `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks` + `/simplewiki/categories` — `?category=` exact-matches a normalized category name (the query is normalized the same way the table was built, so casing/underscores/whitespace don't matter); detail `/{page_id}` carries the article's `categories`. `/categories` lists distinct categories with article counts (`?q=` name substring, `?sort=count|name`). Both back onto the `page_categories` table from `simplewiki_index_categories.py` (503 if not built).
 - `/enwiki/articles` (`?q=`, `?title=`, `?namespace=`), `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/enwiki/chunks` + `/enwiki/doc-chunks` — served from the local `enwiki.db` (`api/db.py` `enwiki()`); plain SQL, same shape as simplewiki. `?q=` is FTS5 (trigram) over title **and** body. Embedding (and so `/chunks`) is on-demand only (no batch indexer).
 - `/pydocs/docs`, `/{doc_path:path}`, `/{doc_path:path}/content`, `/pydocs/chunks`
 - `/sec_edgar/filings` (`?downloaded=`), `/{accession_number}`, `/{accession_number}/content`, `POST /{accession_number}/download`, `/sec_edgar/chunks` — list surfaces metadata-only filings whose body isn't fetched; `?downloaded=` narrows to fetched/unfetched.
@@ -132,6 +133,7 @@ arxiv is a **single monolithic DB** at `/datasets/arxiv/arxiv.db` — it lives o
 **simplewiki**
 - `simplewiki_download.py` — Downloads + SHA-1 verifies dump to `data/simplewiki/dumps/`.
 - `simplewiki_parse.py` — Streams bz2 XML → `simplewiki.db`. Flags: `--all-namespaces`. Restart after.
+- `simplewiki_index_categories.py` — Builds the `page_categories(page_id, category)` table by scanning each namespace-0 article's wikitext for `[[Category:...]]` links, normalizing names via `rag.wikitext.normalize_category` (drops the sort-key suffix after `|`, underscores→spaces, trims, uppercases first letter). Indexed on `category`. Idempotent (drops + rebuilds). Reusable across wiki DBs with the same schema — pass `--db data/enwiki/enwiki.db` for enwiki. Restart after.
 - `simplewiki_index_rag.py` — `simplewiki_rag.db`. Default `--limit 100`; full 394k-article corpus ≈ 700 h. Flags: `--chunk-size` (800), `--max-chunk-size` (1000), `--overlap` (100). **Keep chunk settings in sync with `api/routers/simplewiki.py` `_CHUNK_SIZE`/`_MAX_CHUNK_SIZE`/`_OVERLAP`.** Restart after.
 
 **enwiki** (local DB)

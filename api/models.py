@@ -55,6 +55,16 @@ class Article(BaseModel):
     # Final target page_id when this article is a #REDIRECT stub, else None.
     # Only the detail endpoint resolves this; list rows leave it None.
     redirect_to: int | None = None
+    # Normalized category names from page_categories. Only the detail endpoint
+    # fills this; list rows leave it empty to avoid a per-row category query.
+    categories: list[str] = []
+
+
+class CategorySummary(BaseModel):
+    """One category from `simplewiki.page_categories` with its article count."""
+
+    category: str
+    article_count: int
 
 
 class Paper(BaseModel):
