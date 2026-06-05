@@ -87,7 +87,7 @@ Routes below list the path family + query params; deep behavior is under "Script
 - `/factbook/countries`, `/{id}`, `/factbook/chunks`
 - `/gutenberg/texts`, `/{id}`, `/{id}/content`, `/gutenberg/chunks`
 - `/simplewiki/articles`, `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/simplewiki/chunks`
-- `/enwiki/articles`, `/{page_id}`, `/{page_id}/content` — thin proxy to `enwiki_remote_server.py` on `raspberrypi6`. Read-only; no `/chunks` / embed in v1.
+- `/enwiki/articles` (`?q=`, `?title=`, `?namespace=`), `/{page_id}`, `/{page_id}/content`, `POST /{page_id}/embed`, `/enwiki/chunks` + `/enwiki/doc-chunks` — served from the local `enwiki.db` (`api/db.py` `enwiki()`); plain SQL, same shape as simplewiki. `?q=` is FTS5 (trigram) over title **and** body. Embedding (and so `/chunks`) is on-demand only (no batch indexer).
 - `/pydocs/docs`, `/{doc_path:path}`, `/{doc_path:path}/content`, `/pydocs/chunks`
 - `/sec_edgar/filings` (`?downloaded=`), `/{accession_number}`, `/{accession_number}/content`, `POST /{accession_number}/download`, `/sec_edgar/chunks` — list surfaces metadata-only filings whose body isn't fetched; `?downloaded=` narrows to fetched/unfetched.
 - `/worldbank/indicators` (`?q=`, `?topic=`), `/indicators/{id}`, `/indicators/{id}/values` (`?country=`, `?year=`), `/worldbank/countries`, `/countries/{id}/data` (`?topic=`, `?year=`)
@@ -134,12 +134,12 @@ arxiv is a **single monolithic DB** at `/datasets/arxiv/arxiv.db` — it lives o
 - `simplewiki_parse.py` — Streams bz2 XML → `simplewiki.db`. Flags: `--all-namespaces`. Restart after.
 - `simplewiki_index_rag.py` — `simplewiki_rag.db`. Default `--limit 100`; full 394k-article corpus ≈ 700 h. Flags: `--chunk-size` (800), `--max-chunk-size` (1000), `--overlap` (100). **Keep chunk settings in sync with `api/routers/simplewiki.py` `_CHUNK_SIZE`/`_MAX_CHUNK_SIZE`/`_OVERLAP`.** Restart after.
 
-**enwiki** (remote, no local DB)
-- The 76 GB `enwiki.db` is too big to keep on this machine, so it lives on `raspberrypi6:~/datasets/enwiki/enwiki.db`. A tiny FastAPI service serves it over Tailscale; the local API just proxies.
-- `scripts/enwiki/enwiki_remote_server.py` — pi-side service. Routes: `GET /health`, `GET /articles` (with `?q=` title-FTS, `?title=` substring, `?namespace=`), `GET /articles/{page_id}`, `GET /articles/{page_id}/content`. Opens the DB read-only via `mode=ro`. No auth. Env: `ENWIKI_DB_PATH` overrides the default DB path.
-- `api/routers/enwiki.py` — local proxy. Reads `ENWIKI_REMOTE_URL` (set in `.env`, e.g. `http://raspberrypi6:8765`). Returns 503 when unset or the pi is unreachable. The `/health` probe skips this source when the env var is unset so a developer without Tailscale doesn't see a red probe.
-- Deploy update: `scp scripts/enwiki/enwiki_remote_server.py raspberrypi6:~/datasets/enwiki_remote_server.py`. The pi runs uvicorn in a tmux session named `enwiki`: `tmux new-session -d -s enwiki 'cd ~/datasets && exec .venv/bin/uvicorn enwiki_remote_server:app --host 0.0.0.0 --port 8765 2>&1 | tee /tmp/enwiki.log'`. Restart by killing the tmux session and re-running the same command.
-- FTS5 `articles_fts` already exists on the pi DB but indexes **title only** (trigram tokeniser → 3+ char terms). Body FTS / RAG are deferred.
+**enwiki** (local DB)
+- The full ~263 GB `enwiki.db` lives locally at `data/enwiki/enwiki.db` (~19M rows across all namespaces; `article_count` cached in `db_metadata`) and is served **directly** — the API opens it read-only via `api/db.py` `enwiki()` (path constant `ENWIKI_DB`). It was previously proxied to a FastAPI service on `raspberrypi6` because the file was too big to keep here; that proxy (and the `ENWIKI_REMOTE_URL` env var) is gone.
+- `api/routers/enwiki.py` — plain-SQL router, same pattern as simplewiki. `?q=` is FTS5 over `articles_fts`, which is a **trigram** index (3+ char terms) over **both `title` and `text_content`** — full-body search (use `title:term` to restrict to the title). `?title=` substring, `?namespace=` (default 0).
+- `articles_fts` is **prebuilt and shipped inside `enwiki.db`** — there is no local download/parse/index script in this repo, so a missing table means restore the DB file.
+- **No batch RAG indexer.** Semantic search is on-demand: `POST /enwiki/articles/{page_id}/embed` renders one namespace-0 article's wikitext to markdown and embeds it into `data/enwiki/enwiki_rag.db` (live-embed pattern, ENWIKI profile == SIMPLEWIKI). `enwiki_rag.db` starts empty (schema only) so the read-only opener and `/health` stay green before the first embed.
+- `scripts/enwiki/enwiki_remote_server.py` — the old pi-side service. Retained for reference / fallback only; not used by the local API anymore.
 
 **python_docs**
 - `python_docs_download.py` — Python docs text archive. Pass a pinned `--python-version` (e.g. `3.13`); the generic `3` redirect doesn't work for `.tar.bz2`.

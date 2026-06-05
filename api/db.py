@@ -37,6 +37,9 @@ GUTENBERG_RAG_DB = DATA_DIR / "gutenberg" / "gutenberg_rag.db"
 GUTENBERG_ROOT = DATA_DIR / "gutenberg"
 SIMPLEWIKI_DB = DATA_DIR / "simplewiki" / "simplewiki.db"
 SIMPLEWIKI_RAG_DB = DATA_DIR / "simplewiki" / "simplewiki_rag.db"
+# The full ~263 GB enwiki.db now lives locally and is served directly (no
+# remote proxy); it carries an `articles_fts` over title + body.
+ENWIKI_DB = DATA_DIR / "enwiki" / "enwiki.db"
 ENWIKI_RAG_DB = DATA_DIR / "enwiki" / "enwiki_rag.db"
 PYDOCS_DB = DATA_DIR / "pydocs" / "python_docs.db"
 PYDOCS_RAG_DB = DATA_DIR / "pydocs" / "python_docs_rag.db"
@@ -158,6 +161,7 @@ _gutenberg: sqlite3.Connection | None = None
 _gutenberg_rag: sqlite3.Connection | None = None
 _simplewiki: sqlite3.Connection | None = None
 _simplewiki_rag: sqlite3.Connection | None = None
+_enwiki: sqlite3.Connection | None = None
 _enwiki_rag: sqlite3.Connection | None = None
 _pydocs: sqlite3.Connection | None = None
 _pydocs_rag: sqlite3.Connection | None = None
@@ -259,6 +263,19 @@ def simplewiki_rag() -> sqlite3.Connection:
     if _simplewiki_rag is None:
         _simplewiki_rag = _connect_ro_with_vec(SIMPLEWIKI_RAG_DB)
     return _simplewiki_rag
+
+
+def enwiki() -> sqlite3.Connection:
+    """Cached read-only connection to the local enwiki.db.
+
+    Holds the ``articles`` table and the ``articles_fts`` index (title + body,
+    trigram tokeniser). The full ~263 GB DB is served directly from disk; the
+    old remote-proxy path to raspberrypi6 is gone.
+    """
+    global _enwiki
+    if _enwiki is None:
+        _enwiki = _connect_ro(ENWIKI_DB)
+    return _enwiki
 
 
 def enwiki_rag() -> sqlite3.Connection:

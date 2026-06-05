@@ -146,12 +146,14 @@ A single monolithic DB at `/datasets/arxiv/arxiv.db` (kept outside the repo — 
   `POST /{page_id}/embed`.
 - `GET /simplewiki/chunks`.
 
-### English Wikipedia `/enwiki` (remote proxy)
-The 76 GB DB lives on `raspberrypi6`; a tiny FastAPI service serves it over
-Tailscale and this app proxies. Read-only, title-only FTS, no `/chunks` in v1.
-Returns 503 when `ENWIKI_REMOTE_URL` is unset or the Pi is unreachable.
-- `GET /articles` — `?q=` (title FTS), `?title=` (substring), `?namespace=`;
-  `GET /{page_id}` / `/{page_id}/content`.
+### English Wikipedia `/enwiki`
+The full ~263 GB DB lives locally at `data/enwiki/enwiki.db` and is served
+directly. `?q=` is FTS5 (trigram) over title **and** body. Embedding is
+on-demand only (no batch indexer).
+- `GET /articles` — `?q=` (title+body FTS), `?title=` (substring),
+  `?namespace=`; `GET /{page_id}` / `/{page_id}/content` /
+  `POST /{page_id}/embed`.
+- `GET /enwiki/chunks`.
 
 ### Python docs `/pydocs`
 - `GET /docs` — `?q=`; `GET /{doc_path:path}` / `/{doc_path:path}/content`.
