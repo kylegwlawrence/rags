@@ -13,6 +13,7 @@ from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION
 from rag.embed_one import embed_doc
 from rag.profiles import SIMPLEWIKI as _PROFILE
+from rag.wiki_render import convert_wikitext_to_html
 from rag.wikitext import normalize_category, redirect_target, wikitext_to_markdown
 
 router = APIRouter(prefix="/simplewiki", tags=["simplewiki"])
@@ -288,6 +289,35 @@ def list_categories(
     )
 
 
+@router.get("/resolve", response_model=Article)
+def resolve_title(
+    title: str = Query(
+        ..., description="Exact article title to resolve to a page (for [[wikilink]] navigation)."
+    ),
+    conn: sqlite3.Connection = Depends(db.simplewiki),
+) -> Article:
+    """Resolve a namespace-0 article title to its row (fast, index-backed).
+
+    Powers in-app [[wikilink]] navigation: the frontend resolves the link's
+    title here, then opens the returned page_id (redirects are followed by the
+    normal detail path). `INDEXED BY idx_articles_title` forces the title index
+    so this is a probe, not a scan, regardless of the planner's stats.
+    """
+    sql = (
+        f"SELECT {_META_COLS} FROM articles INDEXED BY idx_articles_title "
+        "WHERE title = ? AND namespace = 0 LIMIT 1"
+    )
+    name = title.replace("_", " ").strip()
+    row = conn.execute(sql, [name]).fetchone()
+    if row is None and name:
+        capitalised = name[0].upper() + name[1:]
+        if capitalised != name:
+            row = conn.execute(sql, [capitalised]).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no article titled {title!r}")
+    return _row_to_article(row)
+
+
 # Content route comes BEFORE the detail route — same reason as the arxiv
 # router: route matching is order-sensitive and both share the {page_id}
 # prefix.
@@ -296,17 +326,17 @@ def get_article_content(
     page_id: int,
     conn: sqlite3.Connection = Depends(db.simplewiki),
 ) -> Response:
-    """Return the raw wikitext body for one article as text/plain.
+    """Render one article's wikitext to HTML for the Content view.
 
-    No server-side rendering — wikitext is the canonical representation. The
-    /simplewiki/chunks endpoint already exposes the markdown-rendered body
-    in chunked form for retrieval; downstream tools that want HTML can pipe
-    this through their own renderer.
+    `rag.wiki_render.convert_wikitext_to_html` handles the messy-wikitext
+    cases (infoboxes, templates, refs, tables, math) and falls back to escaped
+    plaintext on its own if a render bug is hit, so this never 500s.
     """
     row = _lookup_with_body(conn, page_id)
     if not row["text_content"]:
         raise HTTPException(status_code=404, detail="article has no body")
-    return Response(content=row["text_content"], media_type="text/plain; charset=utf-8")
+    html = convert_wikitext_to_html(row["text_content"])
+    return Response(content=html, media_type="text/html; charset=utf-8")
 
 
 @router.get("/articles/{page_id}", response_model=Article)

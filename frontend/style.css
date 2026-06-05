@@ -1501,3 +1501,176 @@ select.filter-bar__input {
   border-radius: var(--radius-md);
   font-size: 13px;
 }
+
+/* =====================================================================
+   Rendered wiki article content (simplewiki / enwiki).
+   Ported from local_wikipedia's article styling, scoped under .prose and
+   remapped to this app's design tokens. Styles the HTML that
+   rag.wiki_render.convert_wikitext_to_html emits: wikilinks, references,
+   wikitables, infoboxes, hatnotes, indicators, galleries, math.
+   ===================================================================== */
+
+/* Internal [[wikilink]] anchors carry no href — they navigate via JS. */
+.prose a.wikilink {
+  color: var(--accent-tonal-text);
+  cursor: pointer;
+  text-decoration: none;
+}
+.prose a.wikilink:hover { text-decoration: underline; }
+
+/* Reference list ({{Reflist}} / <references>) */
+.prose ol.references {
+  font-size: 0.88em;
+  color: var(--text-secondary);
+  padding-left: 1.8rem;
+}
+.prose ol.references li { margin-bottom: 0.25rem; }
+.prose ol.references a { color: var(--accent-tonal-text); }
+
+/* Wikitables */
+.prose table.wikitable {
+  border: 1px solid #a2a9b1;
+  color: var(--text-primary);
+}
+.prose table.wikitable > caption {
+  font-weight: bold;
+  padding: 0.5rem;
+  text-align: left;
+}
+.prose table.wikitable th,
+.prose table.wikitable td {
+  border: 1px solid #a2a9b1;
+  padding: 0.5rem 0.7rem;
+  vertical-align: top;
+}
+.prose table.wikitable > thead > tr > th {
+  background-color: #eaecf0;
+  font-weight: bold;
+  text-align: center;
+  border-bottom: 2px solid #a2a9b1;
+}
+.prose table.wikitable > tbody > tr:nth-child(even) { background-color: #f8f9fa; }
+.prose table.wikitable > tbody > tr:nth-child(odd)  { background-color: #fff; }
+
+.prose table td.align-left,   .prose table th.align-left   { text-align: left; }
+.prose table td.align-center, .prose table th.align-center { text-align: center; }
+.prose table td.align-right,  .prose table th.align-right  { text-align: right; }
+
+/* Infobox (floats right of the article body) */
+.prose table.infobox {
+  float: right;
+  clear: right;
+  margin: 0 0 1rem 1.5rem;
+  border: 1px solid #a2a9b1;
+  background: #f8f9fa;
+  font-size: 0.88em;
+  line-height: 1.4;
+  width: 280px;
+}
+.prose table.infobox caption {
+  background: #cee0f2;
+  font-weight: bold;
+  padding: 0.4rem 0.6rem;
+  text-align: center;
+}
+.prose table.infobox th,
+.prose table.infobox td {
+  border: 1px solid #a2a9b1;
+  padding: 0.3rem 0.5rem;
+  vertical-align: top;
+}
+.prose table.infobox th {
+  background: #eaecf0;
+  font-weight: normal;
+  text-align: left;
+  width: 42%;
+}
+.prose table.infobox td { background: #fff; }
+.prose table.infobox ul.infobox-list { margin: 0; padding-left: 1rem; }
+.prose table.infobox ul.infobox-list li { margin: 0; }
+
+@media (max-width: 500px) {
+  .prose table.infobox { float: none; width: 100%; margin: 0 0 1rem; }
+}
+
+/* Hatnotes ({{main}}, {{about}}, {{see also}}) */
+.prose .hatnote {
+  font-style: italic;
+  padding: 0.3rem 0.6rem 0.3rem 1.4rem;
+  margin: 0.4rem 0 0.8rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.92em;
+}
+.prose .hatnote a { color: var(--accent-tonal-text); font-style: normal; }
+
+/* Status indicators ({{yes}}, {{no}}, {{partial}}, …) — theme-agnostic */
+.prose .indicator-yes, .prose .indicator-no, .prose .indicator-partial,
+.prose .indicator-unknown, .prose .indicator-na, .prose .indicator-increase,
+.prose .indicator-decrease, .prose .indicator-steady {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 3px;
+  font-weight: 500;
+  font-size: 0.9em;
+  text-align: center;
+  min-width: 3em;
+}
+.prose .indicator-yes      { background: rgb(154,255,154); color: #000; }
+.prose .indicator-no       { background: rgb(255,153,153); color: #000; }
+.prose .indicator-partial  { background: rgb(255,204,153); color: #000; }
+.prose .indicator-unknown  { background: #ececec; color: #676767; }
+.prose .indicator-na       { background: #ececec; color: #868686; }
+.prose .indicator-increase { background: #d4edda; color: #155724; }
+.prose .indicator-decrease { background: #f8d7da; color: #721c24; }
+.prose .indicator-steady   { background: #e2e3e5; color: #383d41; }
+
+/* Gallery captions / plainlist */
+.prose ul.gallery-captions {
+  list-style: disc;
+  padding-left: 1.4rem;
+  margin: 0.5rem 0;
+  font-size: 0.9em;
+  color: var(--text-secondary);
+}
+.prose ul.plainlist { list-style: none; padding-left: 0; margin: 0.4rem 0; }
+.prose ul.plainlist li { padding: 0.1rem 0; }
+
+/* Math / coords / footnote markers / poems / unsupported blocks */
+.prose .texhtml { font-family: "Cambria Math", "Latin Modern Math", "STIX Two Math", serif; }
+.prose .math-display { margin: 0.6rem 0; overflow-x: auto; }
+.prose .geo { white-space: nowrap; }
+.prose sup.sfn { color: var(--accent-tonal-text); }
+.prose .poem { margin: 0.6rem 0; padding-left: 1rem; }
+.prose .unsupported-content {
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  font-style: italic;
+  margin: 0.4rem 0;
+}
+
+/* Dark mode: swap the wikitable/infobox light colors for app surfaces */
+[data-theme="dark"] .prose table.wikitable,
+[data-theme="dark"] .prose table.wikitable th,
+[data-theme="dark"] .prose table.wikitable td {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background: var(--surface);
+}
+[data-theme="dark"] .prose table.wikitable > thead > tr > th { background: var(--surface-hover); }
+[data-theme="dark"] .prose table.wikitable > tbody > tr:nth-child(even) { background: var(--surface-hover); }
+[data-theme="dark"] .prose table.wikitable > tbody > tr:nth-child(odd)  { background: var(--surface); }
+[data-theme="dark"] .prose table.infobox,
+[data-theme="dark"] .prose table.infobox td {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+[data-theme="dark"] .prose table.infobox caption {
+  background: var(--accent-tonal);
+  color: var(--accent-tonal-text);
+}
+[data-theme="dark"] .prose table.infobox th {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}

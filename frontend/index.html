@@ -20,6 +20,9 @@
        window.renderMathInElement before the deferred ES module runs. -->
   <script src="/ui/vendor/marked.min.js"></script>
   <script src="/ui/vendor/katex/katex.min.js"></script>
+  <!-- mhchem must load after katex and before auto-render so it can register
+       the \ce{} / \pu{} chemistry macros used by rendered wiki articles. -->
+  <script src="/ui/vendor/katex/contrib/mhchem.min.js"></script>
   <script src="/ui/vendor/katex/contrib/auto-render.min.js"></script>
   <script type="module" src="/ui/main.js"></script>
 </head>

@@ -28,6 +28,7 @@ from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION
 from rag.embed_one import embed_doc
 from rag.profiles import ENWIKI as _PROFILE
+from rag.wiki_render import convert_wikitext_to_html
 from rag.wikitext import wikitext_to_markdown
 
 router = APIRouter(prefix="/enwiki", tags=["enwiki"])
@@ -111,6 +112,34 @@ def list_articles(
     )
 
 
+@router.get("/resolve", response_model=Article)
+def resolve_title(
+    title: str = Query(
+        ..., description="Exact article title to resolve to a page (for [[wikilink]] navigation)."
+    ),
+    conn: sqlite3.Connection = Depends(db.enwiki),
+) -> Article:
+    """Resolve a namespace-0 article title to its row (fast, index-backed).
+
+    Powers in-app [[wikilink]] navigation. `INDEXED BY idx_articles_title`
+    forces the title index — without it the planner picks idx_articles_namespace
+    and scans ~19M rows (namespace 0 is almost the whole corpus).
+    """
+    sql = (
+        f"SELECT {_META_COLS} FROM articles INDEXED BY idx_articles_title "
+        "WHERE title = ? AND namespace = 0 LIMIT 1"
+    )
+    name = title.replace("_", " ").strip()
+    row = conn.execute(sql, [name]).fetchone()
+    if row is None and name:
+        capitalised = name[0].upper() + name[1:]
+        if capitalised != name:
+            row = conn.execute(sql, [capitalised]).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no article titled {title!r}")
+    return _row_to_article(row)
+
+
 # Content route comes BEFORE the detail route — FastAPI matches paths in
 # registration order and both share the `/articles/{page_id}` prefix.
 @router.get("/articles/{page_id}/content")
@@ -118,7 +147,11 @@ def get_article_content(
     page_id: int,
     conn: sqlite3.Connection = Depends(db.enwiki),
 ) -> Response:
-    """Return the raw wikitext body for one article as text/plain."""
+    """Render one article's wikitext to HTML for the Content view.
+
+    Same display renderer as simplewiki (`rag.wiki_render`); it falls back to
+    escaped plaintext internally on a render error, so this never 500s.
+    """
     row = conn.execute(
         "SELECT text_content FROM articles WHERE page_id = ?", [page_id]
     ).fetchone()
@@ -126,7 +159,8 @@ def get_article_content(
         raise HTTPException(status_code=404, detail=f"article {page_id} not found")
     if not row["text_content"]:
         raise HTTPException(status_code=404, detail="article has no body")
-    return Response(content=row["text_content"], media_type="text/plain; charset=utf-8")
+    html = convert_wikitext_to_html(row["text_content"])
+    return Response(content=html, media_type="text/html; charset=utf-8")
 
 
 @router.post("/articles/{page_id}/embed", response_model=EmbedResult)

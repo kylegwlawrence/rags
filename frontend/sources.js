@@ -143,6 +143,7 @@ export const SOURCES = {
     subtitle: 'Wikipedia articles',
     listEndpoint: '/simplewiki/articles',
     detailEndpoint: (id) => `/simplewiki/articles/${id}`,
+    resolveEndpoint: (title) => `/simplewiki/resolve?title=${encodeURIComponent(title)}`,
     contentEndpoint: (id) => `/simplewiki/articles/${id}/content`,
     chunksEndpoint: '/simplewiki/chunks',
     docChunksEndpoint: '/simplewiki/doc-chunks',
@@ -155,7 +156,7 @@ export const SOURCES = {
     titleField: 'title',
     subtitle_fn: () => '',
     meta_fn: (item) => item.text_bytes ? `${Math.round(item.text_bytes / 1024)} KB` : '',
-    contentType: 'text',
+    contentType: 'html',
     metaFields: [
       { label: 'Page ID',   value: (d) => d.page_id },
       { label: 'Namespace', value: (d) => d.namespace },
@@ -181,6 +182,7 @@ export const SOURCES = {
     subtitle: 'Full English Wikipedia',
     listEndpoint: '/enwiki/articles',
     detailEndpoint: (id) => `/enwiki/articles/${id}`,
+    resolveEndpoint: (title) => `/enwiki/resolve?title=${encodeURIComponent(title)}`,
     contentEndpoint: (id) => `/enwiki/articles/${id}/content`,
     chunksEndpoint: '/enwiki/chunks',
     docChunksEndpoint: '/enwiki/doc-chunks',
@@ -189,7 +191,7 @@ export const SOURCES = {
     titleField: 'title',
     subtitle_fn: () => '',
     meta_fn: (item) => item.text_bytes ? `${Math.round(item.text_bytes / 1024)} KB` : '',
-    contentType: 'text',
+    contentType: 'html',
     metaFields: [
       { label: 'Page ID',   value: (d) => d.page_id },
       { label: 'Namespace', value: (d) => d.namespace },

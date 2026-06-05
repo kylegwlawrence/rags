@@ -77,6 +77,25 @@ export async function getDoc(source, id) {
 }
 
 /**
+ * Resolve an article title to its detail row (wiki sources only). Returns the
+ * matched doc, or null when the source has no resolver or the title isn't found.
+ *
+ * @param {object} source - must define resolveEndpoint(title)
+ * @param {string} title
+ * @returns {Promise<object|null>}
+ */
+export async function resolveTitle(source, title) {
+  if (!source.resolveEndpoint) return null;
+  try {
+    const resp = await _fetch(source.resolveEndpoint(title));
+    return resp.json();
+  } catch (e) {
+    if (e && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
  * @param {object} source
  * @param {string|number} id
  * @returns {Promise<string>} - raw HTML or plain text

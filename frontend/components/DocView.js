@@ -1,5 +1,5 @@
 import { defineComponent, ref, computed, onMounted, nextTick, watch, inject } from '/ui/vendor/vue.esm-browser.js';
-import { getDoc, getContent, getDocChunks, embedDoc, downloadDoc, getValues } from '/ui/api.js';
+import { getDoc, getContent, getDocChunks, embedDoc, downloadDoc, getValues, resolveTitle } from '/ui/api.js';
 
 export default defineComponent({
   name: 'DocView',
@@ -16,6 +16,9 @@ export default defineComponent({
     // detail endpoint, then navigate there. `resolving` hides the (raw stub)
     // content while that check is in flight so the redirect text never flashes.
     const followRedirect = inject('followRedirect', null);
+    // Used by the rendered-wiki Content view: clicking an internal [[wikilink]]
+    // resolves its title to a page_id and opens that article in-app.
+    const openDocById = inject('openDocById', null);
     const resolving = ref(false);
 
     // The browse list emits a slim list row (e.g. factbook CountrySummary =
@@ -160,6 +163,7 @@ export default defineComponent({
     const contentEl = ref(null);
     const MATH_RE = /\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g;
     const KATEX_DELIMITERS = [
+      { left: '$$', right: '$$', display: true },   // wiki display math (rag.wiki_render)
       { left: '\\[', right: '\\]', display: true },
       { left: '\\(', right: '\\)', display: false },
     ];
@@ -199,6 +203,49 @@ export default defineComponent({
       await nextTick();
       typesetMath();
     });
+
+    // Server-rendered wiki HTML (contentType 'html') carries KaTeX delimiters
+    // (\(…\) inline, $$…$$ display, \ce{…} chemistry) inline in the body, so
+    // typeset the live DOM once it's swapped in / the Content tab is shown.
+    watch([content, activeTab], async () => {
+      if (props.source.contentType !== 'html') return;
+      if (activeTab.value !== 'content' || !content.value) return;
+      await nextTick();
+      typesetMath();
+    });
+
+    // --- In-app wikilink navigation (rendered wiki Content view) ------------
+    // rag.wiki_render emits internal links as
+    //   <a class="wikilink" data-wiki-title="Title" [data-wiki-anchor="Section"]>
+    // with no functional href. Resolve the title to a page_id within the
+    // current source (via the index-backed /resolve endpoint) and open it; a
+    // bare #section link scrolls in place.
+    function scrollToAnchor(anchor) {
+      const el = contentEl.value;
+      if (!el || !anchor) return;
+      const sel = '#' + (window.CSS && CSS.escape ? CSS.escape(anchor) : anchor);
+      const target = el.querySelector(sel);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function onContentClick(e) {
+      const a = e.target.closest && e.target.closest('a.wikilink');
+      if (!a) return;
+      e.preventDefault();
+      const title = a.getAttribute('data-wiki-title') || '';
+      const anchor = a.getAttribute('data-wiki-anchor') || '';
+      if (!title) {            // same-page [[#Section]] link
+        scrollToAnchor(anchor);
+        return;
+      }
+      if (!openDocById) return;
+      try {
+        const target = await resolveTitle(props.source, title);
+        if (target) openDocById(target[props.source.idField]);
+      } catch (err) {
+        console.error('wikilink resolve failed:', err);
+      }
+    }
 
     const profileHtml = computed(() => {
       const data = detail.value && detail.value.data;
@@ -371,6 +418,7 @@ export default defineComponent({
       downloading, downloadError, showDownload, downloadLabel, downloadFiling,
       profileHtml, pdfSrc, contentEl, markdownHtml,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
+      onContentClick,
     };
   },
 
@@ -497,7 +545,7 @@ export default defineComponent({
         <div v-else-if="contentError" class="doc-content-state doc-content-state--error">
           {{ contentError }}
         </div>
-        <div v-else-if="source.contentType === 'html' && content" class="prose" v-html="content" />
+        <div v-else-if="source.contentType === 'html' && content" ref="contentEl" class="prose" v-html="content" @click="onContentClick" />
         <div v-else-if="source.contentType === 'markdown' && content" ref="contentEl" class="prose" v-html="markdownHtml" />
         <pre v-else-if="source.contentType === 'text' && content" class="content-pre">{{ content }}</pre>
         <iframe

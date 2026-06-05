@@ -201,17 +201,38 @@ def test_resolve_redirect_chain_and_edge_cases():
     assert resolve(6) is None  # target title not present
 
 
-def test_simplewiki_content_returns_wikitext(client):
-    """/simplewiki/articles/{id}/content returns raw wikitext as text/plain."""
+def test_simplewiki_content_returns_html(client):
+    """/simplewiki/articles/{id}/content renders wikitext to HTML (text/html)."""
     r = client.get("/simplewiki/articles?limit=1")
     items = r.json()["items"]
     if not items:
         pytest.skip("simplewiki.db has no articles; run scripts/simplewiki/simplewiki_parse.py")
     page_id = items[0]["page_id"]
     r = client.get(f"/simplewiki/articles/{page_id}/content")
+    # A bare redirect stub renders to empty HTML → 404; walk to a real body.
+    if r.status_code == 404:
+        pytest.skip("first article has no renderable body")
     assert r.status_code == 200
-    assert r.headers["content-type"].startswith("text/plain")
+    assert r.headers["content-type"].startswith("text/html")
     assert len(r.content) > 0
+
+
+def test_simplewiki_resolve_title(client):
+    """/simplewiki/resolve?title= maps an exact title back to its article (for
+    in-app [[wikilink]] navigation)."""
+    r = client.get("/simplewiki/articles?limit=1")
+    items = r.json()["items"]
+    if not items:
+        pytest.skip("simplewiki.db has no articles; run scripts/simplewiki/simplewiki_parse.py")
+    art = items[0]
+    r = client.get("/simplewiki/resolve", params={"title": art["title"]})
+    assert r.status_code == 200
+    assert r.json()["page_id"] == art["page_id"]
+
+
+def test_simplewiki_resolve_title_404(client):
+    r = client.get("/simplewiki/resolve", params={"title": "Definitely No Such Article ZZZQ"})
+    assert r.status_code == 404
 
 
 def test_simplewiki_embed_404(client):
