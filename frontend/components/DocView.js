@@ -62,6 +62,10 @@ export default defineComponent({
     const downloadError = ref(null);
     const downloaded = ref(false);
     const noHtml = ref(false);
+    // For `downloadToDisk` sources (e.g. OpenAlex), the body is saved
+    // server-side for a separate pipeline — there's no Content tab to reveal,
+    // so on success we hold the result here and show a "saved" note instead.
+    const savedToDisk = ref(null);
 
     // True once the open document has body text — either it already had some
     // (the list row's bodyField is set) or we just downloaded it.
@@ -74,8 +78,16 @@ export default defineComponent({
     // Show the download button only for download-capable sources whose open
     // document has no body yet.
     const showDownload = computed(
-      () => !!props.source.downloadEndpoint && !hasBody.value,
+      () => !!props.source.downloadEndpoint && !hasBody.value && !savedToDisk.value,
     );
+
+    // After a `downloadToDisk` save succeeds, a small note replaces the button.
+    const savedToDiskLabel = computed(() => {
+      const r = savedToDisk.value;
+      if (!r) return '';
+      const kb = r.bytes ? ` (${Math.round(r.bytes / 1024)} KB)` : '';
+      return `✓ PDF saved to server${kb}`;
+    });
 
     // Show the embed button when the source has an embed endpoint AND — if the
     // source gates embedding on a fetched body (`embedNeedsBody`, e.g.
@@ -353,10 +365,16 @@ export default defineComponent({
       downloadError.value = null;
       try {
         const result = await downloadDoc(props.source, props.doc[props.source.idField]);
-        if (result && result.status === 'no_html') {
-          // arXiv has no HTML version for this paper — terminal, not an error.
-          // Surface a clear note and stop offering a retry.
+        // Terminal "nothing to fetch" statuses: arXiv's no_html, OpenAlex's
+        // no_pdf. Surface a clear note and stop offering a retry.
+        const noneStatuses = props.source.downloadNoneStatuses || ['no_html'];
+        if (result && noneStatuses.includes(result.status)) {
           noHtml.value = true;
+          return;
+        }
+        if (props.source.downloadToDisk) {
+          // Saved server-side for a separate pipeline — no Content to reveal.
+          savedToDisk.value = result;
           return;
         }
         downloaded.value = true;
@@ -437,7 +455,7 @@ export default defineComponent({
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel, showEmbed,
       downloading, downloadError, noHtml, showDownload, downloadLabel,
-      downloadTitle, downloadBody,
+      downloadTitle, downloadBody, savedToDisk, savedToDiskLabel,
       profileHtml, pdfSrc, contentEl, markdownHtml,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
       onContentClick,
@@ -471,6 +489,11 @@ export default defineComponent({
           :title="downloadTitle"
           @click="downloadBody"
         >{{ downloadLabel }}</button>
+        <span
+          v-if="savedToDisk"
+          class="doc-view__download doc-view__download--none"
+          :title="savedToDiskLabel"
+        >{{ savedToDiskLabel }}</span>
       </div>
 
       <div class="doc-view__tabs">

@@ -202,6 +202,21 @@ class ArxivDownloadResult(BaseModel):
     html_chars: int
 
 
+class OpenAlexDownloadResult(BaseModel):
+    """Result of an on-demand OpenAlex PDF download (`POST .../{id}/download`).
+
+    OpenAlex stores no body text — only open-access links — so the work's PDF
+    (`pdf_url` / `oa_url`) is saved to `data/openalex/bodies/` for the `pdfs`
+    ingest pipeline, not into openalex.db. `status` is 'fetched' (PDF saved) or
+    'no_pdf' (no accessible open-access PDF — terminal). A transient fetch
+    failure raises 502 instead. `bytes` is the saved PDF size (0 when 'no_pdf').
+    """
+
+    short_id: str
+    status: str
+    bytes: int
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

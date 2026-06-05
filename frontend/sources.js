@@ -73,6 +73,18 @@ export const SOURCES = {
     chunksEndpoint: '/openalex/chunks',
     docChunksEndpoint: '/openalex/doc-chunks',
     embedEndpoint: (id) => `/openalex/works/${id}/embed`,
+    // "Download PDF" fetches the work's open-access PDF (pdf_url / oa_url) and
+    // saves it on the server for the `pdfs` ingest pipeline. `downloadToDisk`
+    // tells DocView the body is saved server-side (no Content tab to reveal —
+    // openalex contentType is 'none'), so it shows a "saved" note instead of
+    // loading content. `downloadNoneStatuses` is the terminal "nothing to fetch"
+    // set (vs arxiv's default ['no_html']).
+    downloadEndpoint: (id) => `/openalex/works/${id}/download`,
+    downloadToDisk: true,
+    downloadLabel: 'Download PDF',
+    downloadTitle: 'Fetch the open-access PDF and save it on the server for ingestion',
+    downloadNoneLabel: 'No open-access PDF',
+    downloadNoneStatuses: ['no_pdf'],
     idField: 'id',
     titleField: 'title',
     subtitle_fn: (item) => (item.authors || []).slice(0, 3).join(', '),

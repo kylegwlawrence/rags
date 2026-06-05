@@ -1,3 +1,4 @@
+import os
 import re
 import sqlite3
 from typing import Literal
@@ -9,13 +10,42 @@ from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
-from api.models import EmbedResult, Page, Work
+from api.models import EmbedResult, OpenAlexDownloadResult, Page, Work
 from rag import Doc, content_hash
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
 from rag.embed_one import embed_doc
+from rag.openalex_fetch import (
+    NoPdfAvailable,
+    ensure_body_status_table,
+    fetch_work_pdf,
+    record_body_status,
+)
 from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/openalex", tags=["openalex"])
+
+# Where on-demand PDF downloads land — the same drop folder the bulk
+# `openalex_fetch_bodies.py` writes to, feeding the `pdfs` ingest pipeline.
+OPENALEX_BODIES_DIR = db.DATA_DIR / "openalex" / "bodies"
+
+# Contact address advertised to publisher hosts when fetching a PDF on demand.
+# Resolved at request time (not import) so an unset env var doesn't break the
+# rest of the router. Mirrors arxiv's `_require_arxiv_user_agent`.
+_EMAIL_ENV = "DATASETS_EMAIL"
+
+
+def _require_user_agent() -> str:
+    email = os.environ.get(_EMAIL_ENV)
+    if not email:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{_EMAIL_ENV} env var is not set; a contact mailto: is required "
+                "in the User-Agent for polite PDF fetches. Set it (e.g. via .env) "
+                "and restart uvicorn."
+            ),
+        )
+    return f"datasets/0.1 (mailto:{email})"
 
 # Live-embed chunk settings come from `rag.profiles.DEFAULT` — the same
 # profile `scripts/openalex/openalex_index_rag.py` uses, so a work embedded
@@ -313,6 +343,77 @@ def embed_work(
         chunk_count=chunk_count,
         embedded=chunk_count > 0,
     )
+
+
+@router.post("/works/{short_id}/download", response_model=OpenAlexDownloadResult)
+def download_work_pdf(
+    short_id: str,
+    conn: sqlite3.Connection = Depends(db.openalex),
+) -> OpenAlexDownloadResult:
+    """Fetch one work's open-access PDF to disk on demand (synchronous).
+
+    `openalex_fetch_bodies.py` downloads PDFs in bulk; this does the same for a
+    single work from the detail view — the work's `pdf_url` / `oa_url` via the
+    shared `rag.openalex_fetch.fetch_work_pdf` — saving the PDF under
+    `data/openalex/bodies/{short_id}.pdf` for the `pdfs` ingest pipeline.
+    OpenAlex stores no body text, so unlike the arXiv / SEC download routes this
+    writes nothing back into openalex.db's content; it only records the outcome
+    in the shared `body_status` table (so a later bulk run skips it).
+
+    Returns `status='fetched'` (PDF saved) or `status='no_pdf'` (no accessible
+    open-access PDF — terminal, returned with 200 so the UI can show a clear
+    note). A transient fetch failure (network / persistent 5xx) returns 502 and
+    records an `error` row so a later attempt can retry. A work already fetched
+    (PDF still on disk) returns immediately without re-downloading.
+
+    The `body_status` write goes through a fresh read-write connection; the
+    cached read-only connection sees the committed row on its next query (same
+    in-place pattern as the arXiv / SEC download routes), so no restart needed.
+    """
+    if not SHORT_ID_RE.match(short_id):
+        raise HTTPException(status_code=400, detail="id must look like W123456")
+    full = OPENALEX_PREFIX + short_id
+    row = conn.execute(
+        "SELECT pdf_url, oa_url, is_oa FROM works WHERE id = ?", [full]
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"work {short_id!r} not found")
+
+    dest = OPENALEX_BODIES_DIR / f"{short_id}.pdf"
+    rw = db.connect_rw(db.OPENALEX_DB)
+    try:
+        ensure_body_status_table(rw)
+        prior = rw.execute(
+            "SELECT status, bytes FROM body_status WHERE work_id = ?", [short_id]
+        ).fetchone()
+        if prior and prior["status"] == "fetched" and dest.exists():
+            # Idempotent: already on disk, don't re-hit the publisher.
+            return OpenAlexDownloadResult(
+                short_id=short_id, status="fetched", bytes=prior["bytes"] or 0
+            )
+
+        try:
+            nbytes, src = fetch_work_pdf(
+                [row["pdf_url"], row["oa_url"]],
+                dest,
+                user_agent=_require_user_agent(),
+            )
+        except NoPdfAvailable as e:
+            record_body_status(rw, short_id, "no_pdf", note=str(e))
+            return OpenAlexDownloadResult(short_id=short_id, status="no_pdf", bytes=0)
+        except httpx.HTTPError as e:
+            record_body_status(rw, short_id, "error", note=str(e))
+            raise HTTPException(
+                status_code=502, detail=f"could not fetch PDF: {e}"
+            ) from e
+
+        record_body_status(
+            rw, short_id, "fetched", pdf_path=f"{short_id}.pdf",
+            nbytes=nbytes, source_url=src,
+        )
+        return OpenAlexDownloadResult(short_id=short_id, status="fetched", bytes=nbytes)
+    finally:
+        rw.close()
 
 
 add_chunks_route(
