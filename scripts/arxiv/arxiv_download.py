@@ -87,6 +87,7 @@ def select_pending(
     *,
     force: bool,
     from_date: str | None = None,
+    oai_date: str | None = None,
     categories: list[str] | None = None,
     category_prefixes: list[str] | None = None,
 ) -> list[str]:
@@ -97,7 +98,12 @@ def select_pending(
     ``download_status`` or ``download_status='retry'``.
 
     ``from_date`` filters to papers with ``submitted_date >= from_date`` (ISO
-    date string, e.g. ``'2023-01-01'``). ``categories`` filters to papers
+    date string, e.g. ``'2023-01-01'``). ``oai_date`` filters to papers whose
+    ``oai_datestamp`` falls on exactly that date (ISO ``'YYYY-MM-DD'``) — this
+    is the field the OAI-PMH ingest scopes on, so it selects precisely one
+    harvest day's papers (the daily DAG passes yesterday). It differs from
+    ``submitted_date`` by the arXiv announce lag, so the two are not
+    interchangeable. ``categories`` filters to papers
     whose ``categories`` field contains at least one of the given tokens
     (e.g. ``['cs.LG', 'stat.ML']``). ``category_prefixes`` matches any
     category token that starts with the given prefix followed by a dot
@@ -115,6 +121,12 @@ def select_pending(
     if from_date:
         conditions.append("submitted_date >= ?")
         params.append(from_date)
+
+    if oai_date:
+        # Match the OAI-PMH harvest day exactly. oai_datestamp is stored as a
+        # date string but substr() guards against a stored timestamp form.
+        conditions.append("substr(oai_datestamp, 1, 10) = ?")
+        params.append(oai_date)
 
     cat_clauses: list[str] = []
 
@@ -238,6 +250,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Only process papers submitted on or after this date.",
     )
     parser.add_argument(
+        "--oai-date",
+        dest="oai_date",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help=(
+            "Only process papers whose OAI-PMH datestamp is exactly this date "
+            "— the field the ingest scopes on. Use to limit a run to one "
+            "harvest day (the daily DAG passes yesterday)."
+        ),
+    )
+    parser.add_argument(
         "--category",
         dest="categories",
         action="append",
@@ -281,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
         args.limit,
         force=args.force,
         from_date=args.from_date,
+        oai_date=args.oai_date,
         categories=args.categories,
         category_prefixes=args.category_prefixes,
     )
