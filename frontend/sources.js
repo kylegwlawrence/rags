@@ -166,6 +166,7 @@ export const SOURCES = {
     filters: [
       { key: 'q',     label: 'Search',        type: 'text', placeholder: 'Title FTS5 search…' },
       { key: 'title', label: 'Title contains', type: 'text', placeholder: 'substring' },
+      { key: 'category', label: 'Category', type: 'text', placeholder: 'substring, e.g. actor' },
       { key: 'embedded', label: 'Embedding', type: 'radio', options: [
         { value: '',      label: 'All' },
         { value: 'true',  label: 'Embedded only' },

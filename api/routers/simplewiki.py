@@ -155,11 +155,12 @@ def list_articles(
     category: str | None = Query(
         None,
         description=(
-            "Exact-match filter: only articles belonging to this category "
-            "(normalized name, e.g. 'Living people'). Backed by the "
-            "page_categories table from simplewiki_index_categories.py. "
-            "Combine with q/title to search within a category. See "
-            "/simplewiki/categories for available names."
+            "Substring filter (case-insensitive): articles in any category "
+            "whose name contains this text (e.g. 'actor' matches 'American "
+            "movie actors'). Underscores/whitespace are normalized like the "
+            "stored names. Backed by the page_categories table from "
+            "simplewiki_index_categories.py. Combine with q/title to search "
+            "within categories. See /simplewiki/categories for the full list."
         ),
     ),
     embedded: bool | None = Query(
@@ -192,17 +193,17 @@ def list_articles(
         clauses.append("articles.title LIKE ?")
         params.append(f"%{title}%")
     if category is not None:
-        # Normalize the query the same way the table was built so casing /
-        # underscores / whitespace don't cause spurious misses (e.g.
-        # "living_people" matches the stored "Living people").
-        # IN-subquery over page_categories (indexed on category), same shape as
-        # the FTS filter: resolve the page_id allowlist first, then probe
-        # articles by (namespace, page_id).
+        # Substring match: normalize the query the same way the stored names
+        # were built (underscores->spaces, trim) so formatting doesn't cause
+        # misses, then LIKE %…% (case-insensitive for ASCII). IN-subquery over
+        # page_categories resolves the page_id allowlist first, then probes
+        # articles by (namespace, page_id); IN dedupes pages hit via multiple
+        # matching categories.
         clauses.append(
             "articles.page_id IN "
-            "(SELECT page_id FROM page_categories WHERE category = ?)"
+            "(SELECT page_id FROM page_categories WHERE category LIKE ?)"
         )
-        params.append(normalize_category(category))
+        params.append(f"%{normalize_category(category)}%")
     if embedded is not None:
         # docs_meta stores stringified page_ids; cast to int since
         # articles.page_id is INTEGER.
