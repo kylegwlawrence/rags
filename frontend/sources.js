@@ -21,6 +21,9 @@ export const SOURCES = {
     contentType: 'html',
     metaFields: [
       { label: 'ID',         value: (d) => d.id },
+      // arxiv OAI metadata carries no URL; derive the abs page from the id.
+      { label: 'URL',        value: (d) => `https://arxiv.org/abs/${d.id}`,
+                             href:  (d) => `https://arxiv.org/abs/${d.id}` },
       { label: 'Authors',    value: (d) => (d.authors || []).join(', ') },
       { label: 'Submitted',  value: (d) => d.submitted_date },
       { label: 'Updated',    value: (d) => d.updated_date },
@@ -72,7 +75,8 @@ export const SOURCES = {
       { label: 'Venue',     value: (d) => d.venue },
       { label: 'Citations', value: (d) => d.cited_by_count },
       { label: 'DOI',       value: (d) => d.doi },
-      { label: 'URL',       value: (d) => d.openalex_url },
+      { label: 'URL',       value: (d) => d.openalex_url,
+                            href:  (d) => d.openalex_url },
     ],
     filters: [
       { key: 'q',           label: 'Search',       type: 'text',   placeholder: 'FTS5 query…' },

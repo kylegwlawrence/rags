@@ -921,6 +921,15 @@ select.filter-bar__input {
   padding: 2px 0;
 }
 
+.meta-grid__val a {
+  color: var(--accent-tonal-text);
+  text-decoration: none;
+}
+
+.meta-grid__val a:hover {
+  text-decoration: underline;
+}
+
 /* ===== Nested-data profile (factbook etc.) ============================== */
 
 .profile-wrap {

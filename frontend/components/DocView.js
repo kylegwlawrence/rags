@@ -475,7 +475,15 @@ export default defineComponent({
         >
           <template v-for="f in visibleMetaFields()" :key="f.label">
             <dt class="meta-grid__key">{{ f.label }}</dt>
-            <dd class="meta-grid__val">{{ f.value(doc) }}</dd>
+            <dd class="meta-grid__val">
+              <a
+                v-if="f.href"
+                :href="f.href(doc)"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ f.value(doc) }}</a>
+              <template v-else>{{ f.value(doc) }}</template>
+            </dd>
           </template>
         </dl>
 
