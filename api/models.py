@@ -188,6 +188,20 @@ class DownloadResult(BaseModel):
     body_chars: int
 
 
+class ArxivDownloadResult(BaseModel):
+    """Result of an on-demand paper HTML download (`POST .../{id}/download`).
+
+    `status` is the row's new `download_status`: 'downloaded' when the LaTeXML
+    HTML was stored, 'no_html' when arXiv has no HTML version for the paper.
+    `html_chars` is the stored body length (0 when status='no_html'). A transient
+    fetch failure raises 502 instead and leaves the row's status unchanged.
+    """
+
+    paper_id: str
+    status: str
+    html_chars: int
+
+
 class Chunk(BaseModel):
     """One retrieved chunk from a `<source>_rag.db` hybrid search."""
 

@@ -27,7 +27,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
+import httpx  # noqa: F401  (kept so tests can monkeypatch the shared httpx module)
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_DIR.parent.parent
@@ -36,11 +36,12 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from arxiv_oai import ARXIV_EMAIL  # noqa: E402
 
-HTML_URL_TEMPLATE = "https://arxiv.org/html/{arxiv_id}"
+# Fetch logic lives in rag/arxiv_fetch.py so the API's on-demand download
+# route shares it (same split as rag/sec_filing.py). Re-exported here for
+# back-compat with callers/tests that import them from this module.
+from rag.arxiv_fetch import HTML_URL_TEMPLATE, fetch_paper_html  # noqa: E402
+
 USER_AGENT = f"datasets/0.1 (mailto:{ARXIV_EMAIL})"
-REQUEST_TIMEOUT = 60.0
-MAX_ATTEMPTS = 3
-BACKOFF_BASE = 5.0
 MIN_REQUEST_INTERVAL = 3.0
 DEFAULT_DB = REPO_ROOT / "data" / "arxiv" / "arxiv.db"
 
@@ -49,36 +50,12 @@ def fetch_html(
     arxiv_id: str,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str | None:
-    """Fetch the LaTeXML HTML body for ``arxiv_id``.
+    """Fetch the LaTeXML HTML body for ``arxiv_id`` with this script's User-Agent.
 
-    Returns the body text on 200, ``None`` on 404 (no HTML version available),
-    or raises ``httpx.HTTPStatusError`` after ``MAX_ATTEMPTS`` failed retries
-    on persistent 429 / 5xx. Honors ``Retry-After`` on 429 / 5xx between
-    attempts.
+    Thin wrapper over ``rag.arxiv_fetch.fetch_paper_html``: returns the body on
+    200, ``None`` on 404, or raises on persistent 429 / 5xx.
     """
-    url = HTML_URL_TEMPLATE.format(arxiv_id=arxiv_id)
-    headers = {"User-Agent": USER_AGENT}
-    for attempt in range(MAX_ATTEMPTS):
-        with httpx.Client(
-            timeout=REQUEST_TIMEOUT, headers=headers, follow_redirects=True
-        ) as client:
-            resp = client.get(url)
-        if resp.status_code == 404:
-            return None
-        if resp.status_code == 429 or 500 <= resp.status_code < 600:
-            if attempt == MAX_ATTEMPTS - 1:
-                resp.raise_for_status()
-            retry_after = resp.headers.get("Retry-After", "")
-            wait = (
-                float(retry_after)
-                if retry_after and retry_after.replace(".", "", 1).isdigit()
-                else BACKOFF_BASE * (attempt + 1)
-            )
-            sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp.text
-    raise RuntimeError("unreachable: MAX_ATTEMPTS exhausted without raising")
+    return fetch_paper_html(arxiv_id, user_agent=USER_AGENT, sleep=sleep)
 
 
 def select_pending(

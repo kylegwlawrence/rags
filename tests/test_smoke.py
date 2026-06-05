@@ -471,6 +471,114 @@ def test_arxiv_papers_503_when_paper_authors_missing(client, tmp_path):
         ro_conn.close()
 
 
+def test_arxiv_download_paper(client, tmp_path, monkeypatch):
+    """POST /arxiv/papers/{id}/download fetches HTML on demand and stores it.
+
+    Exercises every outcome against a temp arxiv.db with the arXiv fetch helper
+    faked: missing DATASETS_EMAIL (503), a fresh fetch (downloaded), a 404 from
+    arXiv (no_html, still a 200 so the UI can show a clear note), an
+    already-downloaded paper (idempotent — no re-fetch), and a missing paper
+    (404). Mirrors the dependency-override + temp-DB pattern used above.
+    """
+    import sqlite3
+
+    import api.routers.arxiv as arxiv_router
+
+    db_path = tmp_path / "arxiv.db"
+    c = sqlite3.connect(db_path)
+    c.executescript(
+        """
+        CREATE TABLE papers (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            abstract TEXT,
+            html_content TEXT,
+            download_status TEXT,
+            downloaded_at TEXT
+        );
+        """
+    )
+    c.executemany(
+        "INSERT INTO papers (id, title, html_content) VALUES (?, ?, ?)",
+        [
+            ("2401.0001", "Fresh", None),
+            ("2401.0002", "NoHtml", None),
+            ("2401.0003", "Already", "<html>cached</html>"),
+        ],
+    )
+    c.commit()
+    c.close()
+
+    ro_conn = sqlite3.connect(
+        f"file:{db_path}?mode=ro", uri=True, check_same_thread=False
+    )
+    ro_conn.row_factory = sqlite3.Row
+
+    # Fake the arXiv fetch: 2401.0001 has HTML, 2401.0002 has none (404 -> None).
+    # `calls` lets us assert the idempotent path never re-hits arXiv.
+    calls: list[str] = []
+
+    def fake_fetch(arxiv_id, *, user_agent, sleep=None):
+        calls.append(arxiv_id)
+        return "<html>body</html>" if arxiv_id == "2401.0001" else None
+
+    monkeypatch.setattr(arxiv_router, "fetch_paper_html", fake_fetch)
+    # The route writes via db.connect_rw(db.ARXIV_DB); point it at the temp file.
+    monkeypatch.setattr(db, "ARXIV_DB", db_path)
+
+    app.dependency_overrides[db.arxiv] = lambda: ro_conn
+    try:
+        # Without DATASETS_EMAIL the route can't identify to arXiv -> 503, and
+        # the fetch is never reached.
+        monkeypatch.delenv("DATASETS_EMAIL", raising=False)
+        r = client.post("/arxiv/papers/2401.0001/download")
+        assert r.status_code == 503, r.text
+        assert not calls
+
+        monkeypatch.setenv("DATASETS_EMAIL", "test@example.com")
+
+        # Fresh download: body fetched and stored.
+        r = client.post("/arxiv/papers/2401.0001/download")
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "paper_id": "2401.0001",
+            "status": "downloaded",
+            "html_chars": len("<html>body</html>"),
+        }
+
+        # No HTML version: 404 from arXiv -> recorded as no_html, 200 response.
+        r = client.post("/arxiv/papers/2401.0002/download")
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "paper_id": "2401.0002",
+            "status": "no_html",
+            "html_chars": 0,
+        }
+
+        # Already downloaded: idempotent, must not re-hit arXiv.
+        r = client.post("/arxiv/papers/2401.0003/download")
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "downloaded"
+        assert "2401.0003" not in calls
+
+        # Missing paper -> 404.
+        r = client.post("/arxiv/papers/9999.9999/download")
+        assert r.status_code == 404, r.text
+    finally:
+        app.dependency_overrides.pop(db.arxiv, None)
+        ro_conn.close()
+
+    # The writes landed on the file (verify via a fresh connection).
+    check = sqlite3.connect(db_path)
+    status = dict(check.execute("SELECT id, download_status FROM papers").fetchall())
+    html = dict(check.execute("SELECT id, html_content FROM papers").fetchall())
+    check.close()
+    assert status["2401.0001"] == "downloaded"
+    assert html["2401.0001"] == "<html>body</html>"
+    assert status["2401.0002"] == "no_html"
+    assert html["2401.0002"] is None
+
+
 # ---------------------------------------------------------------------------
 # /<source>/chunks — parametrized across every RAG source.
 # ---------------------------------------------------------------------------

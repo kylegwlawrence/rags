@@ -53,11 +53,15 @@ export default defineComponent({
     const embedError = ref(null);
 
     // On-demand body download state (only for sources with a downloadEndpoint,
-    // e.g. SEC EDGAR). `downloaded` flips true after a successful fetch so the
-    // button hides and the freshly-stored body can be loaded into Content.
+    // e.g. SEC EDGAR filings, arxiv paper HTML). `downloaded` flips true after a
+    // successful fetch so the button hides and the freshly-stored body can be
+    // loaded into Content. `noHtml` is the arxiv-specific terminal case: arXiv
+    // has no HTML version for the paper, so the button shows a clear note
+    // instead of inviting a pointless retry.
     const downloading = ref(false);
     const downloadError = ref(null);
     const downloaded = ref(false);
+    const noHtml = ref(false);
 
     // True once the open document has body text — either it already had some
     // (the list row's bodyField is set) or we just downloaded it.
@@ -73,20 +77,31 @@ export default defineComponent({
       () => !!props.source.downloadEndpoint && !hasBody.value,
     );
 
-    // Show the embed button when the source has an embed endpoint AND — if a
-    // bodyField gates the source (sec_edgar) — the body has actually been
-    // downloaded. Embedding without a body would create zero or junk chunks,
-    // so the button stays hidden until the download path completes.
+    // Show the embed button when the source has an embed endpoint AND — if the
+    // source gates embedding on a fetched body (`embedNeedsBody`, e.g.
+    // sec_edgar) — that body has actually been downloaded. Embedding a filing
+    // with no body would create zero or junk chunks, so its button stays hidden
+    // until the download completes. arxiv has no such gate: it embeds from the
+    // abstract when no HTML is present, so its embed button always shows.
     const showEmbed = computed(() => {
       if (!props.source.embedEndpoint) return false;
-      if (props.source.bodyField) return hasBody.value;
+      if (props.source.embedNeedsBody) return hasBody.value;
       return true;
     });
 
     const downloadLabel = computed(() => {
+      if (noHtml.value) return props.source.downloadNoneLabel || 'Not available';
       if (downloading.value) return 'Downloading…';
       if (downloadError.value) return 'Retry download';
-      return 'Download full filing';
+      return props.source.downloadLabel || 'Download';
+    });
+
+    // Tooltip mirrors the button state: the terminal no-HTML note, the error
+    // text on failure, else the source's configured action description.
+    const downloadTitle = computed(() => {
+      if (noHtml.value) return downloadLabel.value;
+      if (downloadError.value) return downloadError.value;
+      return props.source.downloadTitle || 'Download the full document';
     });
 
     // "Embedded" means we've confirmed (via the doc-chunks fetch) that the RAG
@@ -333,11 +348,17 @@ export default defineComponent({
       }
     }
 
-    async function downloadFiling() {
+    async function downloadBody() {
       downloading.value = true;
       downloadError.value = null;
       try {
-        await downloadDoc(props.source, props.doc[props.source.idField]);
+        const result = await downloadDoc(props.source, props.doc[props.source.idField]);
+        if (result && result.status === 'no_html') {
+          // arXiv has no HTML version for this paper — terminal, not an error.
+          // Surface a clear note and stop offering a retry.
+          noHtml.value = true;
+          return;
+        }
         downloaded.value = true;
         // The body now exists — (re)load the Content tab so it shows up.
         content.value = null;
@@ -415,7 +436,8 @@ export default defineComponent({
       chunks, chunksLoading, chunksError, chunksLoaded,
       expandedChunks,
       embedding, embedError, isEmbedded, embedLabel, showEmbed,
-      downloading, downloadError, showDownload, downloadLabel, downloadFiling,
+      downloading, downloadError, noHtml, showDownload, downloadLabel,
+      downloadTitle, downloadBody,
       profileHtml, pdfSrc, contentEl, markdownHtml,
       visibleMetaFields, openChunksTab, toggleExpand, embedArticle,
       onContentClick,
@@ -441,10 +463,13 @@ export default defineComponent({
         <button
           v-if="showDownload"
           class="doc-view__download"
-          :class="{ 'doc-view__download--error': downloadError && !downloading }"
-          :disabled="downloading"
-          :title="downloadError || 'Download the full filing text from SEC EDGAR'"
-          @click="downloadFiling"
+          :class="{
+            'doc-view__download--error': downloadError && !downloading,
+            'doc-view__download--none': noHtml,
+          }"
+          :disabled="downloading || noHtml"
+          :title="downloadTitle"
+          @click="downloadBody"
         >{{ downloadLabel }}</button>
       </div>
 

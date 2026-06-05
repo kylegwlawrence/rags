@@ -75,7 +75,7 @@ uvicorn api.main:app --host 0.0.0.0 --port 8002
 
 Port 8002 is fixed (8000/8001 occupied). Tailscale ACLs gate access; no app-level auth. `GET /health` returns per-DB status (503 if any DB broken).
 
-**Reload:** after any indexer/downloader run, restart uvicorn — connections are cached at module load. Exceptions (live write paths, no restart needed): the `/embed` routes (e.g. `POST /simplewiki/articles/{page_id}/embed`, `POST /pdfs/documents/{doc_id}/embed`) write via a fresh RW connection (WAL mode makes the committed rows visible to the cached reader immediately); `POST /sec_edgar/filings/{accession_number}/download` does an in-place single-row UPDATE on `sec_edgar.db` via `db.connect_rw` — the cached read-only connection sees the committed row on its next query even though that DB isn't WAL (same file, no inode swap).
+**Reload:** after any indexer/downloader run, restart uvicorn — connections are cached at module load. Exceptions (live write paths, no restart needed): the `/embed` routes (e.g. `POST /simplewiki/articles/{page_id}/embed`, `POST /pdfs/documents/{doc_id}/embed`) write via a fresh RW connection (WAL mode makes the committed rows visible to the cached reader immediately); `POST /arxiv/papers/{id}/download` and `POST /sec_edgar/filings/{accession_number}/download` each do an in-place single-row UPDATE (on `arxiv.db` / `sec_edgar.db` respectively) via `db.connect_rw` — the cached read-only connection sees the committed row on its next query even though those DBs aren't WAL (same file, no inode swap).
 
 ## API routes
 
@@ -83,7 +83,7 @@ All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total,
 
 Routes below list the path family + query params; deep behavior is under "Script notes". `?embedded=` filters by chunk presence; `sort=relevance` needs `q` (else document/date order).
 
-- `/arxiv/papers`, `/{id:path}`, `/{id:path}/content`, `/arxiv/chunks` — served from the single monolithic `arxiv.db` (`api/db.py` `arxiv()`); plain SQL, no fan-out. `sort=relevance` is `bm25(papers_fts)`; date sorts exact. `/chunks` is the global `arxiv_rag.db`.
+- `/arxiv/papers`, `/{id:path}`, `/{id:path}/content`, `POST /{id:path}/download`, `POST /{id:path}/embed`, `/arxiv/chunks` — served from the single monolithic `arxiv.db` (`api/db.py` `arxiv()`); plain SQL, no fan-out. `sort=relevance` is `bm25(papers_fts)`; date sorts exact. `POST .../download` fetches one paper's LaTeXML HTML from arXiv on demand (shared `rag.arxiv_fetch.fetch_paper_html`, the same fetch `arxiv_download.py` uses in bulk) and writes it onto `html_content`; a 404 records `download_status='no_html'` and returns that status with a 200 (the frontend shows a "no HTML available" note). Needs `DATASETS_EMAIL`. `/chunks` is the global `arxiv_rag.db`.
 - `/openalex/works` (`?q=`, `?year=`, `?cited_by_min/max=`, `?venue=`, `?domain=`, `?field=`, `?author=`, `?embedded=`, `?sort=`), `/{short_id}`, `/openalex/chunks` — `?domain=`/`?field=` exact-match the work's primary-topic hierarchy.
 - `/factbook/countries`, `/{id}`, `/factbook/chunks`
 - `/gutenberg/texts`, `/{id}`, `/{id}/content`, `/gutenberg/chunks`
@@ -100,7 +100,7 @@ Routes below list the path family + query params; deep behavior is under "Script
 - `/geonames/places` (`?q=`, `?country_code=`, `?feature_class=` (repeatable), `?feature_code=` (repeatable), `?min_population=`), `/{geonameid}`, plus `/geonames/feature_classes` and `/geonames/feature_codes` (`?feature_class=` repeatable) dropdown lookups — ~13M features. `?q=` FTS5 over name + country_name + feature_description; default sort population-desc. **No RAG/chunks** (rows are one-line records). Always pass a filter; an open query scans all 13M rows.
 - `/github/readmes` (`?q=`, `?owner=`, `?source_list=`, `?embedded=`, `?sort=`), `/{repo:path}`, `/{repo:path}/content`, `POST /{repo:path}/embed`, `/github/chunks` + `/github/doc-chunks` — one row per repo README from 15 "awesome" lists; `repo` is the `owner/name` slug. Only `status='fetched'` rows served. `?q=` FTS5 over name + body, `?owner=` substring, `?source_list=` the discovering list. `/content` is raw README markdown.
 
-Write paths are the on-demand `/embed` routes (arxiv, openalex, gutenberg, simplewiki, ecfr, eurlex, enwiki, pdfs, openstax, federal_register, github_readmes, sec_edgar → their `<source>_rag.db`) plus `POST /sec_edgar/.../download` (writes a body onto `sec_edgar.db`). Everything else is read-only.
+Write paths are the on-demand `/embed` routes (arxiv, openalex, gutenberg, simplewiki, ecfr, eurlex, enwiki, pdfs, openstax, federal_register, github_readmes, sec_edgar → their `<source>_rag.db`) plus `POST /arxiv/papers/.../download` (writes `html_content` onto `arxiv.db`) and `POST /sec_edgar/.../download` (writes a body onto `sec_edgar.db`). Everything else is read-only.
 
 ## Script notes
 

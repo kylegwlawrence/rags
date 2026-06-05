@@ -14,6 +14,16 @@ export const SOURCES = {
     chunksEndpoint: '/arxiv/chunks',
     docChunksEndpoint: '/arxiv/doc-chunks',
     embedEndpoint: (id) => `/arxiv/papers/${id}/embed`,
+    // On-demand HTML fetch: the button pulls arxiv.org/html/{id} for papers
+    // whose body isn't downloaded yet (has_html falsy), mirroring SEC EDGAR.
+    // Unlike SEC, embedding stays available without a body (abstract fallback),
+    // so `bodyField` gates only the download button — embed has no
+    // `embedNeedsBody`. `downloadNoneLabel` shows when arXiv has no HTML version.
+    downloadEndpoint: (id) => `/arxiv/papers/${id}/download`,
+    bodyField: 'has_html',
+    downloadLabel: 'Download full paper',
+    downloadTitle: 'Fetch the full paper HTML from arXiv',
+    downloadNoneLabel: 'No HTML version available',
     idField: 'id',
     titleField: 'title',
     subtitle_fn: (item) => (item.authors || []).slice(0, 3).join(', '),
@@ -516,8 +526,13 @@ export const SOURCES = {
     // "Download full filing" button pulls the body from SEC. The button shows
     // only when the open filing has no body yet (body_chars falsy).
     downloadEndpoint: (id) => `/sec_edgar/filings/${id}/download`,
+    downloadLabel: 'Download full filing',
+    downloadTitle: 'Download the full filing text from SEC EDGAR',
     embedEndpoint: (id) => `/sec_edgar/filings/${id}/embed`,
     bodyField: 'body_chars',
+    // Embedding needs the body first: filings are metadata-only until fetched,
+    // so the embed button stays hidden until the download completes.
+    embedNeedsBody: true,
     idField: 'accession_number',
     titleField: 'company_name',
     subtitle_fn: (item) => item.form_type || '',

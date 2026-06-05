@@ -1,4 +1,6 @@
+import os
 import sqlite3
+from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
@@ -8,8 +10,9 @@ from api import db
 from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
-from api.models import EmbedResult, Page, Paper
+from api.models import ArxivDownloadResult, EmbedResult, Page, Paper
 from rag import Doc, content_hash
+from rag.arxiv_fetch import fetch_paper_html
 from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
 from rag.embed_one import embed_doc
@@ -17,6 +20,26 @@ from rag.html_to_markdown import html_to_markdown
 from rag.profiles import DEFAULT as _PROFILE
 
 router = APIRouter(prefix="/arxiv", tags=["arxiv"])
+
+# Contact address advertised to arXiv when fetching a paper's HTML on demand.
+# arXiv's polite-access policy wants a mailto: in the User-Agent, so this is
+# required — resolved at request time (not import) so an unset env var doesn't
+# break the rest of the router. Mirrors sec_edgar's `_require_sec_email`.
+_ARXIV_EMAIL_ENV = "DATASETS_EMAIL"
+
+
+def _require_arxiv_user_agent() -> str:
+    email = os.environ.get(_ARXIV_EMAIL_ENV)
+    if not email:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{_ARXIV_EMAIL_ENV} env var is not set; arXiv requires a "
+                "contact mailto: in the User-Agent. Set it (e.g. via .env) and "
+                "restart uvicorn."
+            ),
+        )
+    return f"datasets/0.1 (mailto:{email})"
 
 # Live-embed chunk settings match `scripts/arxiv/arxiv_index_rag.py` (both
 # pull from `rag.profiles.DEFAULT` and use `chunk_markdown`), so a paper
@@ -333,6 +356,77 @@ def embed_paper(
         title=doc.title,
         chunk_count=chunk_count,
         embedded=chunk_count > 0,
+    )
+
+
+@router.post("/papers/{paper_id:path}/download", response_model=ArxivDownloadResult)
+def download_paper(
+    paper_id: str,
+    conn: sqlite3.Connection = Depends(db.arxiv),
+) -> ArxivDownloadResult:
+    """Fetch one paper's LaTeXML HTML from arXiv on demand and store it (synchronous).
+
+    `arxiv_download.py` fetches HTML bodies in bulk; this does the same for a
+    single paper from the detail view — `arxiv.org/html/{id}` via the shared
+    `rag.arxiv_fetch.fetch_paper_html` — so the Content tab and `/content` start
+    serving it. The body is written onto `papers.html_content` with
+    `download_status='downloaded'`; a 404 (arXiv has no HTML version for the
+    paper) records `download_status='no_html'` and returns that status with a 200
+    so the UI can show a clear "no HTML available" note instead of an error.
+
+    The write goes through a fresh read-write connection; the cached read-only
+    connection picks up the committed single-row UPDATE on its next query, so no
+    uvicorn restart is needed (same in-place pattern as the SEC download route).
+    A paper already carrying HTML returns immediately without re-fetching. A
+    persistent fetch failure (repeated 429 / 5xx) returns 502 and leaves the
+    row's status unchanged so a later attempt can retry. Building the FTS / RAG
+    indexes over the new body stays a separate batch step (`arxiv_index_fts.py` /
+    `arxiv_index_rag.py`) or the live `/embed` route.
+    """
+    row = conn.execute(
+        "SELECT id, html_content FROM papers WHERE id = ?", [paper_id]
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
+    if row["html_content"]:
+        # Idempotent: already downloaded, don't re-hit arXiv.
+        return ArxivDownloadResult(
+            paper_id=paper_id, status="downloaded", html_chars=len(row["html_content"])
+        )
+
+    try:
+        body = fetch_paper_html(paper_id, user_agent=_require_arxiv_user_agent())
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"could not fetch paper HTML from arXiv: {e}",
+        ) from e
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    status = "no_html" if body is None else "downloaded"
+
+    rw = db.connect_rw(db.ARXIV_DB)
+    try:
+        if body is None:
+            rw.execute(
+                "UPDATE papers SET download_status = 'no_html', downloaded_at = ? "
+                "WHERE id = ?",
+                (now_iso, paper_id),
+            )
+        else:
+            rw.execute(
+                "UPDATE papers SET html_content = ?, download_status = 'downloaded', "
+                "downloaded_at = ? WHERE id = ?",
+                (body, now_iso, paper_id),
+            )
+        rw.commit()
+    finally:
+        rw.close()
+
+    return ArxivDownloadResult(
+        paper_id=paper_id,
+        status=status,
+        html_chars=len(body) if body is not None else 0,
     )
 
 

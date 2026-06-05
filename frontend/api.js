@@ -147,11 +147,13 @@ export async function embedDoc(source, id) {
 /**
  * Download a single document's full body on demand (live, synchronous).
  * Only available for sources whose config defines `downloadEndpoint`
- * (e.g. SEC EDGAR, where filing bodies are fetched from SEC on click).
+ * (SEC EDGAR filing bodies; arxiv paper HTML). The returned object is
+ * source-shaped but always carries a `status` field — SEC: 'fetched';
+ * arxiv: 'downloaded' or 'no_html' (arXiv has no HTML version).
  *
  * @param {object} source
  * @param {string|number} id - the document's primary key
- * @returns {Promise<{accession_number: string, status: string, body_chars: number}>}
+ * @returns {Promise<{status: string, [key: string]: any}>}
  */
 export async function downloadDoc(source, id) {
   const resp = await _fetch(source.downloadEndpoint(id), { method: 'POST' });
