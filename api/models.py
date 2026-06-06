@@ -419,3 +419,29 @@ class EcfrRegulation(BaseModel):
     section: str | None
     heading: str | None
     content_chars: int | None
+
+
+class CanadianLaw(BaseModel):
+    """One row from acts or regulations. Markdown body at /content."""
+
+    id: str
+    type: str
+    title: str | None
+    short_title: str | None = None
+    long_title: str | None = None
+    running_head: str | None = None
+    bill_origin: str | None = None
+    bill_type: str | None = None
+    in_force: str | None = None
+    regulation_type: str | None = None
+    enabling_authority: str | None = None
+    inforce_start_date: str | None = None
+    last_amended_date: str | None = None
+    current_date: str | None = None
+    body_chars: int | None = None
+
+
+class CanadianLawDetail(CanadianLaw):
+    """Canadian law with full Markdown body (detail endpoint only)."""
+
+    body: str | None = None

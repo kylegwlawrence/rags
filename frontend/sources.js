@@ -814,11 +814,69 @@ export const SOURCES = {
       ]},
     ],
   },
+  justice_canada: {
+    key: 'justice_canada',
+    label: 'Justice Canada',
+    subtitle: 'Consolidated federal laws of Canada',
+    listEndpoint: '/justice_canada/laws',
+    detailEndpoint: (id) => `/justice_canada/laws/${id}`,
+    contentEndpoint: (id) => `/justice_canada/laws/${id}/content`,
+    chunksEndpoint: null,
+    idField: 'id',
+    titleField: 'title',
+    subtitle_fn: (item) => {
+      // Show long title as subtitle only when there is also a distinct short title.
+      if (item.short_title && item.long_title && item.short_title !== item.long_title) {
+        return item.long_title;
+      }
+      return '';
+    },
+    meta_fn: (item) => [
+      item.id,
+      item.type === 'regulation' ? (item.regulation_type || '') : '',
+      item.last_amended_date,
+    ].filter(Boolean).join(' · '),
+    contentType: 'markdown',
+    metaFields: [
+      { label: 'ID',                 value: (d) => d.id },
+      { label: 'Type',               value: (d) => d.type === 'act' ? 'Act' : 'Regulation' },
+      { label: 'Short title',        value: (d) => d.short_title || '' },
+      { label: 'Long title',         value: (d) => d.long_title || '' },
+      { label: 'In force',           value: (d) => d.in_force || '' },
+      { label: 'Bill origin',        value: (d) => d.bill_origin || '' },
+      { label: 'Regulation type',    value: (d) => d.regulation_type || '' },
+      { label: 'Enabling authority', value: (d) => d.enabling_authority || '' },
+      { label: 'In force from',      value: (d) => d.inforce_start_date || '' },
+      { label: 'Last amended',       value: (d) => d.last_amended_date || '' },
+      { label: 'Current as of',      value: (d) => d.current_date || '' },
+      { label: 'Body',               value: (d) => d.body_chars ? `${d.body_chars.toLocaleString()} chars` : '' },
+    ],
+    filters: [
+      { key: 'type', label: 'Type', type: 'select', options: [
+        { value: '',             label: 'Acts & regulations' },
+        { value: 'acts',         label: 'Acts only' },
+        { value: 'regulations',  label: 'Regulations only' },
+      ]},
+      { key: 'in_force', label: 'In force', type: 'select', options: [
+        { value: '',    label: 'Any' },
+        { value: 'yes', label: 'Yes' },
+      ]},
+      { key: 'regulation_type', label: 'Reg. type', type: 'select', options: [
+        { value: '',    label: 'Any' },
+        { value: 'SOR', label: 'SOR' },
+        { value: 'SI',  label: 'SI' },
+      ]},
+      { key: 'sort', label: 'Sort', type: 'select', options: [
+        { value: '',       label: 'Newest first' },
+        { value: 'oldest', label: 'Oldest first' },
+      ]},
+    ],
+  },
 };
 
 export const SOURCE_ORDER = [
   'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
   'pydocs', 'openstax', 'factbook', 'worldbank', 'geonames',
   'federal_register', 'github_readmes', 'sec_edgar', 'billstatus', 'eurlex', 'ecfr',
-  'pdfs',
+  'justice_canada', 'pdfs',
 ];

@@ -18,6 +18,7 @@ from api.routers import (  # noqa: E402
     geonames,
     github_readmes,
     gutenberg,
+    justice_canada,
     openalex,
     openstax,
     pdfs,
@@ -45,6 +46,7 @@ app.include_router(eurlex.router)
 app.include_router(ecfr.router)
 app.include_router(openstax.router)
 app.include_router(pdfs.router)
+app.include_router(justice_canada.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 

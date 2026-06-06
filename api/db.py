@@ -47,6 +47,7 @@ BILLSTATUS_DB = DATA_DIR / "billstatus" / "billstatus.db"
 EURLEX_DB = DATA_DIR / "eurlex" / "eurlex.db"
 EURLEX_RAG_DB = DATA_DIR / "eurlex" / "eurlex_rag.db"
 ECFR_DB = DATA_DIR / "ecfr" / "ecfr.db"
+JUSTICE_CANADA_DB = DATA_DIR / "justice_canada" / "justice_canada.db"
 ECFR_RAG_DB = DATA_DIR / "ecfr" / "ecfr_rag.db"
 OPENSTAX_DB = DATA_DIR / "openstax" / "openstax.db"
 OPENSTAX_RAG_DB = DATA_DIR / "openstax" / "openstax_rag.db"
@@ -274,3 +275,8 @@ def pdfs() -> sqlite3.Connection:
 @cache
 def pdfs_rag() -> sqlite3.Connection:
     return _connect_ro_with_vec(PDFS_RAG_DB)
+
+
+@cache
+def justice_canada() -> sqlite3.Connection:
+    return _connect_ro(JUSTICE_CANADA_DB)
