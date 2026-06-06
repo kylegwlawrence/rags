@@ -1,19 +1,3 @@
-"""Read-only routes over the local enwiki SQLite DB.
-
-The full ~263 GB `enwiki.db` now lives on this machine at `data/enwiki/enwiki.db`,
-so these routes query it directly — the same plain-SQL pattern as the simplewiki
-router. (Earlier versions proxied every request to a FastAPI service on
-raspberrypi6 because the DB was too big to keep locally; that proxy is gone.)
-
-The local `articles_fts` index covers both `title` and `text_content`, so `?q=`
-is a full-text match over title *and* body — unlike simplewiki/the old Pi index,
-which were title-only.
-
-The embed button (`POST /articles/{page_id}/embed`) renders the article's
-wikitext to markdown and embeds it into `data/enwiki/enwiki_rag.db` via local
-Ollama. Chunks are served from that local RAG DB.
-"""
-
 import sqlite3
 
 import httpx
@@ -119,12 +103,7 @@ def resolve_title(
     ),
     conn: sqlite3.Connection = Depends(db.enwiki),
 ) -> Article:
-    """Resolve a namespace-0 article title to its row (fast, index-backed).
-
-    Powers in-app [[wikilink]] navigation. `INDEXED BY idx_articles_title`
-    forces the title index — without it the planner picks idx_articles_namespace
-    and scans ~19M rows (namespace 0 is almost the whole corpus).
-    """
+    """Resolve a namespace-0 article title to its row (fast, index-backed)."""
     sql = (
         f"SELECT {_META_COLS} FROM articles INDEXED BY idx_articles_title "
         "WHERE title = ? AND namespace = 0 LIMIT 1"
@@ -147,11 +126,7 @@ def get_article_content(
     page_id: int,
     conn: sqlite3.Connection = Depends(db.enwiki),
 ) -> Response:
-    """Render one article's wikitext to HTML for the Content view.
-
-    Same display renderer as simplewiki (`rag.wiki_render`); it falls back to
-    escaped plaintext internally on a render error, so this never 500s.
-    """
+    """Render one article's wikitext to HTML for the Content view."""
     row = conn.execute(
         "SELECT text_content FROM articles WHERE page_id = ?", [page_id]
     ).fetchone()
@@ -170,12 +145,8 @@ def embed_article(
 ) -> EmbedResult:
     """Embed one enwiki article into enwiki_rag.db on demand (synchronous).
 
-    Reads the article's metadata and wikitext from the local DB, renders
-    wikitext to markdown, and embeds with local Ollama — identical pipeline to
-    the simplewiki embed button. Writes to a local enwiki_rag.db (WAL mode;
-    readable by the cached read-only connection immediately). Only namespace-0
-    (main) articles can be embedded. A 503 means Ollama was unreachable; any
-    prior chunks for this article are left untouched.
+    Namespace 0 only. Renders wikitext to markdown, replaces existing chunks,
+    searchable immediately. 503 if Ollama is unreachable.
     """
     row = conn.execute(
         f"SELECT {_META_COLS}, text_content FROM articles WHERE page_id = ?",

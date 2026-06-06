@@ -1,21 +1,6 @@
-"""GeoNames places router.
-
-Backed by `data/geonames/geonames.db` (`places` table + `places_fts` FTS5
-index over name + country_name + feature_description). No RAG / chunks
-endpoint: rows are one-line records, not documents to retrieve.
-
-Feature-class and feature-code descriptions are served from two CSV lookups
-shipped in `data/geonames/` so the UI can render multi-select dropdowns
-without having to embed the lists in JavaScript:
-
-  - feature_classes.csv: 9 rows (A,H,L,P,R,S,T,U,V) with name + description + count
-  - feature_codes.csv:   ~680 rows pairing each (class,code) with a description
-
-The CSVs are loaded once at first request and cached at module scope.
-"""
-
 import csv
 import sqlite3
+from functools import cache
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -34,59 +19,43 @@ router = APIRouter(prefix="/geonames", tags=["geonames"])
 _FEATURE_CLASSES_CSV = DATA_DIR / "geonames" / "feature_classes.csv"
 _FEATURE_CODES_CSV = DATA_DIR / "geonames" / "feature_codes.csv"
 
-_feature_classes_cache: list[GeonamesFeatureClass] | None = None
-_feature_codes_cache: list[GeonamesFeatureCode] | None = None
-
-
+@cache
 def _load_feature_classes() -> list[GeonamesFeatureClass]:
-    """Read feature_classes.csv once and cache the parsed rows.
-
-    503 if the file is missing — same shape as a missing DB.
-    """
-    global _feature_classes_cache
-    if _feature_classes_cache is not None:
-        return _feature_classes_cache
+    """Read and cache feature_classes.csv. 503 if missing."""
     if not _FEATURE_CLASSES_CSV.is_file():
         raise HTTPException(
             status_code=503,
             detail=f"feature_classes.csv not found at {_FEATURE_CLASSES_CSV}",
         )
-    rows: list[GeonamesFeatureClass] = []
     with open(_FEATURE_CLASSES_CSV, "r", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            rows.append(GeonamesFeatureClass(
+        return [
+            GeonamesFeatureClass(
                 feature_class=r["feature_class"],
                 name=r["name"],
                 description=r.get("description") or None,
                 count=int(r["count"]) if r.get("count") else None,
-            ))
-    _feature_classes_cache = rows
-    return rows
+            )
+            for r in csv.DictReader(f)
+        ]
 
 
+@cache
 def _load_feature_codes() -> list[GeonamesFeatureCode]:
-    """Read feature_codes.csv once and cache the parsed rows.
-
-    503 if the file is missing.
-    """
-    global _feature_codes_cache
-    if _feature_codes_cache is not None:
-        return _feature_codes_cache
+    """Read and cache feature_codes.csv. 503 if missing."""
     if not _FEATURE_CODES_CSV.is_file():
         raise HTTPException(
             status_code=503,
             detail=f"feature_codes.csv not found at {_FEATURE_CODES_CSV}",
         )
-    rows: list[GeonamesFeatureCode] = []
     with open(_FEATURE_CODES_CSV, "r", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            rows.append(GeonamesFeatureCode(
+        return [
+            GeonamesFeatureCode(
                 feature_class=r["feature_class"],
                 feature_code=r["feature_code"],
                 description=r.get("description") or None,
-            ))
-    _feature_codes_cache = rows
-    return rows
+            )
+            for r in csv.DictReader(f)
+        ]
 
 
 def _row_to_place(row: sqlite3.Row) -> GeonamesPlace:
@@ -128,11 +97,7 @@ def list_feature_codes(
         ),
     ),
 ) -> list[GeonamesFeatureCode]:
-    """Return feature codes, optionally narrowed to the given class(es).
-
-    Powers the 'Feature code' multi-select dropdown, whose options depend
-    on the currently-selected feature classes.
-    """
+    """Return feature codes, optionally narrowed to the given class(es)."""
     rows = _load_feature_codes()
     if feature_class:
         wanted = {c.upper() for c in feature_class}
@@ -178,15 +143,7 @@ def list_places(
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.geonames),
 ) -> Page[GeonamesPlace]:
-    """List geographic places with FTS / country / feature / population filters.
-
-    Default sort is population DESC so notable places surface first; when `q`
-    is given, sort by FTS relevance (bm25) instead. With 13M+ rows, always
-    include at least one filter — open queries scan the full table.
-
-    `feature_class` and `feature_code` are multi-value (OR within a list,
-    AND across lists when both are set).
-    """
+    """List geographic places with FTS / country / feature / population filters."""
     from_clause = "places"
     clauses: list[str] = []
     params: list = []

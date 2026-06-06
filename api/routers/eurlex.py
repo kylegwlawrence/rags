@@ -149,14 +149,8 @@ def embed_law(
 ) -> EmbedResult:
     """Embed one EUR-Lex law into eurlex_rag.db on demand (synchronous).
 
-    Reads the act's `act_raw_text` body and chunks it as flat prose via the
-    same `rag.eurlex.build_doc` builder the batch indexer uses. Replaces any
-    chunks already stored for the law, becoming searchable through
-    `/eurlex/chunks` immediately (the RAG DB runs in WAL mode, so the cached
-    read-only connection picks up the new rows without a uvicorn restart).
-
-    Returns `embedded=false` when the law has no body text. A 503 means
-    Ollama was unreachable; existing chunks are untouched.
+    Chunks `act_raw_text` as flat prose. Replaces existing chunks; searchable
+    immediately. 503 if Ollama is unreachable.
     """
     row = conn.execute(
         "SELECT CELEX, Act_name, act_raw_text FROM laws WHERE CELEX = ?",

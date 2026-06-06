@@ -67,13 +67,7 @@ Sort = Literal["cited_by_count_desc", "year_desc", "year_asc", "relevance"]
 
 
 def _row_to_work(row: sqlite3.Row, authors: list[str]) -> Work:
-    """Map a `works` row + its ordered author display_names to the response model.
-
-    `authors` comes from the normalized `work_authors` / `authors` tables — fetched
-    in batch by `_fetch_authors_many` for list endpoints, per-row for the detail
-    endpoint. The denormalized `works.authors` column still exists from the
-    downloader but is no longer the source of truth here.
-    """
+    """Map a `works` row + ordered author display_names to the response model."""
     full_id = row["id"]
     short = full_id.rsplit("/", 1)[-1] if full_id else full_id
     return Work(
@@ -282,15 +276,8 @@ def embed_work(
 ) -> EmbedResult:
     """Embed one OpenAlex work into openalex_rag.db on demand (synchronous).
 
-    Embeds title + abstract (openalex.db has no body content). Replaces any
-    chunks already stored for this work, so it becomes searchable through
-    `/openalex/chunks` immediately — the RAG DB runs in WAL mode, so the
-    cached read-only connection picks up the new rows without a uvicorn
-    restart.
-
-    Returns `embedded=false` when both title and abstract are empty after
-    cleanup. A 503 means Ollama was unreachable; existing chunks are
-    untouched.
+    Embeds title + abstract only (no body). Returns embedded=false if both are
+    empty. Replaces existing chunks; searchable immediately. 503 if Ollama unreachable.
     """
     if not SHORT_ID_RE.match(short_id):
         raise HTTPException(status_code=400, detail="id must look like W123456")
@@ -352,23 +339,9 @@ def download_work_pdf(
 ) -> OpenAlexDownloadResult:
     """Fetch one work's open-access PDF to disk on demand (synchronous).
 
-    `openalex_fetch_bodies.py` downloads PDFs in bulk; this does the same for a
-    single work from the detail view — the work's `pdf_url` / `oa_url` via the
-    shared `rag.openalex_fetch.fetch_work_pdf` — saving the PDF under
-    `data/openalex/bodies/{short_id}.pdf` for the `pdfs` ingest pipeline.
-    OpenAlex stores no body text, so unlike the arXiv / SEC download routes this
-    writes nothing back into openalex.db's content; it only records the outcome
-    in the shared `body_status` table (so a later bulk run skips it).
-
-    Returns `status='fetched'` (PDF saved) or `status='no_pdf'` (no accessible
-    open-access PDF — terminal, returned with 200 so the UI can show a clear
-    note). A transient fetch failure (network / persistent 5xx) returns 502 and
-    records an `error` row so a later attempt can retry. A work already fetched
-    (PDF still on disk) returns immediately without re-downloading.
-
-    The `body_status` write goes through a fresh read-write connection; the
-    cached read-only connection sees the committed row on its next query (same
-    in-place pattern as the arXiv / SEC download routes), so no restart needed.
+    Saves to data/openalex/bodies/{short_id}.pdf for the pdfs pipeline. Records
+    outcome in body_status. status='no_pdf' (200) if no OA PDF; 502 on transient
+    failure. Idempotent: returns immediately if already on disk.
     """
     if not SHORT_ID_RE.match(short_id):
         raise HTTPException(status_code=400, detail="id must look like W123456")

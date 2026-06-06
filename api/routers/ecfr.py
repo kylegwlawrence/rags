@@ -157,16 +157,8 @@ def embed_regulation(
 ) -> EmbedResult:
     """Embed one eCFR section into ecfr_rag.db on demand (synchronous).
 
-    The body is flat legal prose with no `##` headings, so it chunks with
-    `chunk_doc` (not `chunk_markdown`) under the DENSE profile (dense
-    regulatory text → smaller chunks for finer retrieval grain). The batch
-    indexer (`scripts/ecfr/ecfr_index_rag.py`) uses the same builder.
-
-    Replaces any chunks already stored for this section, becoming searchable
-    through `/ecfr/chunks` immediately (the RAG DB runs in WAL mode, so the
-    cached read-only connection picks up the new rows without a uvicorn
-    restart). Returns `embedded=false` when the section has no body text. A 503
-    means Ollama was unreachable; any existing chunks are left untouched.
+    Uses `chunk_doc` under the DENSE profile (flat prose, no headings). Replaces
+    any existing chunks; searchable immediately. 503 if Ollama is unreachable.
     """
     row = conn.execute(
         "SELECT id, title_num, section, heading, content "

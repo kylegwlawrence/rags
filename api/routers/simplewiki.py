@@ -25,12 +25,7 @@ router = APIRouter(prefix="/simplewiki", tags=["simplewiki"])
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:
-    """Map an `articles` row to its response model. text_content lives at /content.
-
-    `redirect_to` is left None here; only the detail endpoint walks the
-    redirect chain and overrides it. Pydantic would fill the default anyway,
-    but spelling it out keeps the list-vs-detail contract obvious.
-    """
+    """Map an `articles` row to its response model (text_content lives at /content)."""
     return Article(
         page_id=row["page_id"],
         title=row["title"],
@@ -46,12 +41,7 @@ _META_COLS = "page_id, title, namespace, revision_id, timestamp, text_bytes"
 
 
 def _lookup_meta(conn: sqlite3.Connection, page_id: int) -> sqlite3.Row:
-    """Fetch an `articles` row's metadata plus a 300-char `head` of the body.
-
-    The `head` is enough for `_resolve_redirect` to detect and follow a
-    ``#REDIRECT`` stub without loading the full text_content (which can be
-    several MB on long articles).
-    """
+    """Fetch an `articles` row's metadata plus a 300-char `head` (enough to detect redirects)."""
     row = conn.execute(
         f"SELECT {_META_COLS}, substr(text_content, 1, 300) AS head "
         "FROM articles WHERE page_id = ?",
@@ -80,16 +70,7 @@ _MAX_REDIRECT_HOPS = 10
 
 
 def _find_by_title(conn: sqlite3.Connection, title: str) -> sqlite3.Row | None:
-    """Look up a namespace-0 article by exact title, then first-letter-capitalised.
-
-    Redirect targets in wikitext use varied casing (``[[animal]]``,
-    ``[[boot]]``); MediaWiki canonicalises the first character to upper case
-    while keeping the rest verbatim. Both lookups hit ``idx_articles_title``
-    (BINARY collation), so each is a fast index probe rather than a scan. Only
-    ``head`` (a prefix of the body) is selected so chain-following never loads a
-    multi-megabyte article body just to test whether the target is itself a
-    redirect.
-    """
+    """Look up a namespace-0 article by exact title, then first-letter-capitalised fallback."""
     sql = (
         "SELECT page_id, substr(text_content, 1, 300) AS head "
         "FROM articles WHERE namespace = 0 AND title = ? LIMIT 1"
@@ -255,12 +236,7 @@ def list_categories(
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.simplewiki),
 ) -> Page[CategorySummary]:
-    """List distinct categories with their article counts.
-
-    Built from the page_categories table (simplewiki_index_categories.py). A 503
-    here means that table hasn't been built yet. Use a name from this list to
-    drive the `?category=` filter on /simplewiki/articles.
-    """
+    """List distinct categories with their article counts (backed by page_categories table)."""
     clauses: list[str] = []
     params: list = []
     if q is not None:
@@ -296,13 +272,7 @@ def resolve_title(
     ),
     conn: sqlite3.Connection = Depends(db.simplewiki),
 ) -> Article:
-    """Resolve a namespace-0 article title to its row (fast, index-backed).
-
-    Powers in-app [[wikilink]] navigation: the frontend resolves the link's
-    title here, then opens the returned page_id (redirects are followed by the
-    normal detail path). `INDEXED BY idx_articles_title` forces the title index
-    so this is a probe, not a scan, regardless of the planner's stats.
-    """
+    """Resolve a namespace-0 article title to its row (fast, index-backed)."""
     sql = (
         f"SELECT {_META_COLS} FROM articles INDEXED BY idx_articles_title "
         "WHERE title = ? AND namespace = 0 LIMIT 1"
@@ -326,12 +296,7 @@ def get_article_content(
     page_id: int,
     conn: sqlite3.Connection = Depends(db.simplewiki),
 ) -> Response:
-    """Render one article's wikitext to HTML for the Content view.
-
-    `rag.wiki_render.convert_wikitext_to_html` handles the messy-wikitext
-    cases (infoboxes, templates, refs, tables, math) and falls back to escaped
-    plaintext on its own if a render bug is hit, so this never 500s.
-    """
+    """Render one article's wikitext to HTML for the Content view."""
     row = _lookup_with_body(conn, page_id)
     if not row["text_content"]:
         raise HTTPException(status_code=404, detail="article has no body")
@@ -344,12 +309,7 @@ def get_article(
     page_id: int,
     conn: sqlite3.Connection = Depends(db.simplewiki),
 ) -> Article:
-    """Return metadata for one article by page_id.
-
-    When the article is a ``#REDIRECT`` stub, ``redirect_to`` carries the final
-    resolved target's page_id so the UI can navigate straight there. It stays
-    None for normal articles and for redirects whose target can't be resolved.
-    """
+    """Return metadata for one article; redirect_to is set if the article is a redirect stub."""
     row = _lookup_meta(conn, page_id)
     article = _row_to_article(row)
     # `head` is the first 300 chars — enough for redirect_target / _resolve_redirect
@@ -377,16 +337,8 @@ def embed_article(
 ) -> EmbedResult:
     """Embed one article into simplewiki_rag.db on demand (synchronous).
 
-    Renders the article's wikitext to markdown via the same path as
-    `simplewiki_index_rag.py` and replaces any chunks already stored for it, so
-    the article becomes searchable through `/simplewiki/chunks` and visible in
-    `/simplewiki/doc-chunks` straight away — the RAG DB runs in WAL mode, so the
-    cached read-only connection picks up the new rows without a uvicorn restart.
-
-    A single article is ~1-5 chunks, a few seconds on local Ollama, so this
-    blocks the request rather than queueing a job. Redirects / empty bodies
-    embed nothing and return `embedded=false`. A 503 means Ollama was
-    unreachable; the article's existing chunks (if any) are left untouched.
+    Renders wikitext to markdown. Redirects/empty bodies return embedded=false.
+    Replaces existing chunks; searchable immediately. 503 if Ollama is unreachable.
     """
     row = _lookup_with_body(conn, page_id)
     markdown = wikitext_to_markdown(row["text_content"] or "")

@@ -1,20 +1,3 @@
-"""Read-only API for locally ingested PDFs.
-
-The `pdfs_ingest.py` script stores one metadata row per PDF (plus per-page text)
-in `pdfs.db`, leaving the original files in the `incoming/` drop folder. This
-router lists/serves that metadata and streams the original PDF bytes from
-`incoming/` so the frontend can render the document in an in-browser viewer.
-
-`doc_id` is the source filename stem. The list endpoint supports full-text
-search (`?q=`) over the page text via the `pages_fts` index built by
-`scripts/pdfs/pdfs_index_fts.py`.
-
-Semantic search is served by `/pdfs/chunks` over `pdfs_rag.db`
-(`scripts/pdfs/pdfs_index_rag.py`). PDFs are chunked page by page, so each
-chunk's `section` is its page label (`"p. 42"`) — the frontend reads that to
-deep-link the in-browser viewer to the matching page.
-"""
-
 import sqlite3
 
 import httpx
@@ -210,12 +193,7 @@ def get_document_content(
     doc_id: str,
     conn: sqlite3.Connection = Depends(db.pdfs),
 ) -> FileResponse:
-    """Stream the original PDF file inline so a browser can render it.
-
-    The body is served as `application/pdf` with an *inline* content
-    disposition so the frontend's <iframe> displays it rather than triggering a
-    download.
-    """
+    """Stream the original PDF inline (application/pdf, inline disposition)."""
     row = conn.execute(
         "SELECT source_path FROM documents WHERE doc_id = ?", [doc_id]
     ).fetchone()
@@ -247,21 +225,8 @@ def embed_document(
 ) -> EmbedResult:
     """Embed one whole PDF into pdfs_rag.db on demand (synchronous).
 
-    The batch indexer (`scripts/pdfs/pdfs_index_rag.py`) embeds every PDF; this
-    button does a single PDF the same way, reusing the shared page-aware
-    `chunk_pdf` so a button-embedded PDF chunks identically to a batch-indexed
-    one (each chunk tagged with its page, `section="p. {n}"`). Replaces any
-    chunks already stored for this PDF, becoming searchable through
-    `/pdfs/chunks` immediately (the RAG DB runs in WAL mode, so the cached
-    read-only connection picks up the new rows without a uvicorn restart).
-
-    Unlike the eCFR/SimpleWiki buttons (one short section/article), a PDF can be
-    dozens of pages, so this request can take a while — a ~200-page document is
-    minutes of Ollama time in a single call.
-
-    Returns `embedded=false` when the PDF has no extractable text (e.g. a
-    scanned/image-only file). A 503 means Ollama was unreachable; any existing
-    chunks are left untouched.
+    Page-aware chunking (section="p. N"). Large PDFs can take minutes. Returns
+    embedded=false for image-only/scanned files. 503 if Ollama is unreachable.
     """
     # Confirm the PDF exists (404) and grab a display title for the empty-text
     # response, independent of whether it has any extractable body.

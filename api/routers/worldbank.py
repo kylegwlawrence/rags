@@ -35,12 +35,7 @@ def _topics_for(conn: sqlite3.Connection, indicator_id: str) -> list[str]:
 def _topics_for_many(
     conn: sqlite3.Connection, indicator_ids: list[str]
 ) -> dict[str, list[str]]:
-    """Batch the per-indicator topic lookup so list_indicators is one query.
-
-    Returns ``{indicator_id: [topic_name, ...]}`` ordered by topic id. Without
-    this, rendering a page of 200 indicators triggers 200 separate queries
-    (one per `_row_to_indicator` call).
-    """
+    """Batch-fetch topic names keyed by indicator_id to avoid N+1 queries."""
     if not indicator_ids:
         return {}
     placeholders = ",".join("?" * len(indicator_ids))

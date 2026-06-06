@@ -54,12 +54,7 @@ def list_texts(
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.gutenberg),
 ) -> Page[GutenbergText]:
-    """List Gutenberg texts. Title/author are substring filters; language is exact.
-
-    The `embedded` filter cross-references the separate `gutenberg_rag.db` to
-    select texts that do (or don't) have any chunks indexed. The rag DB is
-    opened lazily so a missing rag DB still allows unfiltered listing.
-    """
+    """List Gutenberg texts. Title/author are substring filters; language is exact."""
     clauses: list[str] = []
     params: list = []
     if title is not None:
@@ -147,15 +142,8 @@ def embed_text(
 ) -> EmbedResult:
     """Embed one Gutenberg text into gutenberg_rag.db on demand (synchronous).
 
-    Reads the `.txt` body from disk via `rag.gutenberg_text`, strips the PG
-    start/end banners, and replaces any chunks already stored for the text.
-    The text becomes searchable through `/gutenberg/chunks` immediately — the
-    RAG DB runs in WAL mode, so the cached read-only connection picks up the
-    new rows without a uvicorn restart.
-
-    Whole-book embeds can run for tens of minutes on local Ollama — the
-    button stays in "Embedding…" the whole time. A 503 means Ollama was
-    unreachable; existing chunks are untouched.
+    Strips PG start/end banners. Replaces existing chunks; searchable immediately.
+    Whole-book embeds can take tens of minutes. 503 if Ollama is unreachable.
     """
     row = _lookup(conn, text_id)
     # Defense in depth: even though the indexer only stores relative paths

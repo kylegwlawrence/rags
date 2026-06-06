@@ -2,7 +2,7 @@ import csv
 import os
 import sqlite3
 from datetime import datetime, timezone
-from functools import lru_cache
+from functools import cache
 from typing import Literal
 
 import httpx
@@ -60,13 +60,7 @@ Sort = Literal["submitted_desc", "submitted_asc", "updated_desc", "relevance"]
 
 
 def _row_to_paper(row: sqlite3.Row, authors: list[str]) -> Paper:
-    """Map a `papers` row + its ordered author display_names to the response model.
-
-    `authors` is fetched separately (single-query batch for `list_papers`,
-    per-paper for `get_paper`) — the normalized `paper_authors` / `authors`
-    tables replaced the legacy JSON column in Phase 3. `papers.categories`
-    is a whitespace-separated token string from the OAI feed.
-    """
+    """Map a `papers` row + ordered author display_names to the response model."""
     categories_raw = row["categories"]
     return Paper(
         id=row["id"],
@@ -144,13 +138,9 @@ _ARCHIVE_NAMES = {
 }
 
 
-@lru_cache(maxsize=1)
+@cache
 def _load_taxonomy() -> list[dict[str, str]]:
-    """Read categories.csv into ``{code, parent, description, legacy}`` rows.
-
-    Cached — the file is small, static reference data. Cells are stripped of
-    the padding whitespace the hand-aligned CSV carries.
-    """
+    """Read categories.csv into ``{code, parent, description, legacy}`` rows (cached)."""
     with _CATEGORIES_CSV.open(newline="", encoding="utf-8") as fh:
         reader = csv.reader(fh)
         header = [c.strip() for c in next(reader)]
@@ -173,23 +163,15 @@ def _load_taxonomy() -> list[dict[str, str]]:
     return rows
 
 
-@lru_cache(maxsize=1)
+@cache
 def _load_categories() -> dict[str, str]:
     """The arxiv taxonomy as ``{code: description}`` (cached)."""
     return {r["code"]: r["description"] for r in _load_taxonomy()}
 
 
-@lru_cache(maxsize=1)
+@cache
 def _archive_parents() -> list[dict[str, str]]:
-    """Top-level archives for the parent "Category" dropdown, sorted by code.
-
-    Covers every distinct value in the CSV ``parent`` column (archives that own
-    subcategories, e.g. ``cs`` / ``math``) plus the current standalone top-level
-    codes that have none (e.g. ``hep-th``, ``gr-qc``, ``quant-ph``); legacy bare
-    codes are excluded. Each archive's display name comes from its own CSV
-    description when present, else the ``_ARCHIVE_NAMES`` fallback, else the bare
-    code. Returns ``[{code, name}, ...]``.
-    """
+    """Top-level archives for the "Category" dropdown, sorted by code (cached)."""
     rows = _load_taxonomy()
     desc_by_code = {r["code"]: r["description"] for r in rows}
     parents = {r["parent"] for r in rows if r["parent"]}
@@ -215,12 +197,7 @@ def _subcategories(archive: str) -> list[dict[str, str]]:
 
 @router.get("/categories")
 def list_categories() -> dict[str, str]:
-    """Map every arxiv category code to its human description.
-
-    e.g. ``{"astro-ph.CO": "Cosmology and Nongalactic Astrophysics", ...}``.
-    The frontend fetches this once to label the Category / Categories fields in
-    a paper's metadata pane. 503 if the reference CSV is missing.
-    """
+    """Return `{code: description}` for every arxiv category. 503 if the CSV is missing."""
     try:
         return _load_categories()
     except FileNotFoundError:
@@ -245,12 +222,7 @@ def _categories_missing() -> HTTPException:
 
 @router.get("/category-parents")
 def list_category_parents() -> list[dict[str, str]]:
-    """Top-level archives for the parent "Category" filter dropdown.
-
-    Each entry is ``{code, name}`` (e.g. ``{"code": "cs", "name": "Computer
-    Science"}``). The frontend pairs this with ``/subcategories`` for the
-    cascading Subcategory dropdown. 503 if the reference CSV is missing.
-    """
+    """Top-level archive codes + names for the "Category" dropdown. 503 if CSV missing."""
     try:
         return _archive_parents()
     except FileNotFoundError:
@@ -264,12 +236,7 @@ def list_subcategories(
         description="Parent archive code (e.g. 'cs'); returns its subcategories.",
     ),
 ) -> list[dict[str, str]]:
-    """Subcategories ``{code, description}`` under one parent archive, sorted by code.
-
-    Empty list when ``archive`` is unset — the frontend's Subcategory dropdown
-    stays at "All subcategories" until a parent Category is chosen. 503 if the
-    reference CSV is missing.
-    """
+    """Subcategories under one archive, sorted by code. Empty when `archive` is unset."""
     try:
         return _subcategories(archive or "")
     except FileNotFoundError:
@@ -450,12 +417,7 @@ def get_paper_content(
     paper_id: str,
     conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> Response:
-    """Return the downloaded HTML body for one paper as text/html.
-
-    404s distinguish paper-missing from no-html-downloaded so the caller can tell
-    why. Content lives in the DB column, not on disk — gutenberg's FileResponse
-    pattern doesn't apply here.
-    """
+    """Return the downloaded HTML body for one paper as text/html."""
     row = conn.execute(
         f"SELECT {_META_COLS}, html_content FROM papers WHERE id = ?", [paper_id]
     ).fetchone()
@@ -473,16 +435,8 @@ def embed_paper(
 ) -> EmbedResult:
     """Embed one arxiv paper into arxiv_rag.db on demand (synchronous).
 
-    Mirrors `arxiv_rag_extract.iter_docs`: renders downloaded HTML via
-    `html_to_markdown` (chunked section-aware) or falls back to the cleaned
-    abstract / title when no body is on disk. Replaces any chunks already
-    stored for this paper, so it becomes searchable through `/arxiv/chunks`
-    immediately — the RAG DB runs in WAL mode, so the cached read-only
-    connection picks up the new rows without a uvicorn restart.
-
-    Returns `embedded=false` when the paper yields no chunks (genuinely empty
-    body and abstract). A 503 means Ollama was unreachable; any existing
-    chunks are left untouched.
+    Renders downloaded HTML or falls back to abstract/title. Replaces any
+    existing chunks; searchable immediately. 503 if Ollama is unreachable.
     """
     row = conn.execute(
         "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
@@ -541,24 +495,9 @@ def download_paper(
     paper_id: str,
     conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> ArxivDownloadResult:
-    """Fetch one paper's LaTeXML HTML from arXiv on demand and store it (synchronous).
+    """Fetch one paper's LaTeXML HTML and write it to papers.html_content (synchronous).
 
-    `arxiv_download.py` fetches HTML bodies in bulk; this does the same for a
-    single paper from the detail view — `arxiv.org/html/{id}` via the shared
-    `rag.arxiv_fetch.fetch_paper_html` — so the Content tab and `/content` start
-    serving it. The body is written onto `papers.html_content` with
-    `download_status='downloaded'`; a 404 (arXiv has no HTML version for the
-    paper) records `download_status='no_html'` and returns that status with a 200
-    so the UI can show a clear "no HTML available" note instead of an error.
-
-    The write goes through a fresh read-write connection; the cached read-only
-    connection picks up the committed single-row UPDATE on its next query, so no
-    uvicorn restart is needed (same in-place pattern as the SEC download route).
-    A paper already carrying HTML returns immediately without re-fetching. A
-    persistent fetch failure (repeated 429 / 5xx) returns 502 and leaves the
-    row's status unchanged so a later attempt can retry. Building the FTS / RAG
-    indexes over the new body stays a separate batch step (`arxiv_index_fts.py` /
-    `arxiv_index_rag.py`) or the live `/embed` route.
+    Idempotent; status='no_html' (200) if arXiv has no HTML; 502 on fetch failure.
     """
     row = conn.execute(
         "SELECT id, html_content FROM papers WHERE id = ?", [paper_id]
@@ -612,11 +551,7 @@ def get_paper(
     paper_id: str,
     conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> Paper:
-    """Return one paper by its arxiv id.
-
-    `{paper_id:path}` so old-style ids with embedded slashes (e.g.
-    `cond-mat/0204015`) match cleanly.
-    """
+    """Return one paper by its arxiv id (`{paper_id:path}` handles slash-containing old-style ids)."""
     row = conn.execute(
         f"SELECT {_META_COLS} FROM papers WHERE id = ?", [paper_id]
     ).fetchone()

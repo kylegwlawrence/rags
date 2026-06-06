@@ -169,17 +169,8 @@ def embed_document(
 ) -> EmbedResult:
     """Embed one Federal Register document into federal_register_rag.db (synchronous).
 
-    Renders the document to section-headered markdown via
-    `rag.federal_register.build_doc` — the same builder
-    `federal_register_index_rag.py` uses, so a button-embedded document
-    chunks identically to a batch indexer pass. Replaces any chunks already
-    stored for it, becoming searchable through `/federal_register/chunks`
-    immediately (the RAG DB runs in WAL mode, so the cached read-only
-    connection picks up the new rows without a uvicorn restart).
-
-    Returns `embedded=false` when the document has neither title nor
-    abstract. A 503 means Ollama was unreachable; existing chunks are
-    untouched.
+    Renders to section-headed markdown. Replaces existing chunks; searchable
+    immediately. 503 if Ollama is unreachable.
     """
     row = _lookup(conn, document_number)
     doc = build_doc(row)

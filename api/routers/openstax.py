@@ -1,20 +1,3 @@
-"""Read-only API for OpenStax textbooks.
-
-`openstax_download.py` loads three tables into `openstax.db`: one row per book
-(`books`), per chapter (`chapters`), and per section (`sections`, with the
-section body as plain text + inline `$…$` LaTeX). This router lists books, lists
-/ full-text-searches sections, and serves each section's body.
-
-`book_id` is the collection slug (e.g. `calculus-volume-1`); a section is
-addressed by `{book_id}/{module_id}`. Full-text search (`?q=`) runs over the
-section title + learning objectives + body via the `sections_fts` index built
-by `scripts/openstax/openstax_index_fts.py`.
-
-Semantic search is served by `/openstax/chunks` over `openstax_rag.db`
-(batch indexer `scripts/openstax/openstax_index_rag.py`, or the per-section
-embed button). Each chunk's `section` is its "Chapter — Section" label.
-"""
-
 import sqlite3
 
 import httpx
@@ -206,12 +189,7 @@ def list_sections(
 
 
 def _lookup_section(conn: sqlite3.Connection, section_id: str) -> sqlite3.Row:
-    """Fetch one section's full row (incl. body) by `section_id`, or 404.
-
-    `section_id` is `{book_id}/{module_id}` — it contains a slash, so the
-    routes below address it with a greedy `{section_id:path}` converter (same
-    pattern as pydocs' `doc_path`).
-    """
+    """Fetch one section's full row (incl. body) by section_id, or 404."""
     row = conn.execute(
         "SELECT s.section_id, s.book_id, b.title AS book_title, b.subject AS subject, "
         "s.chapter_number, s.chapter_title, s.module_id, s.title, s.objectives, "
@@ -249,12 +227,7 @@ def embed_section(
 ) -> EmbedResult:
     """Embed one section into openstax_rag.db on demand (synchronous).
 
-    Reuses the shared `rag.openstax.build_doc` + section-aware `chunk_markdown`
-    (DEFAULT profile) so a button-embedded section chunks identically to a
-    batch-indexed one. Replaces any chunks already stored for this section, becoming
-    searchable through `/openstax/chunks` immediately (the RAG DB runs in WAL
-    mode, so the cached read-only connection sees the new rows without a uvicorn
-    restart). A 503 means Ollama was unreachable; existing chunks are untouched.
+    Replaces existing chunks; searchable immediately. 503 if Ollama is unreachable.
     """
     row = _lookup_section(conn, section_id)
     doc = build_doc(row)
@@ -302,13 +275,7 @@ def get_section(
 def _section_meta_map(
     conn: sqlite3.Connection, doc_ids: list[str]
 ) -> dict[str, sqlite3.Row]:
-    """Batch-fetch section provenance from openstax.db keyed by section_id (= doc_id).
-
-    Each row carries `objectives`, `book_id`, `subject`, `chapter_number`, and
-    `chapter_title` — everything the chunk endpoints surface on a hit beyond the
-    chunk text itself. `doc_ids` is bounded by `top_k` (≤100), so a positional
-    IN-list stays well under SQLite's 999-variable cap.
-    """
+    """Batch-fetch section provenance (objectives, book, subject, chapter) keyed by section_id."""
     if not doc_ids:
         return {}
     placeholders = ",".join("?" * len(doc_ids))
@@ -329,14 +296,7 @@ def _resolve_allowed_doc_ids(
     book_id: list[str] | None,
     chapter_number: int | None,
 ) -> set[str] | None:
-    """Translate the metadata filters into an allowlist of `section_id`s.
-
-    Returns `None` when no filter was supplied (caller should search the whole
-    corpus), otherwise the set of section ids matching every supplied filter —
-    AND across filter types, OR within a multi-value type (`subject`/`book_id`
-    use `IN`). An empty set means the filter matched nothing; the retriever
-    turns that into an empty result.
-    """
+    """Return the set of section_ids matching all supplied filters, or None if no filters given."""
     if not subject and not book_id and chapter_number is None:
         return None
 
@@ -417,9 +377,10 @@ def search_chunks(
             ) from e
         raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
 
-    meta_map = _section_meta_map(conn, [h.doc_id for h in result.hits])
+    hits = result.hits[:top_k]
+    meta_map = _section_meta_map(conn, [h.doc_id for h in hits])
     items = []
-    for h in result.hits:
+    for h in hits:
         m = meta_map.get(h.doc_id)
         items.append(
             OpenstaxChunk(

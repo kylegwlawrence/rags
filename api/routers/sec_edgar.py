@@ -61,13 +61,7 @@ _META_COLS = (
 
 
 def _lookup_meta(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row:
-    """Fetch a `filings` row's metadata (no body) by accession or raise 404.
-
-    `length(body)` runs over the BLOB header alone, so it's cheap even when
-    the body is hundreds of KB. No status filter: metadata-only filings
-    (body not yet downloaded) are reachable so the detail view can show
-    them and offer a download.
-    """
+    """Fetch a `filings` row's metadata (no body) by accession or raise 404."""
     row = conn.execute(
         f"SELECT {_META_COLS} FROM filings WHERE accession_number = ?",
         [accession_number],
@@ -78,12 +72,7 @@ def _lookup_meta(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row
 
 
 def _lookup_with_body(conn: sqlite3.Connection, accession_number: str) -> sqlite3.Row:
-    """Fetch a `filings` row including `body` text + `body_html` by accession or raise 404.
-
-    `body` is the cleaned text the embed route chunks; `body_html` is the
-    render-ready markup the Content view serves. Both ride along so the content
-    and embed routes don't each need their own query.
-    """
+    """Fetch a `filings` row including body + body_html by accession or raise 404."""
     row = conn.execute(
         f"SELECT {_META_COLS}, body, body_html FROM filings WHERE accession_number = ?",
         [accession_number],
@@ -139,12 +128,7 @@ def list_filings(
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(db.sec_edgar),
 ) -> Page[SecEdgarFiling]:
-    """List SEC EDGAR filings with optional full-text, company, CIK, year, and download-state filters.
-
-    Lists every harvested filing by default, including metadata-only rows whose
-    body hasn't been downloaded yet (use the `downloaded` filter to narrow).
-    `q` matches only downloaded filings — `filings_fts` indexes fetched bodies.
-    """
+    """List SEC EDGAR filings with optional full-text, company, CIK, year, and download-state filters."""
     from_clause = "filings"
     clauses: list[str] = []
     params: list = []
@@ -221,13 +205,7 @@ def get_filing_content(
     accession_number: str,
     conn: sqlite3.Connection = Depends(db.sec_edgar),
 ) -> Response:
-    """Return the rendered filing body as text/html.
-
-    Serves the stored `body_html` (cleaned, render-ready markup) so the Content
-    view can display the filing with its tables and headings intact. Rows
-    fetched before `body_html` existed have only the cleaned text `body`; those
-    are wrapped in `<pre>` so they still render. A row with neither 404s.
-    """
+    """Return the rendered filing body as text/html (body_html; falls back to <pre>-wrapped text)."""
     row = _lookup_with_body(conn, accession_number)
     if row["body_html"]:
         html = row["body_html"]
@@ -248,22 +226,9 @@ def download_filing(
 ) -> DownloadResult:
     """Download one filing's body from SEC on demand and store it (synchronous).
 
-    `sec_edgar_download.py` records only filing metadata + a `filing_url`. This
-    fetches that submission, extracts the primary document, and writes both the
-    cleaned text (`body`, for FTS / embedding) and the render-ready HTML
-    (`body_html`, for the Content view) onto the row (status -> 'fetched'), so
-    the Content tab and `/content` start serving it. It mirrors the standalone
-    `sec_edgar_fetch_bodies.py --accession` path but runs in-process, sharing
-    the same extractor (`rag.sec_filing`).
-
-    The write goes through a fresh read-write connection; the cached read-only
-    connection picks up the committed row on its next query — an in-place
-    single-row UPDATE to the same file, so no uvicorn restart is needed (unlike
-    a full re-index that replaces the file). A filing whose submission 404s or
-    keeps failing returns 502; one with no extractable text returns 422. In
-    both cases the row's `status` is recorded so the failure is visible.
-    Building the FTS / RAG search indexes over the new body stays a separate
-    batch step (`sec_edgar_index_fts.py` / `sec_edgar_index_rag.py`).
+    Writes body (cleaned text) + body_html (render-ready) to the row. 502 if
+    the submission 404s; 422 if no extractable text. FTS/RAG re-index is a
+    separate batch step.
     """
     row = _lookup_meta(conn, accession_number)
     filing_url = row["filing_url"]
@@ -320,17 +285,8 @@ def embed_filing(
 ) -> EmbedResult:
     """Embed one fetched SEC filing into sec_edgar_rag.db on demand (synchronous).
 
-    Requires the body to have been downloaded first — `sec_edgar_download.py`
-    records only metadata + `filing_url`, and the bytes are pulled in either
-    by `sec_edgar_fetch_bodies.py` or the live "Download full filing" button
-    (`POST .../download`). When body is missing this returns 409 with a hint
-    so the UI can prompt the download step.
-
-    Doc construction mirrors `sec_edgar_rag_extract.iter_docs`. Replaces any
-    chunks already stored for the filing, becoming searchable through
-    `/sec_edgar/chunks` immediately (the RAG DB runs in WAL mode, so the
-    cached read-only connection sees the new rows without a uvicorn restart).
-    A 503 means Ollama was unreachable; existing chunks are untouched.
+    409 if body not yet downloaded. Replaces existing chunks; searchable
+    immediately. 503 if Ollama is unreachable.
     """
     row = _lookup_with_body(conn, accession_number)
     body = row["body"]

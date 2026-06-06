@@ -153,14 +153,8 @@ def embed_readme(
 ) -> EmbedResult:
     """Embed one README into github_readmes_rag.db on demand (synchronous).
 
-    Cleans the README via the same `strip_html` path as
-    `github_readmes_index_rag.py` and replaces any chunks already stored for
-    it, so the repo becomes searchable through `/github/chunks` immediately —
-    the RAG DB runs in WAL mode, so the cached read-only connection picks up
-    the new rows without a uvicorn restart.
-
-    Returns `embedded=false` for empty READMEs. A 503 means Ollama was
-    unreachable; existing chunks (if any) are left untouched.
+    Strips HTML, replaces existing chunks, searchable immediately. 503 if Ollama
+    is unreachable.
     """
     row = _lookup_with_body(conn, repo)
     readme = row["readme"] or ""
