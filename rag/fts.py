@@ -1,15 +1,4 @@
-"""Shared FTS5 index rebuilder for `scripts/<source>/<source>_index_fts.py`.
-
-Each per-source FTS script does the same three SQL statements with different
-identifiers: DROP IF EXISTS the virtual table, CREATE it as external-content
-against a backing table, INSERT-SELECT to populate it. The variation is just
-table/column names, the rowid alias when the backing PK is INTEGER, and an
-optional WHERE filter (sec_edgar / github_readmes only index `status='fetched'`
-rows). Everything else — the tokenizer, the print summary, the missing-file
-guard — is identical.
-
-This module factors all that out so each script collapses to ~10 lines.
-"""
+"""Shared FTS5 index rebuilder. Each per-source script collapses to ~10 lines by calling run_fts_indexer."""
 
 import sqlite3
 import sys
@@ -28,30 +17,7 @@ def run_fts_indexer(
     row_label: str = "rows",
     tokenize: str = "porter unicode61",
 ) -> int:
-    """Drop and rebuild a FTS5 virtual table over an existing content table.
-
-    Args:
-        db_path: SQLite file. Returns 1 (with a message to stderr) if absent.
-        virtual_table: e.g. ``"papers_fts"``. Always dropped first.
-        content_table: e.g. ``"papers"``. The backing table; not modified.
-        columns: column names indexed and selected. Must exist on
-            ``content_table``.
-        content_rowid: column in ``content_table`` used as the FTS rowid.
-            Default ``"rowid"`` matches SQLite's implicit rowid (works for
-            any table). Pass an INTEGER PK alias like ``"id"`` when the
-            primary key already is the rowid — keeps SELECTs consistent.
-        where: optional WHERE clause appended to the INSERT-SELECT (and the
-            row count). Use for source-specific filters like
-            ``"status = 'fetched' AND body IS NOT NULL"``.
-        row_label: noun used in the summary (``"papers"``, ``"filings"``).
-            Defaults to ``"rows"`` if not given.
-        tokenize: FTS5 tokenizer spec. The whole project uses
-            ``porter unicode61`` so this rarely needs overriding.
-
-    Returns:
-        0 on success, 1 if ``db_path`` doesn't exist. Suitable for use as a
-        ``sys.exit`` argument from a ``main()``.
-    """
+    """Drop and rebuild a FTS5 external-content virtual table. Returns 0 on success, 1 if DB missing."""
     if not db_path.is_file():
         print(f"missing: {db_path}", file=sys.stderr)
         return 1

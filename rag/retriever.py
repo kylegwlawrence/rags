@@ -1,13 +1,7 @@
-"""Hybrid dense + sparse retrieval for the RAG pipeline.
+"""Hybrid dense+sparse retrieval via RRF.
 
-Dense search: sqlite-vec ANN on chunk embeddings.
-Sparse search: FTS5 BM25 on chunk text, AND-of-quoted-words for natural-language recall.
-Fusion: Reciprocal Rank Fusion (RRF).
-
-Falls back to sparse-only with `used_dense=False` when Ollama is unreachable —
-the API surfaces this flag to the client. Missing `chunks_fts` / `chunks_vec`
-tables propagate `sqlite3.OperationalError` to the caller, which translates
-it to a 503 per `WORK.md` §2.2.
+Dense: sqlite-vec ANN. Sparse: FTS5 BM25 (AND-of-words). Falls back to sparse-only
+when Ollama is unreachable (used_dense=False). Missing table → OperationalError → 503.
 """
 
 import json
@@ -33,12 +27,7 @@ _BRUTE_FORCE_MAX_CHUNKS = 8000
 
 
 def is_operational_error(err: sqlite3.OperationalError) -> bool:
-    """True when the error means a missing table / unreadable DB file, not bad SQL.
-
-    Shared by the retriever (decides whether to swallow vs. propagate) and the
-    route handlers (decide 503 vs. 400). SQLite doesn't expose distinct error
-    codes for these cases; the message strings are the only available signal.
-    """
+    """True for missing-table / unreadable-DB errors (→ 503), not bad SQL (→ 400)."""
     msg = str(err)
     return "no such table" in msg or "unable to open database file" in msg
 
@@ -53,29 +42,7 @@ def retrieve(
     ollama_url: str = embedder.OLLAMA_URL,
     allowed_doc_ids: set[str] | None = None,
 ) -> RetrievalResult:
-    """Run hybrid dense+sparse retrieval, merge with RRF, hydrate hits.
-
-    Args:
-        query: Natural-language query. Empty/whitespace-only → empty result.
-        rag_conn: RAG DB connection with sqlite-vec loaded.
-        top_k: Final hit count after RRF merging.
-        candidate_k: Number of candidates pulled from each side before merging.
-        rrf_k: RRF smoothing constant; standard value is 60.
-        ollama_url: Override the embedder's default URL (useful for tests).
-        allowed_doc_ids: Optional metadata filter — restrict retrieval to chunks
-            whose `doc_id` is in this set. `None` means no filter (search the
-            whole corpus); an empty set means the filter matched no documents,
-            so the result is empty without touching the DB. Both arms apply the
-            filter *before* ranking: the sparse side constrains the FTS match in
-            SQL, and the dense side either scores only in-scope chunks (narrow
-            scope) or post-filters a maxed-out KNN pool (broad scope) — see
-            `_dense_search`. This avoids the post-filter starvation where a
-            narrow scope's chunks never reach a fixed global candidate pool.
-
-    Returns:
-        RetrievalResult with `hits` sorted by descending RRF score and
-        `used_dense` flag indicating whether Ollama embedding succeeded.
-    """
+    """Hybrid dense+sparse search with RRF fusion. Empty set for allowed_doc_ids → empty result."""
     if not query.strip():
         return RetrievalResult(hits=[], used_dense=False)
 
@@ -112,26 +79,11 @@ def _dense_search(
     k: int,
     allowed_doc_ids: set[str] | None = None,
 ) -> list[tuple[int, float]]:
-    """ANN search over chunks_vec. Returns (chunk_id, distance) ordered ascending.
+    """ANN search over chunks_vec → (chunk_id, distance) ascending.
 
-    Without a filter this is a plain top-`k` KNN (k clamped to the sqlite-vec
-    cap, `_VEC_KNN_MAX`).
-
-    With `allowed_doc_ids`, the `doc_id` column lives on `chunks`, not on the
-    `chunks_vec` virtual table, so sqlite-vec can't constrain the KNN scan
-    itself. Post-filtering a fixed global pool would (and did) starve narrow
-    scopes: when the corpus-wide nearest neighbours are dominated by other docs,
-    no in-scope chunk survives. So the filter is applied *before* ranking, with
-    the method chosen by scope size:
-
-    * Scope of at most `_BRUTE_FORCE_MAX_CHUNKS` chunks — score every in-scope
-      chunk with `vec_distance_L2` (the same metric the KNN uses) and keep the
-      nearest `k`. Exact, and bounded by the scope rather than the corpus.
-    * Larger scope — run the global KNN at the maximum `k` the engine allows and
-      post-filter to the allowlist. A broad scope is well represented in that
-      pool so its nearest in-scope chunks survive; this only loses recall for a
-      scope that is both large and semantically far from the query, which the
-      sparse arm (exact in SQL) still covers.
+    With a filter: doc_id lives on chunks not chunks_vec, so post-filtering a fixed global
+    pool starves narrow scopes. Instead: ≤ _BRUTE_FORCE_MAX_CHUNKS → exact per-chunk L2 score;
+    larger scope → global KNN capped at _VEC_KNN_MAX then post-filtered.
     """
     packed = embedder.pack_embedding(query_embedding)
     if allowed_doc_ids is None:
@@ -178,20 +130,8 @@ def _sparse_search(
     k: int,
     allowed_doc_ids: set[str] | None = None,
 ) -> list[tuple[int, float]]:
-    """FTS5 BM25 search over chunks_fts.
-
-    Each query word is wrapped in double-quotes individually so FTS5 applies
-    AND-of-terms across the unstemmed forms (the porter tokenizer still
-    matches via stem). Phrase matching across the whole query is intentionally
-    avoided — natural-language queries rarely match verbatim phrases.
-
-    With `allowed_doc_ids`, the match is constrained to those documents' chunks
-    directly in SQL (exact, no recall loss). The id list is bound as one JSON
-    parameter and expanded via `json_each`, so it sidesteps SQLite's
-    999-variable cap even when a broad subject filter yields thousands of ids.
-
-    Malformed FTS5 syntax returns an empty list rather than raising; missing-
-    table errors propagate to the caller for 503 translation.
+    """FTS5 BM25 search. Each word quoted individually (AND-of-stems, no phrase matching).
+    Bad FTS syntax → empty list; missing table propagates for 503.
     """
     words = query.split()
     if not words:

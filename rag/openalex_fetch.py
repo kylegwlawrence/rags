@@ -1,16 +1,5 @@
-"""Fetch one OpenAlex work's open-access PDF to disk.
-
-OpenAlex serves no body text itself — only open-access *pointers* (``pdf_url`` /
-``oa_url``) to a free copy hosted by some third-party publisher or repository.
-This module walks those pointers, downloads the first one that is really a PDF,
-and saves it atomically so the file can flow into the ``pdfs`` ingest pipeline.
-
-Shared by the bulk downloader (``scripts/openalex/openalex_fetch_bodies.py``)
-and the API's on-demand download route (``POST /openalex/works/{id}/download``),
-so a work fetched either way goes through identical request logic — the same
-split as ``rag/arxiv_fetch.py`` (arXiv) and ``rag/sec_filing.py`` (SEC). The
-``body_status`` bookkeeping schema lives here too, so the two callers can't
-drift on its shape.
+"""Fetch one OpenAlex work's OA PDF to disk. Shared by the bulk downloader and the API route.
+Walks pdf_url/oa_url candidates, streams with %PDF- magic check, renames atomically.
 """
 
 import os
@@ -46,20 +35,9 @@ def fetch_work_pdf(
     user_agent: str,
     sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[int, str]:
-    """Download the first candidate URL that is really a PDF to ``dest``.
-
-    ``urls`` are tried in order (typically ``[pdf_url, oa_url]``); empty/None
-    entries are ignored. The PDF is streamed to a ``.part`` temp file and renamed
-    into place only after the ``%PDF-`` magic bytes confirm it, so a failed or
-    non-PDF response never leaves a poisoned file for ``pdfs_ingest`` to pick up.
-
-    Returns ``(bytes_written, source_url)``. Raises :class:`NoPdfAvailable` when
-    every URL is reachable but none is a PDF (terminal — don't retry). Raises
-    ``httpx.HTTPError`` when a URL keeps failing with 429 / 5xx / a network error
-    after ``MAX_ATTEMPTS`` (transient — a later run can retry).
-
-    ``user_agent`` should carry a contact ``mailto:`` (polite-access etiquette).
-    ``sleep`` is injectable so tests can run without real backoff waits.
+    """Download the first candidate URL that is a real PDF → (bytes_written, source_url).
+    Raises NoPdfAvailable when all URLs are reachable but none is a PDF (terminal).
+    Raises httpx.HTTPError on persistent 429/5xx (transient — caller retries).
     """
     candidates = [u for u in urls if u]
     if not candidates:
@@ -101,14 +79,7 @@ def _stream_pdf(
     tmp: Path,
     sleep: Callable[[float], None],
 ) -> int | None:
-    """Stream ``url`` to ``tmp`` if it is a real PDF; return bytes written.
-
-    Returns ``None`` if the URL is reachable but isn't a usable PDF: a 404 / 403
-    / other 4xx (paywalled or absent), or a 200 whose body doesn't start with the
-    ``%PDF-`` magic (e.g. an HTML landing page). Retries 429 / 5xx up to
-    ``MAX_ATTEMPTS`` with backoff (honoring ``Retry-After``); raises
-    ``httpx.HTTPStatusError`` if they persist. Network/timeout errors propagate.
-    """
+    """Stream url → tmp if the body starts with %PDF-; return bytes written or None if not a PDF."""
     for attempt in range(MAX_ATTEMPTS):
         with client.stream("GET", url) as resp:
             if resp.status_code == 429 or 500 <= resp.status_code < 600:

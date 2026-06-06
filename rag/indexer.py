@@ -1,22 +1,7 @@
-"""Re-runnable RAG indexer skeleton used by every per-source script.
+"""Shared RAG indexer loop used by every per-source script.
 
-Each `scripts/<source>_index_rag.py` is a ~40-line wrapper that parses CLI
-flags, builds a per-source extractor closure, and calls `run_indexer(...)`.
-This module owns everything that's identical across sources:
-
-- schema-mismatch / model-mismatch detection → wipe + rebuild
-- WAL/SHM sidecar cleanup
-- `_meta` stamping (embed_model, embedding_dim, chunk_size, overlap, extras)
-- existing version dict load
-- the batched embed-and-write loop (chunks_vec → chunks → docs_meta, in that
-  order so the FK constraint stays satisfied and no orphan vectors accumulate)
-- periodic progress prints every flush boundary
-- FTS rebuild at end
-- `n_new` / `n_updated` accounting (post-chunks check)
-
-Per-source variation comes through the `extractor`, `legacy_table_prefixes`,
-`extra_meta`, and `source_label` parameters — see the per-source scripts for
-usage.
+Handles schema/model-mismatch detection, _meta stamping, version-skip, batched embed-and-write,
+FTS rebuild, and progress accounting. Per-source variation is passed via extractor + parameters.
 """
 
 import sqlite3
@@ -46,31 +31,7 @@ def run_indexer(
     legacy_table_prefixes: tuple[str, ...] = (),
     source_label: str = "docs",
 ) -> int:
-    """Build / update `<source>_rag.db` from a per-source extractor.
-
-    Args:
-        source_db_path: Read-only source SQLite file (e.g. `data/arxiv/arxiv.db`).
-        rag_db_path: Target `<source>_rag.db` to write.
-        extractor: Callable taking the source `sqlite3.Connection` and yielding
-            `Doc` instances. Per-source script applies any sampling / limit
-            inside this closure.
-        reset: When True, wipe `rag_db_path` and rebuild from scratch.
-        batch: Embedding batch size (chunks per Ollama HTTP call).
-        ollama_url: Override the embedder's default URL.
-        chunk_size, chunk_overlap: Per-source chunker config. `chunk_size` is
-            a soft target; the chunker prefers natural boundaries near it.
-            `chunk_overlap` defaults to 10% of `chunk_size` when None.
-        max_chunk_size: Hard cap on chunk length in characters. When None,
-            defaults to ~1.2 × `chunk_size` inside the chunker.
-        extra_meta: Additional `_meta` rows stored alongside the standard keys
-            (e.g. `{"source_limit": "5000"}` for openalex).
-        legacy_table_prefixes: Trigger an auto-rebuild if any table starting
-            with one of these names exists (e.g. `("paper_chunks",)` for arxiv).
-        source_label: Used in the summary line (`"papers"`, `"works"`, etc.).
-
-    Returns:
-        Process exit code: 0 on success, 1 if the source DB is missing.
-    """
+    """Build or incrementally update a RAG DB. Returns 0 on success, 1 if source DB missing."""
     if not source_db_path.is_file():
         print(f"missing source DB: {source_db_path}", file=sys.stderr)
         return 1

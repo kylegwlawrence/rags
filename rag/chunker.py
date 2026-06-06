@@ -1,22 +1,8 @@
-"""Recursive boundary-aware chunker for the RAG pipeline.
+"""Boundary-aware chunkers for the RAG pipeline.
 
-Two chunkers ship here:
-
-- `chunk_doc`: pure text → chunks, all tagged with `doc.section`. Default for
-  sources whose content is naturally one block (arxiv title+abstract, openalex
-  abstracts, gutenberg book bodies).
-- `chunk_markdown`: split on `##`/`###`/`####` headings first (heading text
-  goes into `section`, not the chunk body), then chunk each section. Default
-  for sources whose content is structured (factbook, future arxiv full HTML).
-
-Splitting uses `langchain-text-splitters.RecursiveCharacterTextSplitter` with
-a paragraph→line→sentence→clause→word→char separator hierarchy, so chunks
-end at the strongest available boundary. A hard-cap post-pass re-splits any
-chunk that exceeded `max_chunk_size` after the soft-target split, preferring
-word boundaries before falling through to a character cut.
-
-Both functions return the same dict shape — `run_indexer` accepts either via
-`chunk_fn`.
+`chunk_doc`: flat prose → chunks tagged with doc.section.
+`chunk_markdown`: split on ##/###/#### headings first, chunk each section independently.
+Both use RecursiveCharacterTextSplitter (paragraph→word→char) with a hard-cap post-pass.
 """
 
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
@@ -41,13 +27,7 @@ def _resolve_max(chunk_size: int, max_chunk_size: int | None) -> int:
 
 
 def _split_with_hard_cap(text: str, chunk_size: int, overlap: int, max_chunk_size: int) -> list[str]:
-    """Recursive boundary split with a post-pass that enforces `max_chunk_size`.
-
-    First pass uses the natural-boundary separator list. Any output chunk that
-    still exceeds the hard cap (e.g. a single paragraph with no internal
-    punctuation) is re-split with a tighter `[" ", ""]` splitter — that
-    prefers word boundaries over arbitrary character cuts.
-    """
+    """Split on natural boundaries; re-split oversized chunks with word-boundary fallback."""
     if not text:
         return []
     splitter = RecursiveCharacterTextSplitter(
@@ -86,24 +66,7 @@ def chunk_doc(
     overlap: int = 0,
     max_chunk_size: int | None = None,
 ) -> list[dict]:
-    """Split a Doc's text into chunks, all tagged with `doc.section`.
-
-    Args:
-        doc: Source Doc. `doc.section` (when set) is applied to every output
-            chunk. Extractors that want per-chunk sections should use
-            `chunk_markdown` instead.
-        chunk_size: Soft-target chunk length in characters. Most chunks land
-            at or below this.
-        overlap: Inter-chunk overlap in characters. Set to 0 in the current
-            extractors; non-zero raises duplicate-token mass in embeddings.
-        max_chunk_size: Hard cap; any chunk longer than this after the first
-            split gets re-split with a word-boundary-preferring splitter.
-            Defaults to ~1.2 × `chunk_size` when None.
-
-    Returns:
-        List of dicts with `section` (str|None), `chunk_index` (int, 0-based),
-        `text` (str), `text_length` (int). Empty list if doc text is empty.
-    """
+    """Split a Doc's text into chunks, all tagged with doc.section."""
     text = normalize_whitespace(doc.text or "")
     if not text:
         return []
@@ -132,26 +95,7 @@ def chunk_markdown(
     overlap: int = 0,
     max_chunk_size: int | None = None,
 ) -> list[dict]:
-    """Split markdown text by `##`/`###`/`####` headings, then chunk each section.
-
-    Heading text is captured into the `section` field (and stripped from the
-    chunk body so `## Geography` never reaches the embedder). Lead text before
-    the first heading inherits `doc.section`. Overlap stays within a section —
-    overlapping across section boundaries would mix Geography text into Economy
-    chunks.
-
-    Args:
-        doc: Source Doc. `doc.text` is treated as markdown with ATX-style
-            headings; lead content before the first heading gets `doc.section`.
-        chunk_size: Soft target in characters.
-        overlap: Inter-chunk overlap (within section).
-        max_chunk_size: Hard cap; defaults to ~1.2 × `chunk_size`.
-
-    Returns:
-        List of dicts with `section` (str|None), `chunk_index` (int, 0-based
-        across the whole document, in reading order), `text` (str),
-        `text_length` (int). Empty list if every section ends up empty.
-    """
+    """Split on ##/###/#### headings → section field; overlap stays within a section."""
     text = normalize_whitespace(doc.text or "")
     if not text:
         return []

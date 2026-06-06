@@ -1,15 +1,4 @@
-"""eCFR Doc-builder: render one `regulations` row into a Doc for RAG indexing.
-
-Shared by the batch indexer (`scripts/ecfr/ecfr_rag_extract.py`) and the
-API's live-embed route (`api.routers.ecfr.embed_regulation`). Lives in
-`rag/` so both callers can import it — same reasoning as `rag.federal_register`.
-
-Each `regulations` row yields flat prose: the section's `content` field as-is.
-There are no `##` headings in eCFR content, so `chunk_doc` (not `chunk_markdown`)
-is used. The DENSE profile (1000/1200/100) suits the short regulatory paragraphs.
-
-Version key is `content_hash(heading, content)` plus `CLEANER_VERSION`.
-"""
+"""eCFR Doc-builder. Shared by the batch indexer and the API's live-embed route."""
 
 import sqlite3
 
@@ -18,11 +7,7 @@ from rag.cleaner import CLEANER_VERSION
 
 
 def build_doc(row: sqlite3.Row) -> Doc | None:
-    """Render one `regulations` row into a Doc.
-
-    Returns None when the row has no body text. Columns expected on `row`:
-    `id, title_num, section, heading, content`.
-    """
+    """Render one `regulations` row into a Doc; None when content is empty."""
     reg_id = row["id"]
     heading = (row["heading"] or "").strip()
     content = (row["content"] or "").strip()

@@ -1,22 +1,6 @@
-"""Shared RAG primitives plus any source-specific code reused by the API.
-
-Mostly generic: chunking, embedding, hybrid retrieval, the rag-DB schema.
-Each datasource has its own `data/<source>/<source>_rag.db` with a uniform
-schema (chunks, chunks_fts, chunks_vec, docs_meta, _meta). The reader API
-and the indexer scripts both import this package; most per-source "extractor"
-code lives next to its indexer script under `scripts/`.
-
-A few modules here are source-specific extractors that live in `rag/` only
-because both a script and the API need to import them — keeping them under
-`scripts/<source>/` would force the API to sys.path-mangle to reach them:
-
-- `rag.wikitext`   — simplewiki / enwiki wikitext → markdown
-- `rag.html_to_markdown` — arxiv LaTeXML HTML → markdown
-- `rag.sec_filing` — SEC EDGAR submission fetch + primary-document extraction
-- `rag.pdfs`       — PDF per-page Doc builder + page-aware chunker
-
-The embedding model is locked to `nomic-embed-text:v1.5` at 768 dimensions.
-Changing the model means rebuilding every `<source>_rag.db` from scratch.
+"""Shared RAG primitives (chunking, embedding, retrieval, schema) plus source-specific
+extractors that both scripts and the API import. Each source has its own `<source>_rag.db`
+with a uniform schema. Embedding model: nomic-embed-text:v1.5 at 768 dimensions.
 """
 
 import hashlib
@@ -25,12 +9,7 @@ from typing import NamedTuple
 
 
 def content_hash(*parts: str | None) -> str:
-    """SHA-256 hex prefix (32 chars / 128 bits) of NUL-joined parts.
-
-    Used by every per-source extractor that needs a stable version key when
-    the source schema lacks a per-row `updated_at` column. NUL separators
-    prevent boundary-collision tricks (`"ab"+"c"` vs `"a"+"bc"`).
-    """
+    """SHA-256 hex prefix (32 chars) of NUL-joined parts. NUL prevents boundary-collision."""
     h = hashlib.sha256()
     for p in parts:
         h.update((p or "").encode("utf-8"))
@@ -40,18 +19,7 @@ def content_hash(*parts: str | None) -> str:
 
 @dataclass(frozen=True)
 class Doc:
-    """One unit of content from a source's raw DB, ready to chunk + embed.
-
-    Attributes:
-        doc_id: TEXT id stable across re-runs (arxiv id, openalex W-id, etc.).
-        title: Short display string; used in the embedder's format_document prefix.
-        version: Change-detection key. Re-runs skip docs whose version matches
-            the previously-stored value in docs_meta.
-        text: Full text to chunk. Concatenation of title/abstract/sections is
-            the extractor's job.
-        section: Optional default section name applied to every chunk produced
-            from this doc. Per-chunk section overrides are extractor-specific.
-    """
+    """One unit of content from a source, ready to chunk + embed."""
 
     doc_id: str
     title: str
@@ -75,11 +43,7 @@ class Hit:
 
 
 class RetrievalResult(NamedTuple):
-    """Return value of `retriever.retrieve`.
-
-    `used_dense` is False when Ollama was unreachable and only sparse (FTS5)
-    results were merged. Callers should surface this to clients.
-    """
+    """`used_dense` is False when Ollama was unreachable (sparse-only fallback)."""
 
     hits: list[Hit]
     used_dense: bool

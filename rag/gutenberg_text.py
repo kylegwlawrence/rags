@@ -1,11 +1,4 @@
-"""Gutenberg .txt body helpers: read from disk, strip PG banners, fingerprint.
-
-Shared by the batch indexer (`scripts/gutenberg/gutenberg_rag_extract.py`) and
-the API's live-embed route (`api.routers.gutenberg.embed_text`). Lives in
-`rag/` rather than `scripts/gutenberg/` because both a script and the API
-need to import it — the same reasoning as `rag.wikitext` and
-`rag.sec_filing` (see the rag/__init__.py docstring).
-"""
+"""Gutenberg .txt helpers: read from disk, strip PG banners, fingerprint. Shared by script and API."""
 
 import hashlib
 import re
@@ -53,14 +46,7 @@ def read_text(path: Path) -> str:
 
 
 def strip_banners(text: str) -> str:
-    """Remove PG start/end banner blocks plus stray "Project Gutenberg" mentions.
-
-    Sequence: snip everything before the start banner and after the end
-    banner, then defensively delete any remaining line that mentions
-    "Project Gutenberg" (catches Small-Print remnants and footer prose the
-    structural regexes miss), then drop markdown emphasis runs (`**`) the
-    older PG text uses for inline emphasis, then collapse blank-line runs.
-    """
+    """Remove PG start/end banner blocks and stray "Project Gutenberg" mention lines."""
     start = _PG_START_RE.search(text)
     end = _PG_END_RE.search(text)
     if start:
@@ -74,11 +60,7 @@ def strip_banners(text: str) -> str:
 
 
 def file_fingerprint(path: Path) -> str:
-    """`{size}-{hex}` where hex is SHA-256 prefix over first+last 4 KB.
-
-    mtime drifts on rsync mirrors; size+endpoint-hash is a stable change-detection
-    signal that doesn't require reading the whole file.
-    """
+    """`{size}-{hex}` (SHA-256 of first+last 4 KB). Stable on rsync mirrors where mtime drifts."""
     actual_size = path.stat().st_size
     with path.open("rb") as f:
         head = f.read(4096)

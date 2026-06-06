@@ -1,28 +1,8 @@
-"""Convert arxiv-rendered HTML (LaTeXML output) to markdown.
+"""Convert arXiv LaTeXML HTML to markdown for chunk_markdown section-aware chunking.
 
-The single public entry point is ``html_to_markdown(html) -> str``. The output
-is fed to ``rag.chunker.chunk_markdown`` for section-aware chunking, so the
-goal is *clean markdown that preserves the textual structure of the paper* —
-headings, paragraphs, lists, inline/display math, table content, figure
-captions — and drops chrome (TOC, navbar, scripts).
-
-LaTeXML structure cheatsheet (observed on arXiv HTML5 papers):
-
-* root: ``<article class="ltx_document">``
-* sections: ``<section class="ltx_section">`` with ``<h2 class="ltx_title">``;
-  subsections use ``<h3>``/``<h4>`` similarly
-* abstract: ``<div class="ltx_abstract">`` with ``<h6 class="ltx_title_abstract">``
-* paragraphs: ``<p class="ltx_p">`` (often inside ``<div class="ltx_para">``)
-* math: ``<math alttext="..." display="inline|block">`` — ``alttext`` is the
-  original LaTeX source, which is exactly what we want for the markdown
-* tables: ``<table class="ltx_tabular">`` with standard ``<tr>`` / ``<th>`` / ``<td>``
-* figures: ``<figure class="ltx_figure">`` containing ``<figcaption>``
-* citations: ``<cite class="ltx_cite"><a>key </a></cite>``
-* bold/italic: ``<span class="ltx_text ltx_font_bold|ltx_font_italic">``
-* section numbers inside headings: ``<span class="ltx_tag">1 </span>``
-
-Ported from local_wikipedia/arxiv/render.py with the frontend-only
-``prepare_local_view`` helper omitted.
+LaTeXML structure: <article class="ltx_document">; sections <h2 class="ltx_title">;
+abstract <h6 class="ltx_title_abstract"> (promoted to ##); math <math alttext="...">
+(alttext is the original LaTeX); section numbers in <span class="ltx_tag"> stripped.
 """
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -174,13 +154,7 @@ def _emit_math(node: Tag, parts: list[str]) -> None:
 
 
 def _emit_heading(node: Tag, name: str, classes: set[str], parts: list[str]) -> None:
-    """Emit a heading at the markdown level matching the HTML tag.
-
-    Abstract headings (``<h6 class="ltx_title_abstract">``) get promoted to
-    ``##`` so the chunker sees the abstract as a section like any other.
-    Section-number prefixes (``<span class="ltx_tag">1 </span>``) are stripped
-    here rather than globally so figure / table captions keep their tag text.
-    """
+    """Emit heading markdown. Abstract h6 → ## ; section numbers stripped here (not globally)."""
     for tag_span in node.select(".ltx_tag"):
         tag_span.decompose()
     text = _inline_text(node).strip()
@@ -204,12 +178,7 @@ def _render_list(node: Tag, parts: list[str], *, ordered: bool) -> None:
 
 
 def _render_table(node: Tag) -> str:
-    """Convert a ``<table>`` to a markdown table.
-
-    Rows are inferred from ``<tr>`` descendants; the first row is treated
-    as the header. Cells with internal pipes are escaped. Tables with no
-    rows produce an empty string.
-    """
+    """Convert a <table> to markdown. First row is header; pipes in cells are escaped."""
     rows = node.find_all("tr")
     if not rows:
         return ""
@@ -237,12 +206,7 @@ def _render_table(node: Tag) -> str:
 
 
 def _inline_text(node: Tag) -> str:
-    """Render ``node``'s children as a single inline string (no block breaks).
-
-    Walks children directly rather than dispatching on ``node`` itself, so
-    callers can safely invoke this from inside a handler for ``node``
-    (heading, link, cell) without recursing back into the same handler.
-    """
+    """Render node's children as a flat inline string. Walks children to avoid handler recursion."""
     parts: list[str] = []
     for child in node.children:
         _render(child, parts)

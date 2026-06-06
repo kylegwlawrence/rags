@@ -1,11 +1,5 @@
-"""Ollama embedding calls for the RAG pipeline.
-
-Locked to `nomic-embed-text:v1.5` at 768 dimensions (the tag matters; the bare
-`nomic-embed-text` may resolve differently). The model's task-prefix contract
-is enforced via `format_document` / `format_query` — embedding without them
-produces noticeably worse retrieval.
-
-Configurable via the `OLLAMA_URL` env var (default `http://localhost:11434`).
+"""Ollama embedding calls (nomic-embed-text:v1.5, 768d). URL via OLLAMA_URL env var.
+Task prefixes (search_document / search_query) are required for quality retrieval.
 """
 
 import os
@@ -24,13 +18,7 @@ EMBED_QUERY_PREFIX = "search_query: "
 
 
 def format_document(title: str, section: str | None, text: str) -> str:
-    """Build the indexing-time string for a chunk.
-
-    Prepends nomic's `search_document:` task prefix, then a short header with
-    the doc's title (and section heading when present) so the chunk vector
-    encodes self-contained provenance instead of a fragment that depends on
-    neighbouring chunks for context.
-    """
+    """Prepend the search_document: prefix + title header. Encodes provenance in the vector."""
     header = f"{title} - {section}" if section else title
     return f"{EMBED_DOC_PREFIX}{header}\n\n{text}"
 
@@ -41,12 +29,7 @@ def format_query(query: str) -> str:
 
 
 def embed_text(text: str, base_url: str = OLLAMA_URL) -> list[float]:
-    """Embed a single text via Ollama `/api/embed`.
-
-    Retries up to `rag.retry.MAX_ATTEMPTS` times with exponential backoff on
-    HTTP errors. Raises `httpx.HTTPError` if all attempts fail; the retriever
-    catches this for the sparse-only fallback path.
-    """
+    """Embed one text via Ollama. Raises httpx.HTTPError after retries (retriever catches this)."""
     def _call() -> list[float]:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
@@ -60,13 +43,7 @@ def embed_text(text: str, base_url: str = OLLAMA_URL) -> list[float]:
 
 
 def embed_texts_batch(texts: list[str], base_url: str = OLLAMA_URL) -> list[list[float]]:
-    """Embed multiple texts in one HTTP round-trip via Ollama `/api/embed`.
-
-    Used by the indexer's hot path — N texts go in one POST instead of N. Same
-    retry policy as `embed_text` but a longer (600 s) timeout because the batch
-    can include hundreds of chunks and Ollama can stall under memory pressure
-    (model swap-outs, parallel requests) for well past two minutes.
-    """
+    """Embed multiple texts in one Ollama call. Long timeout (600s) for large batches."""
     def _call() -> list[list[float]]:
         with httpx.Client(timeout=600.0) as client:
             resp = client.post(

@@ -1,21 +1,8 @@
-"""Per-source chunker configuration profiles.
+"""Per-source chunker profiles (chunk_size, max_chunk_size, overlap).
 
-A chunker profile is just `(chunk_size, max_chunk_size, overlap)` — the three
-knobs every per-source indexer script tunes. Centralizing them here means:
-
-* The wrapper scripts in `scripts/<source>/<source>_index_rag.py` declare
-  their defaults by importing a profile from this module instead of typing
-  numbers into argparse.
-* The API's live-embed paths (currently only simplewiki) import the same
-  profile and pass the same values to `rag.embed_one.embed_doc`, so a
-  button-embedded document chunks identically to one rebuilt by the batch
-  indexer. Removes the previous "keep these in sync" comment in
-  `api/routers/simplewiki.py`.
-
-If you change a profile, re-run the relevant `<source>_index_rag.py
---reset` so existing chunks get rebuilt with the new settings (the
-`docs_meta.version` key is content-derived and won't trigger a rebuild
-on config changes alone).
+Scripts import their defaults from here; the API's live-embed routes import the same profile
+so button-embedded docs chunk identically to batch-indexed ones. Changing a profile requires
+--reset on the relevant indexer (version keys are content-derived, not config-derived).
 """
 
 from dataclasses import dataclass

@@ -1,11 +1,5 @@
-"""Shared CLI scaffolding for `scripts/<source>/<source>_index_rag.py`.
-
-Each wrapper script was ~80 lines of argparse + the same validations + a
-single call to `rag.indexer.run_indexer`. Only a handful of pieces actually
-varied: the source/rag DB paths, the extractor callable, the chunker
-profile, the source-label noun, and (in a few cases) source-specific extra
-flags. `run_index_cli(...)` factors out the boilerplate so each wrapper
-collapses to ~25 lines.
+"""Shared CLI scaffolding for per-source index_rag.py scripts.
+`run_index_cli` handles standard argparse flags, validation, and dispatch to `run_indexer`.
 """
 
 import argparse
@@ -37,41 +31,7 @@ def run_index_cli(
     extra_meta_factory: Callable[[argparse.Namespace], dict[str, str]] | None = None,
     add_extra_args: Callable[[argparse.ArgumentParser], None] | None = None,
 ) -> int:
-    """Parse the standard rag-indexer CLI and dispatch to `run_indexer`.
-
-    Args:
-        description: Script docstring/argparse description. Usually pass `__doc__`.
-        source_db_path: Read-only source SQLite DB (e.g. `data/arxiv/arxiv.db`).
-        rag_db_path: Target `<source>_rag.db` to write.
-        extractor_factory: Takes the parsed argparse `Namespace` and returns the
-            conn-only extractor `run_indexer` expects. The factory pattern lets
-            per-source CLI flags (e.g. gutenberg's `--language`) reach the
-            extractor without polluting the helper's signature.
-        chunk_fn: `rag.chunker.chunk_doc` (flat prose) or `chunk_markdown`
-            (section-aware). Passed straight through to `run_indexer`.
-        chunker_defaults: A `ChunkerProfile` from `rag.profiles`. The script
-            inherits its three chunker defaults from this profile; callers
-            can still override on the command line.
-        limit_default: Default for `--limit`. `None` means "process every doc
-            the extractor yields" — pass an int (e.g. 100) for sources where
-            the full corpus is too slow on local Ollama. Validation in either
-            case: if `--limit` ends up not-None, it must be positive.
-        limit_help: Custom `--limit` help string (overrides the generic one,
-            useful for "default 5000" or other source-specific framing).
-        source_label: Noun shown in the indexer's summary print ("papers",
-            "works", "articles"). Defaults to "docs".
-        legacy_table_prefixes: Passed through to `run_indexer` for the wipe-
-            on-detect path (arxiv uses this to detect a Phase-1 schema).
-        extra_meta_factory: Builds the `extra_meta` dict from parsed args,
-            e.g. `lambda a: {"source_limit": str(a.limit)}`. Returned values
-            land in the rag DB's `_meta` table for run-config provenance.
-        add_extra_args: Hook for per-source flags. Called after the standard
-            flags are added so the source can register its own (gutenberg's
-            `--language`, `--exclude-id`, `--max-pages`, etc.).
-
-    Returns:
-        Whatever `run_indexer` returns (0 on success, 1 if source DB missing).
-    """
+    """Parse standard rag-indexer CLI flags, validate, and dispatch to run_indexer."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--limit",

@@ -1,35 +1,5 @@
-"""Federal Register Doc-builder: render one `documents` row to markdown.
-
-Shared by the batch indexer (`scripts/federal_register/federal_register_rag_extract.py`)
-and the API's live-embed route (`api.routers.federal_register.embed_document`).
-Lives in `rag/` rather than `scripts/federal_register/` because both a script
-and the API need to import it — same reasoning as `rag.sec_filing` and
-`rag.wikitext` (see the rag/__init__.py docstring).
-
-Each `documents` row renders as section-headered markdown:
-
-    ## Details
-    Type: Rule
-    Date: 2024-01-15
-    Agencies: Environmental Protection Agency
-    Effective date: 2024-03-01
-
-    ## Abstract
-    This rule establishes ...
-
-    ## Action
-    Final rule.
-
-    ## Excerpts
-    ...relevant passage...
-
-Empty fields are omitted. `chunk_markdown` splits on `##` headings so each
-chunk's `section` column carries "Details", "Abstract", "Action", or "Excerpts".
-
-Version key is `content_hash(title, abstract, action, excerpts, type,
-publication_date, agencies, effective_date)` plus `CLEANER_VERSION` —
-`federal_register.db` has no per-row `updated_at`, so a content hash is the
-edit-detection signal.
+"""Federal Register Doc-builder. Shared by the batch indexer and the API's live-embed route.
+Renders rows as ## Details / Abstract / Action / Excerpts markdown for chunk_markdown splitting.
 """
 
 import sqlite3
@@ -44,13 +14,7 @@ def _clean(value: str | None) -> str:
 
 
 def build_doc(row: sqlite3.Row) -> Doc | None:
-    """Render one `documents` row into a markdown Doc.
-
-    Returns None when the row has no usable text (no title and no abstract,
-    or only whitespace after assembly). The columns expected on `row` are
-    `document_number, title, abstract, type, publication_date, agencies,
-    action, effective_date, excerpts`.
-    """
+    """Render one `documents` row into a markdown Doc; None when no usable text."""
     doc_number = row["document_number"] or ""
     title = _clean(row["title"])
     abstract = _clean(row["abstract"])

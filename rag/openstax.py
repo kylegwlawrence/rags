@@ -1,27 +1,8 @@
-r"""OpenStax CNXML/COLLXML parsing + Doc-builder, shared by script and API.
+r"""OpenStax CNXML/COLLXML parsing + Doc-builder. Shared by the downloader, indexer, and API route.
 
-OpenStax ships each textbook as a GitHub `osbooks-*` repo of XML:
-
-* `collections/<slug>.collection.xml` — **COLLXML**: the table of contents.
-  A `<col:collection>` holds book metadata and a tree of `<col:subcollection>`
-  chapters, each listing its sections as `<col:module document="mNNNNN"/>`
-  references in reading order.
-* `modules/<mNNNNN>/index.cnxml` — **CNXML**: one section. A `<title>`, learning
-  objectives in `<metadata><md:abstract>`, and body prose in `<content>`
-  (`<para>`, `<section>`, `<equation>`, tables, exercises, and presentation
-  `<m:math>` for every formula).
-
-This module turns that XML into plain rows + a `Doc`:
-
-* `parse_collection` — COLLXML → book metadata + ordered (chapter, [module_id]).
-* `cnxml_to_markdown` — one module's CNXML → (title, objectives, body markdown),
-  with every `<m:math>` rebuilt as inline `\(…\)` LaTeX via `rag.mathml`.
-* `build_doc` — a stored `sections` row → a `Doc` ready to chunk/embed.
-
-Parsing uses the stdlib `xml.etree` (CNXML is well-formed XML), so the only new
-dependency is none. Lives in `rag/` rather than `scripts/openstax/` because the
-downloader imports the parsers while the indexer and the API's live-embed route
-import `build_doc` — the same split as `rag.eurlex` / `rag.pdfs`.
+COLLXML (collections/<slug>.collection.xml) → parse_collection → book metadata + chapter ordering.
+CNXML (modules/mNNNNN/index.cnxml) → cnxml_to_markdown → title + objectives + body with \(…\) LaTeX.
+`build_doc` renders a stored `sections` row into a Doc ready to chunk/embed.
 """
 
 import sqlite3
@@ -52,12 +33,7 @@ def _find_local(parent: Element, name: str) -> Element | None:
 
 @dataclass(frozen=True)
 class Chapter:
-    """One chapter (or front/back matter) from a collection's TOC.
-
-    `number` is the 1-based chapter ordinal, or None for loose modules that
-    sit outside any chapter (the preface, answer keys, etc.). `module_ids`
-    lists the chapter's section modules in reading order.
-    """
+    """One chapter from a COLLXML TOC. number=None for loose modules (preface, answer keys)."""
 
     number: int | None
     title: str | None
@@ -87,14 +63,7 @@ def _collect_modules(elem: Element) -> list[str]:
 
 
 def parse_collection(xml_text: str) -> CollectionInfo:
-    """Parse a `.collection.xml` (COLLXML) string into a `CollectionInfo`.
-
-    Top-level `<col:content>` children are walked in order: a `<col:module>`
-    is loose matter (chapter None); a `<col:subcollection>` is a numbered
-    chapter whose sections are every module beneath it (handles the rare
-    nested-unit layout too). Chapter numbers count only subcollections, so the
-    preface doesn't shift the numbering.
-    """
+    """Parse a .collection.xml into CollectionInfo. Subcollections → numbered chapters; loose modules → None."""
     root = fromstring(xml_text)
 
     title = ""
@@ -227,11 +196,7 @@ def _render(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
 
 
 def _render_section(elem: Element, level: int) -> str:
-    """Render a `<section>`: its `<title>` as a `#`-heading, then its body.
-
-    The heading uses `min(level, 6)` hashes; the section's other children render
-    one level deeper so nested sub-sections nest their headings too.
-    """
+    """Render a <section>: title as a #-heading (clamped to h6), children one level deeper."""
     parts: list[str] = []
     title_el = _find_local(elem, "title")
     if title_el is not None:
@@ -261,12 +226,7 @@ def _inline(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
 
 
 def _extract_objectives(metadata: Element) -> str | None:
-    """Pull learning objectives from a module's `<md:abstract>`, if present.
-
-    The abstract is typically a lead "In this section, you will:" paragraph
-    followed by a `<list>` of `<item>` objectives. Returns one objective per
-    line, or None when the module has no abstract / no list items.
-    """
+    """Extract list items from <md:abstract>; returns one per line, or None if absent."""
     abstract = _find_local(metadata, "abstract")
     if abstract is None:
         return None
@@ -284,13 +244,7 @@ def _extract_objectives(metadata: Element) -> str | None:
 
 
 def cnxml_to_markdown(xml_text: str) -> ParsedModule:
-    r"""Parse one module's CNXML into title, objectives, and body markdown.
-
-    Every `<m:math>` formula is rebuilt as inline `\(…\)` LaTeX (display
-    `<equation>` as `\[…\]`); images are dropped; tables flatten to
-    `cell | cell` rows. Whitespace is normalised so the chunker's paragraph
-    boundaries line up.
-    """
+    r"""Parse one module's CNXML → (title, objectives, body). Math → \(…\)/\[…\] LaTeX."""
     root = fromstring(xml_text)
 
     title = ""
@@ -329,18 +283,7 @@ def section_label(chapter_title: str | None, section_title: str) -> str:
 
 
 def build_doc(row: sqlite3.Row) -> Doc | None:
-    """Render one `sections` row (joined with its book title) into a `Doc`.
-
-    Expected columns on `row`: `section_id, book_title, chapter_title, title,
-    objectives, body`. The doc text leads with the section title and its
-    learning objectives (the outline signal) so a chunk matches a topic query
-    even when the prose buries it, then the body. Returns None when the section
-    has no body text.
-
-    `Doc.section` is the human "Chapter — Section" label, which rides onto every
-    chunk and into the embedding header. Pairs with `rag.chunker.chunk_doc`
-    (flat prose); each module is already one logical section.
-    """
+    """Render one `sections` row into a Doc (title + objectives + body); None when body is empty."""
     body = (row["body"] or "").strip()
     if not body:
         return None

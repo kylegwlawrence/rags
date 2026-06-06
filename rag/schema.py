@@ -1,12 +1,6 @@
-"""RAG database schema and connection helper.
-
-Uniform across all sources. Each source has its own `<source>_rag.db` file
-with identical table structure; source identity comes from the file path,
-not the table name.
-
-Used by the indexer scripts in read-write mode (sqlite-vec loaded, schema
-ensured). The API reads through `api.db._connect_ro_with_vec` instead — same
-extension load, but the URI form `file:...?mode=ro` prevents writes.
+"""RAG DB schema (chunks, chunks_fts, chunks_vec, docs_meta, _meta) and connection helper.
+All sources share the same schema; identity comes from the file path. Indexers use this
+read-write; the API uses api.db._connect_ro_with_vec for read-only access.
 """
 
 import pathlib
@@ -16,21 +10,7 @@ import sqlite_vec
 
 
 def connect_rag(path: pathlib.Path) -> sqlite3.Connection:
-    """Open a RAG DB read-write with sqlite-vec loaded and schema ensured.
-
-    Enables `PRAGMA foreign_keys = ON` so the `chunks.doc_id REFERENCES
-    docs_meta(doc_id)` constraint is actually enforced — protects against
-    future "I forgot the delete order" bugs. The existing indexer already
-    deletes chunks before docs_meta so nothing breaks today.
-
-    Args:
-        path: Filesystem path to the `<source>_rag.db` file. Parent directories
-            must exist; the SQLite file is created if absent.
-
-    Returns:
-        sqlite3.Connection with Row factory, sqlite-vec extension loaded, FK
-        enforcement on, and all RAG tables guaranteed to exist.
-    """
+    """Open a RAG DB read-write with sqlite-vec loaded, FK enforcement on, and schema ensured."""
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -86,10 +66,7 @@ def create_rag_schema(conn: sqlite3.Connection) -> None:
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
-    """Read a `_meta` key. Returns None if the key isn't set.
-
-    Works with or without `row_factory = sqlite3.Row` on the caller's connection.
-    """
+    """Read a `_meta` key; returns None if absent."""
     row = conn.execute("SELECT value FROM _meta WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
 
@@ -108,22 +85,12 @@ def delete_doc_chunks(
     *,
     sync_fts: bool = False,
 ) -> None:
-    """Remove a doc's chunks, vectors, optional FTS entries, and docs_meta row.
+    """Remove a doc's chunks, vectors, FTS entries (if sync_fts), and docs_meta row.
 
-    Two callers, two FTS strategies:
-
-    * `rag.embed_one.embed_doc` calls with ``sync_fts=True`` so a live single-
-      doc embed keeps the FTS index current — it issues per-chunk
-      ``chunks_fts('delete', rowid, text)`` rows before dropping the
-      backing ``chunks`` rows.
-    * `rag.indexer._run.flush()` calls with ``sync_fts=False`` because the
-      batch indexer does one ``chunks_fts('rebuild')`` at the end of the run;
-      per-doc FTS deletes would just be wasted work.
-
-    Order matters: ``chunks_vec`` is a sqlite-vec virtual table whose rows
-    aren't reached by the ``chunks.doc_id`` foreign-key cascade, so they
-    must be cleared explicitly *before* the backing chunks rows go away.
-    Caller is responsible for ``commit()``.
+    sync_fts=True: live embed — per-chunk FTS delete keeps the index current.
+    sync_fts=False: batch indexer — skips per-doc FTS deletes, does one rebuild at end.
+    chunks_vec must be cleared before chunks (no FK cascade on the virtual table).
+    Caller commits.
     """
     if sync_fts:
         rows = conn.execute(

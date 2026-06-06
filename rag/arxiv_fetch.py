@@ -1,10 +1,4 @@
-"""Fetch one arXiv paper's LaTeXML HTML body from ``arxiv.org/html/{id}``.
-
-Shared by the bulk downloader (``scripts/arxiv/arxiv_download.py``) and the
-API's on-demand download route (``POST /arxiv/papers/{id}/download``), so a
-paper fetched either way goes through identical request logic — the same split
-as ``rag/sec_filing.py`` for SEC filings.
-"""
+"""Fetch one arXiv paper's LaTeXML HTML body. Shared by the bulk downloader and the API route."""
 
 import time
 from collections.abc import Callable
@@ -23,16 +17,7 @@ def fetch_paper_html(
     user_agent: str,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str | None:
-    """Fetch the LaTeXML HTML body for ``arxiv_id``.
-
-    Returns the body text on 200, ``None`` on 404 (arXiv has no HTML version
-    for that paper), or raises ``httpx.HTTPStatusError`` after ``MAX_ATTEMPTS``
-    failed retries on persistent 429 / 5xx. Honors ``Retry-After`` on 429 / 5xx
-    between attempts.
-
-    ``user_agent`` should carry a contact ``mailto:`` per arXiv's polite-access
-    policy. ``sleep`` is injectable so tests can run without real backoff waits.
-    """
+    """Fetch LaTeXML HTML for arxiv_id. Returns None on 404; raises HTTPStatusError after retries."""
     url = HTML_URL_TEMPLATE.format(arxiv_id=arxiv_id)
     headers = {"User-Agent": user_agent}
     for attempt in range(MAX_ATTEMPTS):

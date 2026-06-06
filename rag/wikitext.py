@@ -1,32 +1,8 @@
-"""Convert MediaWiki wikitext to markdown.
+"""Convert MediaWiki wikitext to markdown for chunk_markdown section-aware chunking.
 
-The single public entry point is ``wikitext_to_markdown(wt) -> str``. The output
-is fed to ``rag.chunker.chunk_markdown`` for section-aware chunking, so the goal
-is *clean markdown that preserves the textual structure of the article* —
-section headings, paragraphs, list items, link display text — and drops
-chrome (templates, file/image references, references).
-
-Wikitext structure cheatsheet:
-
-* sections: ``== Title ==`` (h2) up to ``====== Title ======`` (h6); single
-  ``=`` is reserved for the article title and never appears in body text
-* paragraphs separated by blank lines
-* wikilinks: ``[[Target]]`` or ``[[Target|Display]]``. ``[[File:foo.jpg|...]]``
-  and ``[[Image:foo.jpg|...]]`` are figure references and get dropped entirely;
-  ``[[Category:...]]`` is metadata and also dropped.
-* external links: ``[http://url Display]`` or bare ``http://url``
-* bold/italic: ``'''bold'''`` / ``''italic''``
-* lists: ``* item`` or ``# item``; nesting via repeated ``*``/``#``
-* templates: ``{{name|arg1|arg2}}`` — body varies; rendered chrome we drop
-* tables: ``{| ... |}`` — per Phase 4 scope we skip; only prose chunks ship
-* redirects: ``#REDIRECT [[Target]]`` at the very top — return "" so the
-  extractor filters the page out.
-
-The renderer is intentionally simpler than MediaWiki's: we don't expand
-templates (the dump would need a separate per-template renderer), and we
-don't render tables. Mwparserfromhell's ``strip_code()`` does most of the
-heavy lifting at the section-fragment level; this module adds the section
-header preservation that ``strip_code()`` alone discards.
+Wikitext structure: == heading == (h2) … ====== (h6); [[Target|Display]] wikilinks;
+[[File:/Image:/Category:]] dropped; templates dropped via mwparserfromhell.strip_code();
+#REDIRECT → "" (extractor filters). Tables are not rendered (only prose chunks ship).
 """
 
 import re
@@ -57,16 +33,7 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
 
 def normalize_category(name: str) -> str:
-    """Normalize a category name to its canonical MediaWiki form.
-
-    Applied both when building the page_categories table and when matching an
-    incoming ``?category=`` query, so the two always agree. MediaWiki treats
-    category titles as equal under these rules: underscores equal spaces, the
-    first letter is case-insensitive, surrounding whitespace is ignored. Any
-    sort-key suffix after a ``|`` should already be stripped by the caller.
-
-    Returns "" for an empty/whitespace-only name.
-    """
+    """Normalize to MediaWiki canonical form: underscores→spaces, first letter capitalised, stripped."""
     name = name.replace("_", " ")
     name = _WHITESPACE_RUN_RE.sub(" ", name).strip()
     if not name:
@@ -80,12 +47,7 @@ def is_redirect(wikitext: str) -> bool:
 
 
 def redirect_target(wikitext: str) -> str | None:
-    """Return the target article title of a ``#REDIRECT``, or None if not one.
-
-    Drops any ``#section`` anchor and ``|display`` suffix, leaving the bare
-    target title. Whitespace and underscores are left as-is for the caller to
-    normalise against stored titles.
-    """
+    """Return the redirect target title (no #anchor or |display suffix), or None if not a redirect."""
     m = _REDIRECT_TARGET_RE.match(wikitext or "")
     if m is None:
         return None
@@ -93,15 +55,7 @@ def redirect_target(wikitext: str) -> str | None:
 
 
 def wikitext_to_markdown(wikitext: str) -> str:
-    """Convert MediaWiki wikitext to markdown for the RAG chunker.
-
-    Headings keep their level (``==`` → ``##``, ``===`` → ``###``, ...). Bodies
-    are passed through ``mwparserfromhell.strip_code()`` to flatten templates,
-    formatting, and references; file/image/category wikilinks are removed
-    before stripping so their caption text doesn't survive into the chunk.
-
-    Returns "" for redirect articles and articles with no extractable prose.
-    """
+    """Convert wikitext to markdown. == → ##; bodies stripped via mwparserfromhell. Returns "" for redirects."""
     if not wikitext:
         return ""
     if is_redirect(wikitext):
@@ -143,12 +97,7 @@ def wikitext_to_markdown(wikitext: str) -> str:
 
 
 def _strip_fragment(fragment: str) -> str:
-    """Convert a wikitext fragment to plain text, dropping file/image/category links.
-
-    File/image/category wikilinks are removed *before* ``strip_code()`` so
-    their pipe-separated caption text (often long alt-text or thumbnails)
-    doesn't survive as orphaned prose.
-    """
+    """Strip wikitext fragment to plain text. File/Category wikilinks removed before strip_code()."""
     if not fragment or not fragment.strip():
         return ""
     try:

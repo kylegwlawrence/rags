@@ -1,18 +1,7 @@
-"""Text-cleanup helpers used by per-source RAG extractors.
+"""Text-cleanup helpers for RAG extractors.
 
-`strip_html` removes HTML tags and decodes entities. `strip_markdown` removes
-syntax noise (`**bold**`, `[text](url)`, `##` markers) while preserving the
-heading text itself. `normalize_whitespace` collapses runs of horizontal
-whitespace but keeps `\\n\\n` paragraph boundaries (the chunker splits on them).
-
-`CLEANER_VERSION` is appended to every per-source `Doc.version` string so that
-existing chunks get re-embedded on the next indexer run after any change to
-the cleaning behaviour. Bump the version when changing any function here.
-
-Per-source extractors call these directly (not the shared indexer) — each
-source has its own idea of what counts as noise (factbook walks JSON leaves,
-gutenberg has Project-Gutenberg banners, arxiv abstracts are mostly clean
-prose), so cleanup decisions stay close to the source.
+`CLEANER_VERSION` is appended to Doc.version — bump it when any function here changes
+so existing chunks are re-embedded on the next indexer run.
 """
 
 import html
@@ -24,13 +13,7 @@ CLEANER_VERSION = "v3"
 
 
 def strip_html(text: str) -> str:
-    """Remove HTML tags and decode entities, returning plain text.
-
-    Fast-path: returns input unchanged when no `<` and no `&` appear (avoids
-    parser overhead on the ~70% of arxiv/openalex strings that are already
-    clean prose). Otherwise parses with BeautifulSoup and decodes any bare
-    entities (`&amp;`, `&lt;`) that survive without surrounding tags.
-    """
+    """Remove HTML tags and decode entities. Fast-paths when no `<` or `&` present."""
     if not text:
         return text
     if "<" not in text and "&" not in text:
@@ -82,14 +65,7 @@ _BLANKLINE_RUN_RE = re.compile(r"\n{3,}")
 
 
 def normalize_whitespace(text: str) -> str:
-    """Collapse whitespace runs; preserve `\\n\\n` paragraph breaks; fold CRLF.
-
-    Windows / Project-Gutenberg-style `\\r\\n` line endings are normalised to
-    `\\n` so the chunker's paragraph separator (`\\n\\n`) actually matches —
-    otherwise `\\r\\n\\r\\n` falls through to the single-newline separator and
-    sentences get cut across line breaks. Three-plus newlines collapse to
-    exactly two.
-    """
+    """Collapse whitespace; preserve \\n\\n paragraph breaks; fold CRLF → \\n."""
     if not text:
         return text
     text = text.replace("\r\n", "\n").replace("\r", "\n")

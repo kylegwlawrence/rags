@@ -1,17 +1,7 @@
-"""Presentation-MathML → LaTeX converter (stdlib only).
+"""Presentation-MathML → LaTeX converter (stdlib xml.etree only, no MathML dependency).
 
-OpenStax CNXML embeds every formula as *presentation* MathML (`<m:math>` with
-`<m:mfrac>`, `<m:msup>`, …) and carries **no** TeX annotation, so the equations
-have to be rebuilt as LaTeX from the presentation tree. Rather than add a
-MathML dependency, this walks the parsed element tree with `xml.etree` (already
-used to parse the CNXML itself) and emits LaTeX for the bounded set of tags the
-OpenStax corpus actually uses.
-
-The single entry point is `mathml_to_latex(elem)`, which takes a parsed
-`<math>` element (namespaces already present on the tags) and returns a LaTeX
-string *without* `$` delimiters — the caller wraps it inline (`$…$`) or display
-(`$$…$$`). Anything unrecognised falls back to its concatenated text content, so
-an unusual construct degrades to readable characters rather than vanishing.
+Entry point: mathml_to_latex(elem) → LaTeX string without delimiters (caller wraps in $…$).
+Unrecognised constructs fall back to concatenated text content rather than vanishing.
 """
 
 from xml.etree.ElementTree import Element
@@ -92,12 +82,7 @@ def _delim(ch: str) -> str:
 
 
 def _accent_cmd(mark: "Element", table: dict) -> str | None:
-    """Return the LaTeX accent command for an over/under mark, or None.
-
-    Only a leaf operator/identifier whose text is a known accent counts; a
-    `<munder>` whose mark is a limit expression (e.g. `x\\to 3`) is not an
-    accent and falls through to `\\underset`.
-    """
+    """Return a LaTeX accent command for an over/under mark, or None if it's a limit expression."""
     # Unwrap a single-child container (the accent operator is sometimes wrapped
     # in an <mrow>, e.g. <mover><mi>y</mi><mrow><mo>^</mo></mrow></mover>).
     while mark is not None and _local(mark.tag) in ("mrow", "mstyle", "mpadded"):
@@ -149,15 +134,7 @@ def _children(elem: Element) -> list[Element]:
 
 
 def _convert_children(kids: list[Element]) -> str:
-    r"""Concatenate a container's children, recognising piecewise functions.
-
-    OpenStax writes a piecewise definition as an `<mo>{</mo>` brace fence
-    immediately followed by an `<mtable>` of cases. Rendered literally the brace
-    is just a small `\{`; paired here it becomes a tall `\left\{ … \right.`
-    spanning the whole table — the conventional piecewise look. A trailing
-    `<mo>}</mo>` after a table is paired symmetrically. Everything else is
-    converted child-by-child as before.
-    """
+    r"""Concatenate children. Detects {<mo>{</mo> + <mtable>} piecewise pattern → \left\{ … \right."""
     parts: list[str] = []
     i = 0
     while i < len(kids):
@@ -258,16 +235,7 @@ def _convert(elem: Element) -> str:
 
 
 def mathml_to_latex(elem: Element) -> str:
-    """Convert a parsed `<math>` element to a LaTeX string (no `$` delimiters).
-
-    Args:
-        elem: An `xml.etree` element for a MathML `<math>` node (or any MathML
-            subtree). Namespaces on the tags are tolerated.
-
-    Returns:
-        A LaTeX fragment with internal whitespace collapsed. Empty string when
-        the element has no convertible content.
-    """
+    """Convert a <math> element to a LaTeX string (no $ delimiters). Whitespace collapsed."""
     latex = _convert(elem)
     # Collapse the thin-space padding the symbol map leaves behind.
     return " ".join(latex.split())
