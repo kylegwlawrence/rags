@@ -3,6 +3,38 @@
  * and ChunksView generically — no source-specific component code needed.
  */
 
+import { ref } from '/ui/vendor/vue.esm-browser.js';
+import { getJson } from '/ui/api.js';
+
+// arxiv category code → human description (e.g. "astro-ph.CO" →
+// "Cosmology and Nongalactic Astrophysics"), loaded once from GET
+// /arxiv/categories. Reactive so the metadata fields re-render with the
+// descriptions as soon as the map arrives.
+const arxivCategories = ref({});
+let _arxivCategoriesLoaded = false;
+
+/** Fetch the arxiv category taxonomy once. Safe to call repeatedly. */
+export async function loadArxivCategories() {
+  if (_arxivCategoriesLoaded) return;
+  _arxivCategoriesLoaded = true;
+  try {
+    arxivCategories.value = await getJson('/arxiv/categories');
+  } catch (e) {
+    // Reference data is optional — fall back to bare codes and allow a retry.
+    _arxivCategoriesLoaded = false;
+    console.error('Failed to load arxiv categories:', e);
+  }
+}
+
+// Append the description to a category code, e.g.
+// "astro-ph.CO (Cosmology and Nongalactic Astrophysics)". Unknown codes (not
+// in the map, or before it loads) render as the bare code.
+function labelArxivCategory(code) {
+  if (!code) return code;
+  const desc = arxivCategories.value[code];
+  return desc ? `${code} (${desc})` : code;
+}
+
 export const SOURCES = {
   arxiv: {
     key: 'arxiv',
@@ -37,8 +69,8 @@ export const SOURCES = {
       { label: 'Authors',    value: (d) => (d.authors || []).join(', ') },
       { label: 'Submitted',  value: (d) => d.submitted_date },
       { label: 'Updated',    value: (d) => d.updated_date },
-      { label: 'Category',   value: (d) => d.primary_category },
-      { label: 'Categories', value: (d) => (d.categories || []).join(', ') },
+      { label: 'Category',   value: (d) => labelArxivCategory(d.primary_category) },
+      { label: 'Categories', value: (d) => (d.categories || []).map(labelArxivCategory).join(', ') },
       { label: 'DOI',        value: (d) => d.doi },
       { label: 'Journal',    value: (d) => d.journal_ref },
       { label: 'Comments',   value: (d) => d.comments },

@@ -3,7 +3,7 @@ import SourceNav from '/ui/components/SourceNav.js';
 import BrowseView from '/ui/components/BrowseView.js';
 import DocView from '/ui/components/DocView.js';
 import ChunksView from '/ui/components/ChunksView.js';
-import { SOURCES, SOURCE_ORDER } from '/ui/sources.js';
+import { SOURCES, SOURCE_ORDER, loadArxivCategories } from '/ui/sources.js';
 import { getDoc } from '/ui/api.js';
 
 // Hash format: #/{sourceKey}  |  #/{sourceKey}/chunks  |  #/{sourceKey}/doc/{encodedDocId}
@@ -134,6 +134,9 @@ export default defineComponent({
 
     onMounted(async () => {
       window.addEventListener('popstate', handlePopState);
+      // Prefetch the arxiv category descriptions (tiny, static) so the paper
+      // metadata pane can label codes without a per-doc round-trip.
+      loadArxivCategories();
       // If the initial URL pointed at a doc, fetch it now
       if (initial.view === 'doc' && initial.docId) {
         await applyRoute(initial);

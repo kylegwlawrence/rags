@@ -1,6 +1,8 @@
+import csv
 import os
 import sqlite3
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Literal
 
 import httpx
@@ -118,6 +120,53 @@ def _fetch_authors_many(
     for r in rows:
         out[r["paper_id"]].append(r["display_name"])
     return out
+
+
+# Category taxonomy lives in the repo's data dir (not the /datasets monolith),
+# a small static reference table: code, parent, description, legacy, paper_count.
+_CATEGORIES_CSV = db.DATA_DIR / "arxiv" / "categories.csv"
+
+
+@lru_cache(maxsize=1)
+def _load_categories() -> dict[str, str]:
+    """Read the arxiv category taxonomy as ``{code: description}``.
+
+    Cached — the file is small, static reference data. Cells are stripped of
+    the padding whitespace the hand-aligned CSV carries.
+    """
+    with _CATEGORIES_CSV.open(newline="", encoding="utf-8") as fh:
+        reader = csv.reader(fh)
+        header = [c.strip() for c in next(reader)]
+        code_i = header.index("code")
+        desc_i = header.index("description")
+        mapping: dict[str, str] = {}
+        for row in reader:
+            if len(row) <= max(code_i, desc_i):
+                continue  # skip short/blank rows
+            code = row[code_i].strip()
+            if code:
+                mapping[code] = row[desc_i].strip()
+    return mapping
+
+
+@router.get("/categories")
+def list_categories() -> dict[str, str]:
+    """Map every arxiv category code to its human description.
+
+    e.g. ``{"astro-ph.CO": "Cosmology and Nongalactic Astrophysics", ...}``.
+    The frontend fetches this once to label the Category / Categories fields in
+    a paper's metadata pane. 503 if the reference CSV is missing.
+    """
+    try:
+        return _load_categories()
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"arxiv categories.csv not found at {_CATEGORIES_CSV}; "
+                "category descriptions are unavailable."
+            ),
+        )
 
 
 @router.get("/papers", response_model=Page[Paper])
