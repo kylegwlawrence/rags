@@ -8,9 +8,8 @@ from api._chunks import add_chunks_route, add_doc_chunks_route
 from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import EcfrRegulation, EmbedResult, Page
-from rag import Doc, content_hash
 from rag.chunker import chunk_doc
-from rag.cleaner import CLEANER_VERSION
+from rag.ecfr import build_doc
 from rag.embed_one import embed_doc
 from rag.profiles import DENSE as _PROFILE
 
@@ -158,11 +157,10 @@ def embed_regulation(
 ) -> EmbedResult:
     """Embed one eCFR section into ecfr_rag.db on demand (synchronous).
 
-    eCFR has no batch RAG indexer — the full corpus is ~509k chunks (~8 days on
-    local Ollama), so sections are embedded individually on request, like the
-    enwiki embed button. The body is flat legal prose with no `##` headings, so
-    it chunks with `chunk_doc` (not `chunk_markdown`) under the DENSE profile
-    (dense regulatory text → smaller chunks for finer retrieval grain).
+    The body is flat legal prose with no `##` headings, so it chunks with
+    `chunk_doc` (not `chunk_markdown`) under the DENSE profile (dense
+    regulatory text → smaller chunks for finer retrieval grain). The batch
+    indexer (`scripts/ecfr/ecfr_index_rag.py`) uses the same builder.
 
     Replaces any chunks already stored for this section, becoming searchable
     through `/ecfr/chunks` immediately (the RAG DB runs in WAL mode, so the
@@ -178,23 +176,13 @@ def embed_regulation(
     if row is None:
         raise HTTPException(status_code=404, detail=f"regulation {reg_id} not found")
 
-    heading = (row["heading"] or "").strip()
-    content = (row["content"] or "").strip()
-    # A citation-style fallback title when the section has no heading.
-    title = heading or f"Title {row['title_num']} § {row['section']}"
-
-    if not content:
+    doc = build_doc(row)
+    if doc is None:
+        heading = (row["heading"] or "").strip()
+        title = heading or f"Title {row['title_num']} § {row['section']}"
         return EmbedResult(
             doc_id=str(reg_id), title=title, chunk_count=0, embedded=False
         )
-
-    doc = Doc(
-        doc_id=str(reg_id),
-        title=title,
-        version=f"{content_hash(heading, content)}-{CLEANER_VERSION}",
-        text=content,
-        section=None,
-    )
 
     rag_conn = db.connect_rag_rw(db.ECFR_RAG_DB)
     try:
