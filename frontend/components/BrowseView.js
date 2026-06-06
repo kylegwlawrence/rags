@@ -34,14 +34,6 @@ export default defineComponent({
       }
     }
 
-    /**
-     * Fetch options for one filter with an `optionsEndpoint` (a multiselect, or
-     * a select populated from the API). If `f.dependsOn` is set, the parent
-     * filter's current value is forwarded as a query parameter (repeated for
-     * arrays via getJson's encoder). Handles both a bare-array response and a
-     * paginated `{items}` page (e.g. /openstax/books); a high limit is
-     * requested so every option is returned in one page.
-     */
     async function fetchFilterOptions(f) {
       if (!f.optionsEndpoint) return;
       try {
@@ -64,12 +56,6 @@ export default defineComponent({
       }
     }
 
-    /**
-     * Install reactive watchers so cascading filters (feature_code depends on
-     * feature_class) refresh their option list when the parent changes —
-     * without triggering a search re-run. The search itself still waits for
-     * the user to press the Search button.
-     */
     function installCascades() {
       for (const f of props.source.filters) {
         if (!f.optionsEndpoint || !f.dependsOn) continue;
@@ -100,12 +86,6 @@ export default defineComponent({
       load();
     }
 
-    /**
-     * Options to show for a `select` filter. For a cascading select
-     * (`f.dependsOn` set), once the parent filter has a value, only options
-     * whose `group` matches it are shown; options without a `group` (e.g. the
-     * empty "Any …" default) always show.
-     */
     function visibleOptions(f) {
       // Select populated from the API: map fetched rows to {value, label} and
       // prepend the default "all" option so the filter can be cleared.
@@ -120,12 +100,6 @@ export default defineComponent({
       return f.options.filter(opt => !opt.group || opt.group === parentVal);
     }
 
-    /**
-     * Handle a <select> change. Before re-searching, clear any child select
-     * whose current value is no longer valid under the new parent value
-     * (synchronously, so the search runs with a consistent parent/child pair
-     * rather than an orphaned combo that returns zero rows).
-     */
     function onSelectChange(f) {
       for (const child of props.source.filters) {
         if (child.type !== 'select' || child.dependsOn !== f.key) continue;

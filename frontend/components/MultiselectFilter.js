@@ -1,19 +1,4 @@
-/**
- * Multi-select filter dropdown — used by source configs that need a
- * checkbox-style picker (e.g. GeoNames feature class / feature code).
- *
- * Renders as a single button labeled "<label> (N selected) ▾" that toggles
- * a panel of checkboxes. Closes when the user clicks anywhere outside.
- * Emits `update:modelValue` (v-model) with the new array of selected values.
- *
- * Props
- *   label       — the field label shown when no items are selected.
- *   modelValue  — array of currently-selected values (v-model).
- *   options     — array of resolved option objects (parent fetches them).
- *   valueField  — key on each option to use as the selectable value.
- *   labelFn     — function(option) => display label for the checkbox row.
- *   placeholder — text shown when options list is empty (still loading or 0 results).
- */
+// Checkbox-style multi-select dropdown. Closes on outside click. Emits update:modelValue.
 import { defineComponent, ref, computed, onMounted, onBeforeUnmount } from '/ui/vendor/vue.esm-browser.js';
 
 export default defineComponent({

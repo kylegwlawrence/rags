@@ -52,19 +52,11 @@ export default defineComponent({
     const embedding = ref(false);
     const embedError = ref(null);
 
-    // On-demand body download state (only for sources with a downloadEndpoint,
-    // e.g. SEC EDGAR filings, arxiv paper HTML). `downloaded` flips true after a
-    // successful fetch so the button hides and the freshly-stored body can be
-    // loaded into Content. `noHtml` is the arxiv-specific terminal case: arXiv
-    // has no HTML version for the paper, so the button shows a clear note
-    // instead of inviting a pointless retry.
     const downloading = ref(false);
     const downloadError = ref(null);
     const downloaded = ref(false);
     const noHtml = ref(false);
-    // For `downloadToDisk` sources (e.g. OpenAlex), the body is saved
-    // server-side for a separate pipeline — there's no Content tab to reveal,
-    // so on success we hold the result here and show a "saved" note instead.
+    // downloadToDisk sources (e.g. OpenAlex) save server-side; show a note instead of content.
     const savedToDisk = ref(null);
 
     // True once the open document has body text — either it already had some
@@ -81,20 +73,13 @@ export default defineComponent({
       () => !!props.source.downloadEndpoint && !hasBody.value && !savedToDisk.value,
     );
 
-    // After a `downloadToDisk` save succeeds, a small note replaces the button.
     const savedToDiskLabel = computed(() => {
       const r = savedToDisk.value;
       if (!r) return '';
-      const kb = r.bytes ? ` (${Math.round(r.bytes / 1024)} KB)` : '';
+      const kb = r.file_bytes ? ` (${Math.round(r.file_bytes / 1024)} KB)` : '';
       return `✓ PDF saved to server${kb}`;
     });
 
-    // Show the embed button when the source has an embed endpoint AND — if the
-    // source gates embedding on a fetched body (`embedNeedsBody`, e.g.
-    // sec_edgar) — that body has actually been downloaded. Embedding a filing
-    // with no body would create zero or junk chunks, so its button stays hidden
-    // until the download completes. arxiv has no such gate: it embeds from the
-    // abstract when no HTML is present, so its embed button always shows.
     const showEmbed = computed(() => {
       if (!props.source.embedEndpoint) return false;
       if (props.source.embedNeedsBody) return hasBody.value;
@@ -108,8 +93,6 @@ export default defineComponent({
       return props.source.downloadLabel || 'Download';
     });
 
-    // Tooltip mirrors the button state: the terminal no-HTML note, the error
-    // text on failure, else the source's configured action description.
     const downloadTitle = computed(() => {
       if (noHtml.value) return downloadLabel.value;
       if (downloadError.value) return downloadError.value;
@@ -127,9 +110,8 @@ export default defineComponent({
       return isEmbedded.value ? 'Re-embed' : 'Embed';
     });
 
-    // ----- Nested-data profile rendering (contentType 'none' sources whose
-    // detail returns a `data` object, e.g. factbook). Builds sanitized HTML:
-    // every text leaf is escaped, only our own structural tags are injected.
+    // Profile renderer for contentType 'none' sources (e.g. factbook `data` object).
+    // Every text leaf is escaped; only our own structural tags are injected.
     function fbEscape(s) {
       return String(s)
         .replace(/&/g, '&amp;')
@@ -137,8 +119,6 @@ export default defineComponent({
         .replace(/>/g, '&gt;');
     }
 
-    // Source values carry presentational HTML (<p>, <br>, <strong>); convert
-    // structural tags to newlines, drop the rest, collapse whitespace.
     function fbClean(s) {
       return String(s)
         .replace(/<\s*br\s*\/?>/gi, '\n')
@@ -180,13 +160,8 @@ export default defineComponent({
       }
     }
 
-    // --- Markdown + math content (contentType: 'markdown', e.g. OpenStax) ---
-    // The body is light Markdown (paragraphs, ## headings, - lists) with LaTeX
-    // formulas delimited by \(…\) inline and \[…\] display. We render it in two
-    // passes: Markdown → HTML via `marked`, then KaTeX typesets the formulas in
-    // the live DOM. The formulas are pulled out into placeholders *before*
-    // marked runs so it can't mangle LaTeX backslashes/underscores, then put
-    // back verbatim for KaTeX to find.
+    // Markdown + math (contentType: 'markdown'): two-pass render — pull LaTeX into
+    // placeholders before marked (so it can't mangle backslashes), then KaTeX typesets.
     const contentEl = ref(null);
     const MATH_RE = /\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g;
     const KATEX_DELIMITERS = [
@@ -222,8 +197,6 @@ export default defineComponent({
       });
     }
 
-    // Re-typeset whenever the rendered HTML changes or the user returns to the
-    // Content tab (v-html resets innerHTML back to the raw \(…\) on re-render).
     watch([markdownHtml, activeTab], async () => {
       if (props.source.contentType !== 'markdown') return;
       if (activeTab.value !== 'content' || !markdownHtml.value) return;
@@ -231,9 +204,6 @@ export default defineComponent({
       typesetMath();
     });
 
-    // Server-rendered wiki HTML (contentType 'html') carries KaTeX delimiters
-    // (\(…\) inline, $$…$$ display, \ce{…} chemistry) inline in the body, so
-    // typeset the live DOM once it's swapped in / the Content tab is shown.
     watch([content, activeTab], async () => {
       if (props.source.contentType !== 'html') return;
       if (activeTab.value !== 'content' || !content.value) return;
@@ -398,10 +368,7 @@ export default defineComponent({
       expandedChunks.value = new Set(expandedChunks.value);
     }
 
-    // For redirect-aware sources, fetch the detail (which carries `redirect_to`)
-    // and, if this article is a resolvable redirect, hand off to the target.
-    // Returns true when a navigation was kicked off so onMounted can skip the
-    // content/chunks loads that would otherwise render the stub momentarily.
+    // Returns true when a redirect navigation was kicked off (onMounted skips content load).
     async function checkRedirect() {
       if (!props.source.followsRedirects || !followRedirect) return false;
       resolving.value = true;
@@ -418,9 +385,6 @@ export default defineComponent({
       return false;
     }
 
-    // Source URL for the PDF <iframe>. When a chunk hit opened this doc with a
-    // target page (doc.targetPage), append a #page=N fragment — browsers' built-in
-    // PDF viewers honour it and jump straight to that page.
     const pdfSrc = computed(() => {
       const base = props.source.contentEndpoint(props.doc[props.source.idField]);
       return props.doc.targetPage ? `${base}#page=${props.doc.targetPage}` : base;
