@@ -16,6 +16,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from rag.justice_canada import body_to_markdown  # noqa: E402
+
 DEFAULT_DB = REPO_ROOT / "data" / "justice_canada" / "justice_canada.db"
 DEFAULT_CORPUS = REPO_ROOT / "data" / "justice_canada" / "laws-lois-xml"
 
@@ -33,7 +37,8 @@ CREATE TABLE IF NOT EXISTS acts (
     inforce_start_date TEXT,
     last_amended_date  TEXT,
     current_date       TEXT,
-    filename           TEXT
+    filename           TEXT,
+    body               TEXT
 );
 
 CREATE TABLE IF NOT EXISTS regulations (
@@ -45,7 +50,8 @@ CREATE TABLE IF NOT EXISTS regulations (
     inforce_start_date TEXT,
     last_amended_date  TEXT,
     current_date       TEXT,
-    filename           TEXT
+    filename           TEXT,
+    body               TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_acts_in_force ON acts(in_force);
@@ -91,6 +97,7 @@ def parse_act(xml_file: Path) -> tuple | None:
         lims_attr(root, "lastAmendedDate"),
         lims_attr(root, "current-date"),
         xml_file.name,
+        body_to_markdown(root),
     )
 
 
@@ -129,6 +136,7 @@ def parse_regulation(xml_file: Path) -> tuple | None:
         lims_attr(root, "lastAmendedDate"),
         lims_attr(root, "current-date"),
         xml_file.name,
+        body_to_markdown(root),
     )
 
 
@@ -146,8 +154,8 @@ def ingest_acts(cur: sqlite3.Cursor, acts_dir: Path) -> int:
             INSERT OR REPLACE INTO acts
               (chapter_number, short_title, long_title, running_head,
                bill_origin, bill_type, in_force,
-               inforce_start_date, last_amended_date, current_date, filename)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               inforce_start_date, last_amended_date, current_date, filename, body)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             row,
         )
@@ -169,8 +177,8 @@ def ingest_regulations(cur: sqlite3.Cursor, regs_dir: Path) -> int:
             INSERT OR REPLACE INTO regulations
               (instrument_number, short_title, long_title, regulation_type,
                enabling_authority, inforce_start_date, last_amended_date,
-               current_date, filename)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               current_date, filename, body)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             row,
         )
@@ -216,6 +224,11 @@ def main() -> None:
     con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.executescript(SCHEMA)
+    # Migrate existing DBs that pre-date the body column.
+    for table in ("acts", "regulations"):
+        cols = {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}
+        if "body" not in cols:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN body TEXT")
     con.commit()
 
     lang_codes = {"en": ["eng"], "fr": ["fra"], "both": ["eng", "fra"]}
