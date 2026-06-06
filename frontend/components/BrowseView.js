@@ -49,11 +49,14 @@ export default defineComponent({
         if (f.dependsOn) params[f.dependsOn] = filters[f.dependsOn];
         const data = await getJson(f.optionsEndpoint, params);
         filterOptions[f.key] = Array.isArray(data) ? data : (data.items || []);
-        // For a multiselect, drop any currently-selected values that aren't in
-        // the new options (orphaned by a parent-filter change). Silent prune.
+        // Drop any currently-selected value(s) that aren't in the new options
+        // (orphaned by a parent-filter change). Silent prune.
         if (f.type === 'multiselect') {
           const allowed = new Set(filterOptions[f.key].map(o => o[f.valueField]));
           filters[f.key] = filters[f.key].filter(v => allowed.has(v));
+        } else if (f.type === 'select' && filters[f.key]) {
+          const allowed = new Set(filterOptions[f.key].map(o => o[f.valueField]));
+          if (!allowed.has(filters[f.key])) filters[f.key] = '';
         }
       } catch (e) {
         console.error(`Failed to load options for ${f.key}:`, e);
@@ -125,7 +128,16 @@ export default defineComponent({
      */
     function onSelectChange(f) {
       for (const child of props.source.filters) {
-        if (child.type === 'select' && child.dependsOn === f.key) {
+        if (child.type !== 'select' || child.dependsOn !== f.key) continue;
+        if (child.optionsEndpoint) {
+          // Endpoint-backed child (e.g. arxiv Subcategory): its option list is
+          // refetched asynchronously when the parent changes (installCascades
+          // watcher), so the current value can't be validated synchronously.
+          // Reset it so the search runs with a consistent parent and the child
+          // restarts at its default.
+          filters[child.key] = '';
+        } else {
+          // Static-options child: prune synchronously against the new parent.
           const allowed = new Set(visibleOptions(child).map(o => o.value));
           if (!allowed.has(filters[child.key])) filters[child.key] = '';
         }

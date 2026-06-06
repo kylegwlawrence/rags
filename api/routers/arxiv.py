@@ -126,10 +126,27 @@ def _fetch_authors_many(
 # a small static reference table: code, parent, description, legacy, paper_count.
 _CATEGORIES_CSV = db.DATA_DIR / "arxiv" / "categories.csv"
 
+# Friendly names for the parent archives the CSV carries no description row for
+# (cs, math, …). The archives that *do* have their own CSV row — astro-ph and
+# cond-mat (legacy rows) plus the standalone codes like hep-th / gr-qc — are
+# labelled from that description, so they're omitted here. Used to label the
+# parent "Category" dropdown.
+_ARCHIVE_NAMES = {
+    "cs": "Computer Science",
+    "econ": "Economics",
+    "eess": "Electrical Engineering and Systems Science",
+    "math": "Mathematics",
+    "nlin": "Nonlinear Sciences",
+    "physics": "Physics",
+    "q-bio": "Quantitative Biology",
+    "q-fin": "Quantitative Finance",
+    "stat": "Statistics",
+}
+
 
 @lru_cache(maxsize=1)
-def _load_categories() -> dict[str, str]:
-    """Read the arxiv category taxonomy as ``{code: description}``.
+def _load_taxonomy() -> list[dict[str, str]]:
+    """Read categories.csv into ``{code, parent, description, legacy}`` rows.
 
     Cached — the file is small, static reference data. Cells are stripped of
     the padding whitespace the hand-aligned CSV carries.
@@ -137,16 +154,63 @@ def _load_categories() -> dict[str, str]:
     with _CATEGORIES_CSV.open(newline="", encoding="utf-8") as fh:
         reader = csv.reader(fh)
         header = [c.strip() for c in next(reader)]
-        code_i = header.index("code")
-        desc_i = header.index("description")
-        mapping: dict[str, str] = {}
+        idx = {n: header.index(n) for n in ("code", "parent", "description", "legacy")}
+        rows: list[dict[str, str]] = []
         for row in reader:
-            if len(row) <= max(code_i, desc_i):
+            if len(row) <= max(idx.values()):
                 continue  # skip short/blank rows
-            code = row[code_i].strip()
-            if code:
-                mapping[code] = row[desc_i].strip()
-    return mapping
+            code = row[idx["code"]].strip()
+            if not code:
+                continue
+            rows.append(
+                {
+                    "code": code,
+                    "parent": row[idx["parent"]].strip(),
+                    "description": row[idx["description"]].strip(),
+                    "legacy": row[idx["legacy"]].strip(),
+                }
+            )
+    return rows
+
+
+@lru_cache(maxsize=1)
+def _load_categories() -> dict[str, str]:
+    """The arxiv taxonomy as ``{code: description}`` (cached)."""
+    return {r["code"]: r["description"] for r in _load_taxonomy()}
+
+
+@lru_cache(maxsize=1)
+def _archive_parents() -> list[dict[str, str]]:
+    """Top-level archives for the parent "Category" dropdown, sorted by code.
+
+    Covers every distinct value in the CSV ``parent`` column (archives that own
+    subcategories, e.g. ``cs`` / ``math``) plus the current standalone top-level
+    codes that have none (e.g. ``hep-th``, ``gr-qc``, ``quant-ph``); legacy bare
+    codes are excluded. Each archive's display name comes from its own CSV
+    description when present, else the ``_ARCHIVE_NAMES`` fallback, else the bare
+    code. Returns ``[{code, name}, ...]``.
+    """
+    rows = _load_taxonomy()
+    desc_by_code = {r["code"]: r["description"] for r in rows}
+    parents = {r["parent"] for r in rows if r["parent"]}
+    standalone = {r["code"] for r in rows if not r["parent"] and r["legacy"] == "false"}
+    out: list[dict[str, str]] = []
+    for code in sorted(parents | standalone):
+        name = desc_by_code.get(code) or _ARCHIVE_NAMES.get(code) or code
+        out.append({"code": code, "name": name})
+    return out
+
+
+def _subcategories(archive: str) -> list[dict[str, str]]:
+    """Subcategory ``{code, description}`` rows under one parent archive.
+
+    Sorted by code; empty list when ``archive`` is falsy.
+    """
+    if not archive:
+        return []
+    rows = [r for r in _load_taxonomy() if r["parent"] == archive]
+    rows.sort(key=lambda r: r["code"])
+    return [{"code": r["code"], "description": r["description"]} for r in rows]
 
 
 @router.get("/categories")
@@ -169,6 +233,49 @@ def list_categories() -> dict[str, str]:
         )
 
 
+def _categories_missing() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=(
+            f"arxiv categories.csv not found at {_CATEGORIES_CSV}; "
+            "category filters are unavailable."
+        ),
+    )
+
+
+@router.get("/category-parents")
+def list_category_parents() -> list[dict[str, str]]:
+    """Top-level archives for the parent "Category" filter dropdown.
+
+    Each entry is ``{code, name}`` (e.g. ``{"code": "cs", "name": "Computer
+    Science"}``). The frontend pairs this with ``/subcategories`` for the
+    cascading Subcategory dropdown. 503 if the reference CSV is missing.
+    """
+    try:
+        return _archive_parents()
+    except FileNotFoundError:
+        raise _categories_missing()
+
+
+@router.get("/subcategories")
+def list_subcategories(
+    archive: str | None = Query(
+        None,
+        description="Parent archive code (e.g. 'cs'); returns its subcategories.",
+    ),
+) -> list[dict[str, str]]:
+    """Subcategories ``{code, description}`` under one parent archive, sorted by code.
+
+    Empty list when ``archive`` is unset — the frontend's Subcategory dropdown
+    stays at "All subcategories" until a parent Category is chosen. 503 if the
+    reference CSV is missing.
+    """
+    try:
+        return _subcategories(archive or "")
+    except FileNotFoundError:
+        raise _categories_missing()
+
+
 @router.get("/papers", response_model=Page[Paper])
 def list_papers(
     q: str | None = Query(
@@ -182,11 +289,21 @@ def list_papers(
     primary_category: str | None = Query(
         None, description="Exact match against papers.primary_category (e.g. 'cs.CL')"
     ),
+    archive: str | None = Query(
+        None,
+        description=(
+            "Parent-archive match: papers carrying any category in this archive "
+            "— a token equal to it (a bare archive like 'gr-qc') or prefixed "
+            "'<archive>.' (e.g. 'cs' → cs.AI, cs.LG). Token-precise, so 'cs' "
+            "won't match 'physics'. Pairs with the Subcategory `category` filter."
+        ),
+    ),
     category: str | None = Query(
         None,
         description=(
             "Substring match against the whitespace-separated papers.categories "
-            "string. Loose: 'cs.C' will match 'cs.CL'."
+            "string. Loose: 'cs.C' will match 'cs.CL'. Used for the Subcategory "
+            "filter, which sends a full code (e.g. 'cs.AI')."
         ),
     ),
     submitted_year: int | None = Query(None, ge=1900, le=2100),
@@ -244,6 +361,17 @@ def list_papers(
     if primary_category is not None:
         clauses.append("primary_category = ?")
         params.append(primary_category)
+    if archive is not None:
+        # Token-precise archive match on the space-separated categories string:
+        # an exact token (bare archive like 'gr-qc') or one prefixed
+        # '<archive>.' (e.g. cs.AI). Padding both ends with spaces lets the
+        # first/last token match too. Avoids the substring trap where '%cs%'
+        # would also hit 'physics'. (Archive codes carry no LIKE wildcards.)
+        clauses.append(
+            "((' ' || categories || ' ') LIKE ? OR (' ' || categories || ' ') LIKE ?)"
+        )
+        params.append(f"% {archive} %")
+        params.append(f"% {archive}.%")
     if category is not None:
         clauses.append("categories LIKE ?")
         params.append(f"%{category}%")

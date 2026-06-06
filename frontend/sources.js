@@ -77,8 +77,18 @@ export const SOURCES = {
     ],
     filters: [
       { key: 'q',              label: 'Search',     type: 'text',   placeholder: 'FTS5 query…' },
-      { key: 'category',        label: 'Category', type: 'text',   placeholder: 'e.g. cs or cs.AI' },
-      { key: 'author',         label: 'Author',     type: 'text',   placeholder: 'substring' },
+      // Parent archive dropdown, options from /arxiv/category-parents.
+      { key: 'archive',        label: 'Category',   type: 'select',
+        optionsEndpoint: '/arxiv/category-parents', valueField: 'code',
+        labelFn: (o) => (o.name ? `${o.code} — ${o.name}` : o.code),
+        defaultLabel: 'All categories' },
+      // Cascading subcategory dropdown: refetched from /arxiv/subcategories
+      // (?archive=…) whenever the parent Category changes; empty until one is set.
+      { key: 'category',       label: 'Subcategory', type: 'select',
+        optionsEndpoint: '/arxiv/subcategories', valueField: 'code',
+        dependsOn: 'archive',
+        labelFn: (o) => (o.description ? `${o.code} — ${o.description}` : o.code),
+        defaultLabel: 'All subcategories' },
       { key: 'submitted_year', label: 'Year',       type: 'number', placeholder: '2023' },
       { key: 'has_html',       label: 'Has HTML',   type: 'boolean' },
       { key: 'sort', label: 'Sort', type: 'select', options: [
