@@ -389,7 +389,7 @@ def download_work_pdf(
         if prior and prior["status"] == "fetched" and dest.exists():
             # Idempotent: already on disk, don't re-hit the publisher.
             return OpenAlexDownloadResult(
-                short_id=short_id, status="fetched", bytes=prior["bytes"] or 0
+                short_id=short_id, status="fetched", file_bytes=prior["bytes"] or 0
             )
 
         try:
@@ -400,7 +400,7 @@ def download_work_pdf(
             )
         except NoPdfAvailable as e:
             record_body_status(rw, short_id, "no_pdf", note=str(e))
-            return OpenAlexDownloadResult(short_id=short_id, status="no_pdf", bytes=0)
+            return OpenAlexDownloadResult(short_id=short_id, status="no_pdf", file_bytes=0)
         except httpx.HTTPError as e:
             record_body_status(rw, short_id, "error", note=str(e))
             raise HTTPException(
@@ -411,7 +411,7 @@ def download_work_pdf(
             rw, short_id, "fetched", pdf_path=f"{short_id}.pdf",
             nbytes=nbytes, source_url=src,
         )
-        return OpenAlexDownloadResult(short_id=short_id, status="fetched", bytes=nbytes)
+        return OpenAlexDownloadResult(short_id=short_id, status="fetched", file_bytes=nbytes)
     finally:
         rw.close()
 

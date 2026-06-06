@@ -51,14 +51,7 @@ app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
 @app.middleware("http")
 async def no_cache_ui_assets(request: Request, call_next):
-    """Tell browsers never to cache `/ui/*` assets.
-
-    The frontend ships as plain ES modules and HTML — small files that change
-    often during development. Without an explicit `Cache-Control` header,
-    browsers happily memo-cache the module graph per page session, and even a
-    hard refresh sometimes won't pick up an edited file. Force revalidation
-    so the latest version always wins.
-    """
+    """Force revalidation on /ui/* so browsers always fetch the latest ES modules."""
     response = await call_next(request)
     if request.url.path.startswith("/ui/"):
         response.headers["Cache-Control"] = "no-store, must-revalidate"
@@ -67,11 +60,7 @@ async def no_cache_ui_assets(request: Request, call_next):
 
 @app.get("/health")
 def health(response: Response) -> dict:
-    """Return per-database status by running `SELECT 1` against each connection.
-
-    HTTP 503 if any database is broken; 200 otherwise. Body always carries
-    per-DB detail so a probe can tell which one failed without a second call.
-    """
+    """Return per-DB status (SELECT 1 probe). 503 if any DB is broken."""
     status: dict[str, str] = {}
 
     for name, opener in (
@@ -88,7 +77,7 @@ def health(response: Response) -> dict:
         ("enwiki", db.enwiki),
         ("pydocs", db.pydocs),
         ("pydocs_rag", db.pydocs_rag),
-("federal_register", db.federal_register),
+        ("federal_register", db.federal_register),
         ("federal_register_rag", db.federal_register_rag),
         ("github", db.github),
         ("github_rag", db.github_rag),
@@ -113,7 +102,7 @@ def health(response: Response) -> dict:
         except Exception as e:
             status[name] = f"error: {e.__class__.__name__}: {e}"
 
-    ok = all(v == "ok" or v.startswith("skipped") for v in status.values())
+    ok = all(v == "ok" for v in status.values())
     if not ok:
         response.status_code = 503
     return {"ok": ok, "databases": status}

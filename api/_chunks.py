@@ -1,11 +1,4 @@
-"""Shared `/chunks` endpoint factory for the per-source routers.
-
-Three (and now four) sources expose identical `/chunks` endpoints — same
-query parameters, same hybrid-retrieval call, same error semantics, same
-response shape. Only the dependency function and the 503 detail strings
-vary. This module is the WORK.md §3.6 extraction (three similar
-implementations is the threshold).
-"""
+"""Shared `/chunks` and `/doc-chunks` endpoint factory for per-source routers."""
 
 import sqlite3
 from collections.abc import Callable
@@ -27,23 +20,9 @@ def add_chunks_route(
 ) -> None:
     """Attach `GET /chunks` to `router`.
 
-    Runs hybrid (FTS5 + sqlite-vec) retrieval against the source's `_rag.db`
-    via `rag.retriever.retrieve`. Empty `q` → 400; missing rag.db / index
-    tables → 503 naming `indexer_script`; Ollama unreachable → 200 with
-    `used_dense=False`.
-
-    Args:
-        router: The source's existing APIRouter (already mounted at `/<source>`).
-        opener: Cached read-only connection getter from `api.db`
-            (e.g. `db.arxiv_rag`). Loads sqlite-vec on first call.
-        source_name: Short source name; appears in the 503 detail body.
-        indexer_script: Filename of the script that rebuilds this RAG DB,
-            named in the 503 detail so the caller knows what to run.
-        rag_db_path: Repo-relative path to the source's `_rag.db`, named in
-            the 503 detail as a restore hint. Defaults to
-            `data/<source_name>/<source_name>_rag.db`; pass explicitly when
-            the file name doesn't match the source name (e.g. pydocs uses
-            `python_docs_rag.db`).
+    Empty `q` → 400; missing rag.db/tables → 503 with `indexer_script` hint;
+    Ollama down → 200 with `used_dense=False`. Pass `rag_db_path` explicitly
+    when the filename doesn't follow the `<source_name>_rag.db` convention.
     """
     if rag_db_path is None:
         rag_db_path = f"data/{source_name}/{source_name}_rag.db"
@@ -72,8 +51,6 @@ def add_chunks_route(
                 ) from e
             raise HTTPException(status_code=400, detail=f"bad query: {e}") from e
 
-        hits = result.hits[:top_k]
-
         items = [
             Chunk(
                 chunk_id=h.chunk_id,
@@ -85,7 +62,7 @@ def add_chunks_route(
                 text_length=h.text_length,
                 score=h.score,
             )
-            for h in hits
+            for h in result.hits[:top_k]
         ]
         return ChunksResponse(
             items=items,
@@ -105,19 +82,8 @@ def add_doc_chunks_route(
 ) -> None:
     """Attach `GET /doc-chunks` to `router`.
 
-    Returns all stored chunks for a specific `doc_id` in document order.
-    Orders by `chunk_id` (autoincrement insertion order) rather than
-    `chunk_index`: chunks are inserted in reading order, so `chunk_id` is the
-    reliable document-order key even for rows indexed before `chunk_markdown`
-    switched to a global `chunk_index`. Intended for per-document inspection,
-    not retrieval. Empty result (doc not yet indexed) returns `[]`, not 404.
-
-    Args:
-        router: The source's existing APIRouter.
-        opener: Cached read-only RAG connection getter from `api.db`.
-        source_name: Short source name for 503 detail messages.
-        indexer_script: Filename of the script that builds this RAG DB.
-        rag_db_path: Repo-relative path to the `_rag.db` file.
+    Returns all stored chunks for a `doc_id` in document order (by chunk_id,
+    which is insertion/reading order). Returns `[]` for unindexed docs.
     """
     if rag_db_path is None:
         rag_db_path = f"data/{source_name}/{source_name}_rag.db"

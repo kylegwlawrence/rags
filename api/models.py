@@ -83,11 +83,9 @@ class Paper(BaseModel):
 
 
 class PydocsDoc(BaseModel):
-    """One row from `python_docs.docs`. Raw body lives at /content.
+    """One row from `python_docs.docs`. Raw body at /content.
 
-    `content_chars` is `length(content)` — SQLite returns the character count
-    for a TEXT value, not its UTF-8 byte length, so this is named for what it
-    actually measures.
+    `content_chars` is SQLite `length()` — character count, not UTF-8 bytes.
     """
 
     doc_path: str
@@ -97,7 +95,7 @@ class PydocsDoc(BaseModel):
 
 
 class StoredChunk(BaseModel):
-    """One chunk row from `<source>_rag.db`, fetched by doc_id for inspection."""
+    """One chunk row from `<source>_rag.db`, fetched by doc_id."""
 
     chunk_id: int
     doc_id: str
@@ -110,9 +108,8 @@ class StoredChunk(BaseModel):
 class EmbedResult(BaseModel):
     """Result of a live single-document embed (`POST .../{id}/embed`).
 
-    `chunk_count` is the number of chunks written; `embedded` is False when the
-    document yielded no chunks (e.g. a redirect or empty body), in which case
-    any previously-stored chunks for it were removed.
+    `embedded` is False when the doc yielded no chunks (redirect/empty body);
+    any previously-stored chunks are removed in that case.
     """
 
     doc_id: str
@@ -122,9 +119,7 @@ class EmbedResult(BaseModel):
 
 
 class PdfDocument(BaseModel):
-    """One ingested PDF from `pdfs.documents`. The original file is served at
-    /content; `doc_id` is the source filename stem (used as the display title
-    since embedded PDF `title` metadata is frequently missing)."""
+    """One ingested PDF. `doc_id` is the filename stem. Original file at /content."""
 
     doc_id: str
     title: str | None
@@ -176,11 +171,9 @@ class SecEdgarFiling(BaseModel):
 
 
 class DownloadResult(BaseModel):
-    """Result of an on-demand filing body download (`POST .../{accession}/download`).
+    """Result of an on-demand SEC filing body download.
 
-    `status` is the row's new status: 'fetched' when text was stored, 'missing'
-    when the submission held no extractable body, 'error' when it couldn't be
-    fetched. `body_chars` is the stored body length (0 unless status='fetched').
+    `status`: 'fetched' | 'missing' | 'error'. `body_chars` is 0 unless fetched.
     """
 
     accession_number: str
@@ -189,12 +182,9 @@ class DownloadResult(BaseModel):
 
 
 class ArxivDownloadResult(BaseModel):
-    """Result of an on-demand paper HTML download (`POST .../{id}/download`).
+    """Result of an on-demand arXiv HTML download.
 
-    `status` is the row's new `download_status`: 'downloaded' when the LaTeXML
-    HTML was stored, 'no_html' when arXiv has no HTML version for the paper.
-    `html_chars` is the stored body length (0 when status='no_html'). A transient
-    fetch failure raises 502 instead and leaves the row's status unchanged.
+    `status`: 'downloaded' | 'no_html'. Transient fetch failures raise 502.
     """
 
     paper_id: str
@@ -203,18 +193,15 @@ class ArxivDownloadResult(BaseModel):
 
 
 class OpenAlexDownloadResult(BaseModel):
-    """Result of an on-demand OpenAlex PDF download (`POST .../{id}/download`).
+    """Result of an on-demand OpenAlex PDF download.
 
-    OpenAlex stores no body text — only open-access links — so the work's PDF
-    (`pdf_url` / `oa_url`) is saved to `data/openalex/bodies/` for the `pdfs`
-    ingest pipeline, not into openalex.db. `status` is 'fetched' (PDF saved) or
-    'no_pdf' (no accessible open-access PDF — terminal). A transient fetch
-    failure raises 502 instead. `bytes` is the saved PDF size (0 when 'no_pdf').
+    PDF is saved to `data/openalex/bodies/` for the pdfs pipeline, not openalex.db.
+    `status`: 'fetched' | 'no_pdf'. Transient fetch failures raise 502.
     """
 
     short_id: str
     status: str
-    bytes: int
+    file_bytes: int
 
 
 class Chunk(BaseModel):
@@ -231,7 +218,7 @@ class Chunk(BaseModel):
 
 
 class ChunksResponse(BaseModel):
-    """Hybrid-search response. Not a `Page[Chunk]` — RRF doesn't paginate."""
+    """Hybrid-search response (RRF; not paginated)."""
 
     items: list[Chunk]
     used_dense: bool
@@ -365,8 +352,7 @@ class GeonamesPlace(BaseModel):
 
 
 class OpenstaxBook(BaseModel):
-    """One OpenStax textbook from `openstax.books`. Sections live at
-    /openstax/sections?book_id=… in reading order."""
+    """One OpenStax textbook. Sections at /openstax/sections?book_id=… in reading order."""
 
     book_id: str
     title: str
@@ -379,11 +365,10 @@ class OpenstaxBook(BaseModel):
 
 
 class OpenstaxSection(BaseModel):
-    """One section from `openstax.sections`. Body served at /content.
+    """One section from `openstax.sections`. Body at /content.
 
-    `objectives` is the section's learning objectives (one per line) — the pure
-    "outline" signal — included on list rows since it's short. The full body is
-    fetched separately. `content_chars` is `length(body)` (character count).
+    `objectives` (one per line) is included on list rows. `content_chars` is
+    SQLite `length(body)` — character count, not bytes.
     """
 
     section_id: str
@@ -399,9 +384,7 @@ class OpenstaxSection(BaseModel):
 
 
 class OpenstaxChunk(Chunk):
-    """A `Chunk` with the section's learning objectives plus book/subject/chapter
-    provenance, so a consumer can scope follow-up calls or read the
-    subject distribution of an unfiltered query (a lightweight router signal)."""
+    """Chunk with learning objectives and book/subject/chapter provenance."""
 
     objectives: str | None = None
     book_id: str | None = None
@@ -417,8 +400,7 @@ class OpenstaxStoredChunk(StoredChunk):
 
 
 class OpenstaxChunksResponse(BaseModel):
-    """Hybrid-search response for OpenStax — same shape as `ChunksResponse` but
-    each item carries its section's learning objectives."""
+    """Hybrid-search response for OpenStax (items carry learning objectives)."""
 
     items: list[OpenstaxChunk]
     used_dense: bool
@@ -427,11 +409,7 @@ class OpenstaxChunksResponse(BaseModel):
 
 
 class EcfrRegulation(BaseModel):
-    """One section from `ecfr.regulations`. Regulation body served at /content.
-
-    `content_chars` is `length(content)` — SQLite returns the character count
-    for a TEXT value, not its UTF-8 byte length.
-    """
+    """One section from `ecfr.regulations`. Body at /content. `content_chars` is character count."""
 
     id: int
     title_num: int | None
