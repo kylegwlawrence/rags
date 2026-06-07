@@ -397,6 +397,39 @@ def test_pdfs_bad_fts_syntax_400(client):
     assert r.status_code == 400
 
 
+def test_justice_canada_list(client):
+    r = client.get("/justice_canada/laws?limit=1")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "total" in body
+    assert len(body["items"]) <= 1
+
+
+def test_justice_canada_fts_search(client):
+    """`?q=` returns matching laws; falls back to a skip if the FTS index is absent."""
+    r = client.get("/justice_canada/laws", params={"q": "tax", "limit": 5})
+    if r.status_code == 503:
+        pytest.skip("acts_fts/regulations_fts not built; run scripts/justice_canada/index_fts.py")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "total" in body
+    assert len(body["items"]) <= 5
+
+
+def test_justice_canada_sort_relevance_requires_q(client):
+    """sort=relevance without q is a 400, mirroring the other sources' contract."""
+    r = client.get("/justice_canada/laws?sort=relevance")
+    assert r.status_code == 400
+
+
+def test_justice_canada_bad_fts_syntax_400(client):
+    """Malformed FTS5 syntax surfaces as a 400, not a 500."""
+    r = client.get("/justice_canada/laws", params={"q": '"unbalanced'})
+    if r.status_code == 503:
+        pytest.skip("acts_fts/regulations_fts not built; run scripts/justice_canada/index_fts.py")
+    assert r.status_code == 400
+
+
 def test_arxiv_list(client):
     r = client.get("/arxiv/papers?limit=1")
     assert r.status_code == 200
