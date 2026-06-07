@@ -131,8 +131,9 @@ _BLOCK_TAGS = {"para", "title", "note", "example", "exercise", "problem",
 # Markdown heading — so it is deliberately absent here.)
 _TRANSPARENT_TAGS = {"content", "document", "tgroup", "tbody",
                      "thead", "commentary", "labeled-item", "glossary"}
-# Elements whose content we drop entirely (images carry no useful text here).
-_SKIP_TAGS = {"media", "image", "label", "metadata"}
+# Elements whose content we drop entirely. (<media>/<image> are handled
+# explicitly in `_render` so figures become Markdown image links.)
+_SKIP_TAGS = {"label", "metadata"}
 
 # Heading level for a top-level `<section>` in a module's body. The module's
 # own title is the page heading (level 1, stored separately), so its first tier
@@ -142,11 +143,14 @@ _BASE_HEADING_LEVEL = 2
 _MAX_HEADING_LEVEL = 6
 
 
-def _render(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
+def _render(elem: Element, level: int = _BASE_HEADING_LEVEL,
+            media_prefix: str | None = None) -> str:
     """Recursively render a CNXML element to plain text with inline LaTeX.
 
     `level` is the Markdown heading depth to use for a `<section>` title at this
-    point in the tree; it deepens by one for each nested section.
+    point in the tree; it deepens by one for each nested section. `media_prefix`
+    is the URL prefix for image links (e.g. `/openstax/media/{repo}`); None
+    drops the prefix and keeps just the filename.
     """
     tag = _local(elem.tag)
 
@@ -172,54 +176,80 @@ def _render(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
                 if latex:
                     parts.append(f"\n\n\\[{latex}\\]\n\n")
             else:
-                parts.append(_render(child, level))
+                parts.append(_render(child, level, media_prefix))
             if child.tail and child.tail.strip():
                 parts.append(child.tail)
         return "".join(parts)
+    if tag == "media":
+        return _render_media(elem, media_prefix)
     if tag in _SKIP_TAGS:
         return ""
     if tag == "newline":
         return "\n"
     if tag == "section":
-        return _render_section(elem, level)
+        return _render_section(elem, level, media_prefix)
     if tag == "item":
-        return "\n- " + _inline(elem, level).strip()
+        return "\n- " + _inline(elem, level, media_prefix).strip()
     if tag == "entry":
-        return _inline(elem, level).strip() + " | "
+        return _inline(elem, level, media_prefix).strip() + " | "
     if tag == "row":
-        return "\n" + "".join(_render(c, level) for c in elem).rstrip(" |")
+        return "\n" + "".join(
+            _render(c, level, media_prefix) for c in elem).rstrip(" |")
 
-    text = _inline(elem, level)
+    text = _inline(elem, level, media_prefix)
     if tag in _BLOCK_TAGS:
         return "\n\n" + text.strip() + "\n\n"
     return text
 
 
-def _render_section(elem: Element, level: int) -> str:
+def _render_media(elem: Element, media_prefix: str | None) -> str:
+    """Render a <media> wrapper as a Markdown image; '' for non-image media.
+
+    The image `src` is a repo-relative path (`../../media/FILE.jpg`); we keep
+    only the filename and prefix it with the served media URL. The `<media>`
+    element's `alt` becomes the alt text, with brackets stripped so the
+    `![alt](url)` syntax can't break.
+    """
+    image = _find_local(elem, "image")
+    if image is None:
+        return ""  # non-image media (video/audio/iframe) — nothing to render
+    src = (image.get("src") or "").strip()
+    if not src:
+        return ""
+    filename = src.rsplit("/", 1)[-1]
+    url = f"{media_prefix}/{filename}" if media_prefix else filename
+    alt = normalize_whitespace(elem.get("alt") or "")
+    alt = alt.replace("[", "").replace("]", "").strip()
+    return f"\n\n![{alt}]({url})\n\n"
+
+
+def _render_section(elem: Element, level: int,
+                    media_prefix: str | None = None) -> str:
     """Render a <section>: title as a #-heading (clamped to h6), children one level deeper."""
     parts: list[str] = []
     title_el = _find_local(elem, "title")
     if title_el is not None:
-        heading = _inline(title_el, level).strip()
+        heading = _inline(title_el, level, media_prefix).strip()
         if heading:
             hashes = "#" * min(level, _MAX_HEADING_LEVEL)
             parts.append(f"\n\n{hashes} {heading}\n\n")
     for child in elem:
         if child is title_el:  # already emitted as the heading above
             continue
-        parts.append(_render(child, level + 1))
+        parts.append(_render(child, level + 1, media_prefix))
         if child.tail:
             parts.append(child.tail)
     return "".join(parts)
 
 
-def _inline(elem: Element, level: int = _BASE_HEADING_LEVEL) -> str:
+def _inline(elem: Element, level: int = _BASE_HEADING_LEVEL,
+            media_prefix: str | None = None) -> str:
     """Concatenate an element's text, rendered children, and their tails."""
     parts: list[str] = []
     if elem.text:
         parts.append(elem.text)
     for child in elem:
-        parts.append(_render(child, level))
+        parts.append(_render(child, level, media_prefix))
         if child.tail:
             parts.append(child.tail)
     return "".join(parts)
@@ -243,8 +273,12 @@ def _extract_objectives(metadata: Element) -> str | None:
     return text or None
 
 
-def cnxml_to_markdown(xml_text: str) -> ParsedModule:
-    r"""Parse one module's CNXML → (title, objectives, body). Math → \(…\)/\[…\] LaTeX."""
+def cnxml_to_markdown(xml_text: str, media_prefix: str | None = None) -> ParsedModule:
+    r"""Parse one module's CNXML → (title, objectives, body). Math → \(…\)/\[…\] LaTeX.
+
+    `media_prefix` is the URL prefix for image links (e.g.
+    `/openstax/media/osbooks-astronomy`); None keeps just the filename.
+    """
     root = fromstring(xml_text)
 
     title = ""
@@ -264,7 +298,7 @@ def cnxml_to_markdown(xml_text: str) -> ParsedModule:
     body = ""
     content = _find_local(root, "content")
     if content is not None:
-        body = normalize_whitespace(_inline(content))
+        body = normalize_whitespace(_inline(content, media_prefix=media_prefix))
 
     return ParsedModule(title=title, objectives=objectives, body=body)
 

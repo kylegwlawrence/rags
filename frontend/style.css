@@ -1190,6 +1190,13 @@ select.filter-bar__input {
   font-weight: 600;
 }
 
+.prose img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: var(--space-md) auto;
+}
+
 /* ===== Input pill (ported from slowly_ollama, extended for <input>) ====== */
 
 .input-pill {

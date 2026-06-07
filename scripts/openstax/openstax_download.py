@@ -16,8 +16,10 @@ search index with `openstax_index_fts.py` and restart uvicorn.
 
 Covers every English OpenStax title across all shelves; add or remove repos in
 `OPENSTAX_REPOS` (or pass `--repos`) to change the set. The clone is shallow +
-sparse (only `collections/` and `modules/`, skipping the large `media/` image
-folder).
+sparse (`collections/`, `modules/` and `media/`). Each repo's images are copied
+to `data/openstax/media/{repo}/` and referenced from the body as Markdown image
+links (`![alt](/openstax/media/{repo}/file.jpg)`, served by the API). Pass
+`--skip-images` for the old text-only behaviour.
 """
 
 import argparse
@@ -36,6 +38,11 @@ from rag.schema import connect_rag  # noqa: E402
 
 DB_PATH = REPO_ROOT / "data" / "openstax" / "openstax.db"
 RAG_DB_PATH = REPO_ROOT / "data" / "openstax" / "openstax_rag.db"
+MEDIA_DIR = REPO_ROOT / "data" / "openstax" / "media"
+
+# Image file extensions copied out of each repo's media/ folder. Other media
+# (video/audio) is never referenced by the rendered body, so it is left behind.
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp"}
 
 GITHUB_BASE = "https://github.com/openstax"
 
@@ -141,15 +148,16 @@ CREATE INDEX IF NOT EXISTS idx_sections_subject ON sections(book_id);
 """
 
 
-def _clone(repo: str, dest: Path) -> str:
+def _clone(repo: str, dest: Path, with_media: bool = True) -> str:
     """Shallow + sparse clone `repo` into `dest`; return its HEAD commit sha.
 
     Uses a blobless partial clone with a sparse checkout limited to
-    `collections/` and `modules/` so the large `media/` image folder is never
-    fetched. Falls back to a plain shallow clone if the git version doesn't
-    support partial/sparse clone.
+    `collections/`, `modules/` and (when `with_media`) the repo's `media/`
+    image folder. Falls back to a plain shallow clone if the git version
+    doesn't support partial/sparse clone.
     """
     url = f"{GITHUB_BASE}/{repo}.git"
+    sparse = ["collections", "modules"] + (["media"] if with_media else [])
     try:
         subprocess.run(
             ["git", "clone", "--depth", "1", "--filter=blob:none",
@@ -157,8 +165,7 @@ def _clone(repo: str, dest: Path) -> str:
             check=True, capture_output=True, text=True,
         )
         subprocess.run(
-            ["git", "-C", str(dest), "sparse-checkout", "set",
-             "collections", "modules"],
+            ["git", "-C", str(dest), "sparse-checkout", "set", *sparse],
             check=True, capture_output=True, text=True,
         )
     except subprocess.CalledProcessError:
@@ -176,6 +183,27 @@ def _clone(repo: str, dest: Path) -> str:
     return sha
 
 
+def _copy_media(clone_dir: Path, repo: str) -> str | None:
+    """Copy a repo's image files from its `media/` folder → `data/openstax/media/{repo}/`.
+
+    Images are shared across the volumes of a bundle, so they are namespaced by
+    repo (one copy per repo). Returns the URL prefix for this repo's images, or
+    None when the repo has no media folder (nothing to reference).
+    """
+    src = clone_dir / "media"
+    if not src.is_dir():
+        return None
+    dest = MEDIA_DIR / repo
+    dest.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for path in src.iterdir():
+        if path.is_file() and path.suffix.lower() in _IMAGE_EXTS:
+            shutil.copy2(path, dest / path.name)
+            count += 1
+    print(f"  copied {count} images → {dest}")
+    return f"/openstax/media/{repo}"
+
+
 def _load_book(
     cur: sqlite3.Cursor,
     clone_dir: Path,
@@ -183,6 +211,7 @@ def _load_book(
     repo: str,
     subject: str,
     commit_sha: str,
+    media_prefix: str | None,
 ) -> tuple[str, int, int]:
     """Parse one collection + its modules and (re)insert its rows.
 
@@ -218,7 +247,9 @@ def _load_book(
             if not cnxml_path.is_file():
                 print(f"  ! missing module {module_id} in {book_id}", file=sys.stderr)
                 continue
-            parsed = cnxml_to_markdown(cnxml_path.read_text(encoding="utf-8"))
+            parsed = cnxml_to_markdown(
+                cnxml_path.read_text(encoding="utf-8"), media_prefix=media_prefix
+            )
             if not parsed.body.strip():
                 continue  # nothing useful to store (e.g. a stub)
             seq += 1
@@ -252,6 +283,9 @@ def main() -> int:
                              "the root filesystem). Removed on success.")
     parser.add_argument("--keep-clones", action="store_true",
                         help="Don't delete the cloned repos (for debugging).")
+    parser.add_argument("--skip-images", action="store_true",
+                        help="Don't fetch or copy images; produce text-only "
+                             "bodies (the old behaviour).")
     args = parser.parse_args()
 
     repos = ([(r, "mathematics") for r in args.repos]
@@ -270,13 +304,15 @@ def main() -> int:
         for repo, subject in repos:
             print(f"\n=== {repo} ({subject}) ===")
             clone_dir = work_root / repo
-            sha = _clone(repo, clone_dir)
+            sha = _clone(repo, clone_dir, with_media=not args.skip_images)
+            media_prefix = (None if args.skip_images
+                            else _copy_media(clone_dir, repo))
             collections = sorted((clone_dir / "collections").glob("*.collection.xml"))
             if not collections:
                 print(f"  ! no collections found in {repo}", file=sys.stderr)
             for coll in collections:
                 book_id, n_ch, n_sec = _load_book(
-                    cur, clone_dir, coll, repo, subject, sha
+                    cur, clone_dir, coll, repo, subject, sha, media_prefix
                 )
                 con.commit()
                 total_books += 1

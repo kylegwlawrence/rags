@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
@@ -51,6 +53,14 @@ app.include_router(pdfs.router)
 app.include_router(justice_canada.router)
 
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
+
+# OpenStax section images, copied to data/openstax/media/{repo}/ by the
+# downloader and referenced from section bodies as Markdown image links.
+# mkdir guards against StaticFiles erroring before the first download.
+_OPENSTAX_MEDIA = Path("data/openstax/media")
+_OPENSTAX_MEDIA.mkdir(parents=True, exist_ok=True)
+app.mount("/openstax/media",
+          StaticFiles(directory=str(_OPENSTAX_MEDIA)), name="openstax-media")
 
 
 @app.middleware("http")
