@@ -65,6 +65,10 @@ python scripts/github_readmes/github_readmes_download.py    # READMEs from 15 aw
 python scripts/github_readmes/github_readmes_prune.py       # drop low-quality READMEs (dry-run by default; --execute)
 python scripts/github_readmes/github_readmes_index_fts.py   # readmes_fts FTS5 index
 python scripts/github_readmes/github_readmes_index_rag.py   # data/github/github_readmes_rag.db
+python scripts/wikinews/wikinews_download.py                # English Wikinews archive dump → data/wikinews/dumps/
+python scripts/wikinews/wikinews_parse.py                   # dump → data/wikinews/wikinews.db (FTS built inline)
+python scripts/simplewiki/simplewiki_index_categories.py --db data/wikinews/wikinews.db  # page_categories table
+python scripts/wikinews/wikinews_index_rag.py               # data/wikinews/wikinews_rag.db
 ```
 
 ## Running the API
@@ -124,6 +128,7 @@ Write paths: the on-demand `/embed` routes (→ `<source>_rag.db`), plus `POST /
 - **federal_register** — `federal_register_download.py` (federalregister.gov API v2, 1994–present → `documents` PK `document_number`; `--year-from`/`--year-to`; resumable via `ingest_state`), `federal_register_index_rag.py` (renders Markdown Details/Abstract/Action/Excerpts, chunks on `##`; `build_doc` in `rag/federal_register.py`; `federal_register_rag_extract.py` entry point).
 - **geonames** — one-line records, no RAG. `geonames_download.py` (`allCountries.zip` ~330 MB + lookups → `places` PK `geonameid`, ~13M; synthetic `sentence` per row; writes `feature_classes.csv`/`feature_codes.csv`; not resumable; `--download-dir`/`--limit`/`--reset`), `geonames_index_fts.py` (over name + country_name + feature_description; backfills `feature_description` on older DBs, needs `feature_codes.csv`).
 - **github_readmes** — `github_readmes_download.py` (15 "awesome" lists → `readmes` PK `owner/name`; uses `GITHUB_TOKEN` if set; `--delay` 0.7 s/`--limit`), `github_readmes_prune.py` (deletes low-value READMEs — link-dumps/too-short/image-only/>40% non-English — syncs `_rag.db`, rebuilds FTS; **dry-run unless `--execute`**), `github_readmes_index_rag.py` (cleans + chunks on `##`, same link-dump filter; **`--limit` 100 default**; `github_readmes_rag_extract.py` entry point, Doc built inline — no shared `rag/<source>.py`).
+- **wikinews** — static English Wikinews archive (~22k articles, closed May 2026). `wikinews_download.py` (fetches `enwikinews-*-pages-articles.xml.bz2` from dumps.wikimedia.org with SHA-1 verify; ~48 MB compressed). `wikinews_parse.py` (streams XML → `wikinews.db`; extracts `pub_date` from `{{date|Month DD, YYYY}}` template; trigram FTS over title + body built inline). Categories: run `simplewiki_index_categories.py --db data/wikinews/wikinews.db`. `wikinews_index_rag.py` (full corpus feasible; **`--limit` 100 default**; same wikitext→markdown→chunk pipeline as simplewiki; `WIKINEWS` profile = 800/1000/100). API: `/wikinews/articles` supports `?date_from=`/`?date_to=` (ISO), `?sort=date|relevance`, `?category=`, `?embedded=`; default sort newest-first.
 
 ### Re-indexing notes
 

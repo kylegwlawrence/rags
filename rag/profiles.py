@@ -34,3 +34,6 @@ SIMPLEWIKI = ChunkerProfile(chunk_size=800, max_chunk_size=1000, overlap=100)
 
 # enwiki: same settings as simplewiki — same Ollama models, same retrieval goals.
 ENWIKI = SIMPLEWIKI
+
+# wikinews: news articles are short; same settings as simplewiki.
+WIKINEWS = SIMPLEWIKI

@@ -55,6 +55,8 @@ PDFS_DB = DATA_DIR / "pdfs" / "pdfs.db"
 PDFS_RAG_DB = DATA_DIR / "pdfs" / "pdfs_rag.db"
 # Original PDFs stay in the drop folder; /content streams them from here.
 PDFS_INCOMING = DATA_DIR / "pdfs" / "incoming"
+WIKINEWS_DB = DATA_DIR / "wikinews" / "wikinews.db"
+WIKINEWS_RAG_DB = DATA_DIR / "wikinews" / "wikinews_rag.db"
 
 
 def _connect_ro(path: Path) -> sqlite3.Connection:
@@ -280,3 +282,13 @@ def pdfs_rag() -> sqlite3.Connection:
 @cache
 def justice_canada() -> sqlite3.Connection:
     return _connect_ro(JUSTICE_CANADA_DB)
+
+
+@cache
+def wikinews() -> sqlite3.Connection:
+    return _connect_ro(WIKINEWS_DB)
+
+
+@cache
+def wikinews_rag() -> sqlite3.Connection:
+    return _connect_ro_with_vec(WIKINEWS_RAG_DB)

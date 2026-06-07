@@ -60,6 +60,20 @@ class Article(BaseModel):
     categories: list[str] = []
 
 
+class WikinewsArticle(BaseModel):
+    """One row from `wikinews.articles`. Wikitext body lives at /content."""
+
+    page_id: int
+    title: str
+    namespace: int
+    revision_id: int
+    timestamp: str
+    pub_date: str | None
+    text_bytes: int | None
+    redirect_to: int | None = None
+    categories: list[str] = []
+
+
 class CategorySummary(BaseModel):
     """One category from `simplewiki.page_categories` with its article count."""
 

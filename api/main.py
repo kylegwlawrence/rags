@@ -25,6 +25,7 @@ from api.routers import (  # noqa: E402
     python_docs,
     sec_edgar,
     simplewiki,
+    wikinews,
     worldbank,
 )
 
@@ -34,6 +35,7 @@ app.include_router(factbook.router)
 app.include_router(openalex.router)
 app.include_router(gutenberg.router)
 app.include_router(simplewiki.router)
+app.include_router(wikinews.router)
 app.include_router(enwiki.router)
 app.include_router(python_docs.router)
 app.include_router(federal_register.router)
@@ -76,6 +78,8 @@ def health(response: Response) -> dict:
         ("gutenberg_rag", db.gutenberg_rag),
         ("simplewiki", db.simplewiki),
         ("simplewiki_rag", db.simplewiki_rag),
+        ("wikinews", db.wikinews),
+        ("wikinews_rag", db.wikinews_rag),
         ("enwiki", db.enwiki),
         ("pydocs", db.pydocs),
         ("pydocs_rag", db.pydocs_rag),
