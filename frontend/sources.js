@@ -244,6 +244,48 @@ export const SOURCES = {
     ],
   },
 
+  wikinews: {
+    key: 'wikinews',
+    label: 'Wikinews',
+    subtitle: 'English Wikinews archive',
+    listEndpoint: '/wikinews/articles',
+    detailEndpoint: (id) => `/wikinews/articles/${id}`,
+    resolveEndpoint: (title) => `/wikinews/resolve?title=${encodeURIComponent(title)}`,
+    contentEndpoint: (id) => `/wikinews/articles/${id}/content`,
+    chunksEndpoint: '/wikinews/chunks',
+    docChunksEndpoint: '/wikinews/doc-chunks',
+    embedEndpoint: (id) => `/wikinews/articles/${id}/embed`,
+    followsRedirects: true,
+    idField: 'page_id',
+    titleField: 'title',
+    subtitle_fn: (item) => item.pub_date ?? '',
+    meta_fn: (item) => item.pub_date ?? '',
+    contentType: 'html',
+    metaFields: [
+      { label: 'Published', value: (d) => d.pub_date ?? '' },
+      { label: 'Page ID',   value: (d) => d.page_id },
+      { label: 'Revision',  value: (d) => d.revision_id },
+      { label: 'Timestamp', value: (d) => d.timestamp },
+      { label: 'Size',      value: (d) => d.text_bytes ? `${Math.round(d.text_bytes / 1024)} KB` : '' },
+    ],
+    filters: [
+      { key: 'q',         label: 'Search',        type: 'text', placeholder: 'Title + body FTS5 search…' },
+      { key: 'title',     label: 'Title contains', type: 'text', placeholder: 'substring' },
+      { key: 'category',  label: 'Category',       type: 'text', placeholder: 'e.g. United States' },
+      { key: 'date_from', label: 'Date from',      type: 'text', placeholder: 'YYYY-MM-DD' },
+      { key: 'date_to',   label: 'Date to',        type: 'text', placeholder: 'YYYY-MM-DD' },
+      { key: 'sort', label: 'Sort', type: 'radio', options: [
+        { value: 'date',      label: 'Newest first' },
+        { value: 'relevance', label: 'Relevance (requires search)' },
+      ]},
+      { key: 'embedded', label: 'Embedding', type: 'radio', options: [
+        { value: '',      label: 'All' },
+        { value: 'true',  label: 'Embedded only' },
+        { value: 'false', label: 'Unembedded only' },
+      ]},
+    ],
+  },
+
   enwiki: {
     key: 'enwiki',
     label: 'enwiki',
@@ -875,7 +917,7 @@ export const SOURCES = {
 };
 
 export const SOURCE_ORDER = [
-  'arxiv', 'openalex', 'simplewiki', 'enwiki', 'gutenberg',
+  'arxiv', 'openalex', 'simplewiki', 'wikinews', 'enwiki', 'gutenberg',
   'pydocs', 'openstax', 'factbook', 'worldbank', 'geonames',
   'federal_register', 'github_readmes', 'sec_edgar', 'billstatus', 'eurlex', 'ecfr',
   'justice_canada', 'pdfs',
