@@ -894,6 +894,7 @@ export const SOURCES = {
       { label: 'Body',               value: (d) => d.body_chars ? `${d.body_chars.toLocaleString()} chars` : '' },
     ],
     filters: [
+      { key: 'q', label: 'Search', type: 'text', placeholder: 'FTS5 query over title + body…' },
       { key: 'type', label: 'Type', type: 'select', options: [
         { value: '',             label: 'Acts & regulations' },
         { value: 'acts',         label: 'Acts only' },
@@ -909,8 +910,9 @@ export const SOURCES = {
         { value: 'SI',  label: 'SI' },
       ]},
       { key: 'sort', label: 'Sort', type: 'select', options: [
-        { value: '',       label: 'Newest first' },
-        { value: 'oldest', label: 'Oldest first' },
+        { value: '',          label: 'Newest first' },
+        { value: 'oldest',    label: 'Oldest first' },
+        { value: 'relevance', label: 'Relevance' },
       ]},
     ],
   },
