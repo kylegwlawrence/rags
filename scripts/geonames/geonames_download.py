@@ -200,8 +200,12 @@ def main() -> None:
                 feature_key = f"{record['feature_class']}.{record['feature_code']}"
                 feature_description = feature_descriptions.get(feature_key, "")
 
+                # REPLACE (not IGNORE) so daily re-downloads refresh records
+                # GeoNames revised upstream — population, name, coordinates,
+                # feature reclassification. The download writes every column, so
+                # nothing is lost on replace.
                 cur.execute("""
-                    INSERT OR IGNORE INTO places
+                    INSERT OR REPLACE INTO places
                     (geonameid, name, latitude, longitude, feature_class, feature_code,
                      feature_description, country_code, country_name, population,
                      elevation, timezone, sentence)
