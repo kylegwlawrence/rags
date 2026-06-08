@@ -49,6 +49,8 @@ OAI_ENDPOINT = "https://oaipmh.arxiv.org/oai"
 # May be None (e.g. --from-cache runs make no requests); enforced in
 # _fetch_with_retry, the only place a User-Agent is built.
 ARXIV_EMAIL = os.environ.get("DATASETS_EMAIL")
+# Enforced non-None before any request in _fetch_with_retry.
+USER_AGENT = f"datasets/0.1 (mailto:{ARXIV_EMAIL})"
 MIN_REQUEST_INTERVAL = 3.0
 MAX_ATTEMPTS = 3
 BACKOFF_BASE = 5.0
@@ -182,7 +184,7 @@ def _fetch_with_retry(
             "DATASETS_EMAIL env var is not set; arXiv requires a contact "
             "mailto: in the User-Agent. Set it and re-run."
         )
-    headers = {"User-Agent": f"datasets/0.1 (mailto:{ARXIV_EMAIL})"}
+    headers = {"User-Agent": USER_AGENT}
     for attempt in range(MAX_ATTEMPTS):
         with httpx.Client(timeout=REQUEST_TIMEOUT, headers=headers) as client:
             resp = client.get(endpoint, params=params)

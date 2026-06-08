@@ -126,7 +126,9 @@ def main() -> None:
     parser.add_argument("--reset", action="store_true", help="Drop and recreate tables before downloading")
     args = parser.parse_args()
 
-    os.makedirs(os.path.dirname(args.db), exist_ok=True)
+    db_dir = os.path.dirname(args.db)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
 
     con = sqlite3.connect(args.db)
     cur = con.cursor()

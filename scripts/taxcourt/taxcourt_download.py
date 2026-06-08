@@ -110,7 +110,9 @@ def main() -> None:
     if not email:
         parser.error("DATASETS_EMAIL env var is required for the User-Agent contact address.")
 
-    os.makedirs(os.path.dirname(args.db), exist_ok=True)
+    db_dir = os.path.dirname(args.db)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
 
     con = sqlite3.connect(args.db)
     cur = con.cursor()

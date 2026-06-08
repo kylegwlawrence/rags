@@ -310,10 +310,15 @@ def main() -> None:
 
         total_obs = 0
         for i, series_id in enumerate(series_ids, 1):
-            cur.execute(
-                "SELECT 1 FROM observations WHERE series_id = ? LIMIT 1", (series_id,)
-            )
-            if cur.fetchone():
+            state_key = f"obs_done_{series_id}"
+            cur.execute("SELECT 1 FROM ingest_state WHERE key = ?", (state_key,))
+            done = cur.fetchone() is not None
+            if not done:  # fallback for DBs predating the marker
+                cur.execute(
+                    "SELECT 1 FROM observations WHERE series_id = ? LIMIT 1", (series_id,)
+                )
+                done = cur.fetchone() is not None
+            if done:
                 continue
 
             obs = fetch_observations(session, args.api_key, args.delay, series_id)
@@ -330,9 +335,14 @@ def main() -> None:
                 )
                 count += 1
 
-            if count:
-                con.commit()
-                total_obs += count
+            # Mark fetched even when empty, so a series with no observations
+            # isn't re-fetched on every run.
+            cur.execute(
+                "INSERT OR REPLACE INTO ingest_state (key, value) VALUES (?, '1')",
+                (state_key,),
+            )
+            con.commit()
+            total_obs += count
 
             if i % 500 == 0:
                 print(f"  {i}/{len(series_ids)} series — {total_obs} observations total")

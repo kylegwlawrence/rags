@@ -54,9 +54,11 @@ def iter_docs(
             CHARS_PER_PAGE) exceeds this value.
     """
     excluded = exclude_ids or []
-    params: list = [language]
+    # The language column may list several codes ("en; la"), so match membership
+    # rather than equality; normalize ","/";" separators and spacing both sides.
+    params: list = [f"%;{language.lower()};%"]
 
-    clauses = ["language = ?"]
+    clauses = ["(';' || replace(replace(lower(language), ' ', ''), ',', ';') || ';') LIKE ?"]
     if excluded:
         placeholders = ",".join("?" * len(excluded))
         clauses.append(f"id NOT IN ({placeholders})")

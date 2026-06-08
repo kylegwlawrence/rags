@@ -74,9 +74,21 @@ def download_csv_files(files: list[dict], download_dir: str) -> list[str]:
 
 
 def load_csv_into_db(
-    csv_path: str, cur: sqlite3.Cursor, con: sqlite3.Connection, reset: bool
+    csv_path: str, cur: sqlite3.Cursor, con: sqlite3.Connection
 ) -> int:
-    """Parse a CSV/tab file and insert rows into the laws table."""
+    """Parse a CSV/tab file and insert rows into the laws table.
+
+    Per-file resume: a file already recorded in ``imported_files`` is skipped,
+    so a re-run after a mid-import crash picks up the remaining files instead
+    of skipping everything. ``--reset`` (handled in ``main``) clears both
+    tables first.
+    """
+    filename = os.path.basename(csv_path)
+    cur.execute("SELECT 1 FROM imported_files WHERE filename = ?", (filename,))
+    if cur.fetchone():
+        print(f"  {filename} already imported — skipping")
+        return 0
+
     with open(csv_path, "r", encoding="utf-8", errors="replace") as f:
         sample = f.read(8192)
         f.seek(0)
@@ -91,17 +103,8 @@ def load_csv_into_db(
         safe_cols = [sanitize_column(c) for c in columns]
         col_defs = ", ".join(f'"{c}" TEXT' for c in safe_cols)
 
-        if reset:
-            cur.execute("DROP TABLE IF EXISTS laws")
         cur.execute(f"CREATE TABLE IF NOT EXISTS laws ({col_defs})")
         con.commit()
-
-        # Without --reset, skip if the table already has data
-        if not reset:
-            existing = cur.execute("SELECT COUNT(*) FROM laws").fetchone()[0]
-            if existing > 0:
-                print(f"  laws table already has {existing:,} rows — use --reset to reimport")
-                return 0
 
         quoted_cols = ", ".join(f'"{c}"' for c in safe_cols)
         placeholders = ", ".join("?" for _ in safe_cols)
@@ -115,6 +118,7 @@ def load_csv_into_db(
                 con.commit()
                 print(f"  {count:,} rows inserted...")
 
+    cur.execute("INSERT OR IGNORE INTO imported_files (filename) VALUES (?)", (filename,))
     con.commit()
     return count
 
@@ -151,12 +155,34 @@ def main() -> None:
 
     con = sqlite3.connect(args.db)
     cur = con.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS imported_files (filename TEXT PRIMARY KEY)")
+    if args.reset:
+        cur.execute("DROP TABLE IF EXISTS laws")
+        cur.execute("DELETE FROM imported_files")
+    con.commit()
+
+    # Backward-compat: a DB loaded before per-file tracking has rows in `laws`
+    # but no `imported_files` records. We can't tell which files those rows came
+    # from, and `laws` has no unique key, so re-importing would duplicate them —
+    # skip unless --reset. (`laws` is created lazily, so it may not exist yet.)
+    if not args.reset:
+        tracked = cur.execute("SELECT COUNT(*) FROM imported_files").fetchone()[0]
+        has_laws = cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='laws'"
+        ).fetchone()
+        if tracked == 0 and has_laws:
+            existing = cur.execute("SELECT COUNT(*) FROM laws").fetchone()[0]
+            if existing > 0:
+                print(f"laws already has {existing:,} rows from a pre-tracking run — "
+                      "use --reset to reimport")
+                con.close()
+                return
 
     total = 0
     try:
         for csv_path in csv_files:
             print(f"\nImporting {os.path.basename(csv_path)}...")
-            total += load_csv_into_db(csv_path, cur, con, args.reset)
+            total += load_csv_into_db(csv_path, cur, con)
     finally:
         con.close()
 

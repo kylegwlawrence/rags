@@ -29,7 +29,6 @@ def human_size(num_bytes: int) -> str:
         if size < 1024 or unit == "T":
             return f"{size:.1f}{unit}"
         size /= 1024
-    return f"{size:.1f}T"
 
 
 def dir_size(path: Path) -> int:

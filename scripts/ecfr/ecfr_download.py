@@ -21,45 +21,51 @@ load_dotenv()
 
 # Configuration
 DB_PATH = "data/ecfr/ecfr.db"
-DELAY = 0.5                         # Seconds between API calls
-MAILTO = os.environ.get("DATASETS_EMAIL")
-if not MAILTO:
-    raise SystemExit(
-        "DATASETS_EMAIL env var is not set; required for the eCFR API "
-        "User-Agent. Set it and re-run."
-    )
-
+DELAY = 0.5  # seconds between API calls
 API_BASE = "https://www.ecfr.gov/api"
 
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+# Set up in main() so importing this module has no side effects.
+con = None
+cur = None
+session = None
 
-# Setup SQLite
-con = sqlite3.connect(DB_PATH)
-cur = con.cursor()
-cur.execute("""
-    CREATE TABLE IF NOT EXISTS regulations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title_num INTEGER,
-        title_name TEXT,
-        chapter TEXT,
-        part TEXT,
-        section TEXT,
-        heading TEXT,
-        content TEXT,
-        UNIQUE(title_num, section)
-    )
-""")
-cur.execute("CREATE INDEX IF NOT EXISTS idx_title ON regulations(title_num)")
-cur.execute("""
-    CREATE TABLE IF NOT EXISTS ingest_state (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    )
-""")
-con.commit()
 
-session = requests.Session()
-session.headers.update({"User-Agent": f"ecfr-fetcher mailto:{MAILTO}"})
+def setup():
+    """Open the DB, create the schema, and build the API session."""
+    global con, cur, session
+    mailto = os.environ.get("DATASETS_EMAIL")
+    if not mailto:
+        raise SystemExit(
+            "DATASETS_EMAIL env var is not set; required for the eCFR API "
+            "User-Agent. Set it and re-run."
+        )
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS regulations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title_num INTEGER,
+            title_name TEXT,
+            chapter TEXT,
+            part TEXT,
+            section TEXT,
+            heading TEXT,
+            content TEXT,
+            UNIQUE(title_num, section)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_title ON regulations(title_num)")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ingest_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    con.commit()
+    session = requests.Session()
+    session.headers.update({"User-Agent": f"ecfr-fetcher mailto:{mailto}"})
+
 
 def get_titles():
     """Fetch list of all CFR titles and their current dates."""
@@ -150,49 +156,55 @@ def parse_title_xml(title_num, title_name, xml_text):
     con.commit()
     return count
 
-# --- Main ---
-row = cur.execute("SELECT value FROM ingest_state WHERE key='completed_titles'").fetchone()
-completed: set[int] = set(json.loads(row[0])) if row else set()
-if completed:
-    print(f"Resuming — {len(completed)} titles already completed: {sorted(completed)}\n")
+def main():
+    setup()
 
-print("Fetching list of CFR titles...")
-titles = get_titles()
-print(f"Found {len(titles)} titles.\n")
+    row = cur.execute("SELECT value FROM ingest_state WHERE key='completed_titles'").fetchone()
+    completed: set[int] = set(json.loads(row[0])) if row else set()
+    if completed:
+        print(f"Resuming — {len(completed)} titles already completed: {sorted(completed)}\n")
 
-total = 0
-for title in titles:
-    title_num = title.get("number")
-    title_name = title.get("name", "")
-    date = title.get("up_to_date_as_of") or title.get("latest_issue_date")
+    print("Fetching list of CFR titles...")
+    titles = get_titles()
+    print(f"Found {len(titles)} titles.\n")
 
-    if title.get("reserved"):
-        print(f"Title {title_num}: reserved — skipping")
-        continue
+    total = 0
+    for title in titles:
+        title_num = title.get("number")
+        title_name = title.get("name", "")
+        date = title.get("up_to_date_as_of") or title.get("latest_issue_date")
 
-    if title_num in completed:
-        print(f"Title {title_num}: already done — skipping")
-        continue
+        if title.get("reserved"):
+            print(f"Title {title_num}: reserved — skipping")
+            continue
 
-    print(f"Title {title_num}: {title_name} (as of {date})")
+        if title_num in completed:
+            print(f"Title {title_num}: already done — skipping")
+            continue
 
-    xml_text = get_title_xml(title_num, date)
-    if not xml_text:
-        print("    Could not fetch — skipping")
-        continue
+        print(f"Title {title_num}: {title_name} (as of {date})")
 
-    count = parse_title_xml(title_num, title_name, xml_text)
-    total += count
-    print(f"    {count} sections inserted (total: {total})")
+        xml_text = get_title_xml(title_num, date)
+        if not xml_text:
+            print("    Could not fetch — skipping")
+            continue
 
-    completed.add(title_num)
-    cur.execute(
-        "INSERT OR REPLACE INTO ingest_state (key, value) VALUES ('completed_titles', ?)",
-        (json.dumps(sorted(completed)),),
-    )
-    con.commit()
+        count = parse_title_xml(title_num, title_name, xml_text)
+        total += count
+        print(f"    {count} sections inserted (total: {total})")
 
-    time.sleep(DELAY)
+        completed.add(title_num)
+        cur.execute(
+            "INSERT OR REPLACE INTO ingest_state (key, value) VALUES ('completed_titles', ?)",
+            (json.dumps(sorted(completed)),),
+        )
+        con.commit()
 
-con.close()
-print(f"\nDone. Total sections inserted: {total} into {DB_PATH}")
+        time.sleep(DELAY)
+
+    con.close()
+    print(f"\nDone. Total sections inserted: {total} into {DB_PATH}")
+
+
+if __name__ == "__main__":
+    main()

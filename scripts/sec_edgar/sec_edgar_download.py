@@ -149,7 +149,10 @@ def quarters_to_process(
     ]
     if resume_year is None:
         return all_quarters
-    return [(y, q) for y, q in all_quarters if (y, q) > (resume_year, resume_qtr)]
+    # A NULL quarter would make the tuple comparison raise; treat it as the
+    # start of that year (0 sorts before quarter 1).
+    resume = (resume_year, resume_qtr if resume_qtr is not None else 0)
+    return [(y, q) for y, q in all_quarters if (y, q) > resume]
 
 
 def main() -> None:

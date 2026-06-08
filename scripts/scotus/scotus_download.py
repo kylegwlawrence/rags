@@ -29,7 +29,9 @@ def main() -> None:
     parser.add_argument("--download-dir", default="data/scotus/raw")
     args = parser.parse_args()
 
-    os.makedirs(os.path.dirname(args.db), exist_ok=True)
+    db_dir = os.path.dirname(args.db)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     os.makedirs(args.download_dir, exist_ok=True)
     csv.field_size_limit(min(sys.maxsize, 2 ** 31 - 1))
 
@@ -39,6 +41,11 @@ def main() -> None:
     # --- Download ---
     zip_path = os.path.join(args.download_dir, "scdb.csv.zip")
     tmp_path = zip_path + ".tmp"
+    # Re-download a missing file, or an existing one that isn't a valid zip
+    # (a complete-but-corrupt archive from an earlier run).
+    if os.path.exists(zip_path) and not zipfile.is_zipfile(zip_path):
+        print("Existing archive is not a valid zip — re-downloading.")
+        os.remove(zip_path)
     if not os.path.exists(zip_path):
         print("Downloading SCDB dataset...")
         r = session.get(SCDB_URL, timeout=120)

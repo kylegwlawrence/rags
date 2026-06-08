@@ -102,7 +102,8 @@ def parse_bill_xml(xml_content: bytes) -> Optional[tuple]:
         for item in subj_container.iter("name"):
             if item.text:
                 subjects.append(item.text.strip())
-    subjects_str = "; ".join(set(subjects))
+    # dict.fromkeys dedupes but keeps order, so the stored string is stable run-to-run
+    subjects_str = "; ".join(dict.fromkeys(subjects))
 
     summary_text = ""
     summaries = bill.find("summaries")
