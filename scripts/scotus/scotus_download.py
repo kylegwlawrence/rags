@@ -60,7 +60,10 @@ def main() -> None:
         total = 0
 
         with zipfile.ZipFile(zip_path, "r") as z:
-            csv_name = [n for n in z.namelist() if n.endswith(".csv")][0]
+            csv_names = [n for n in z.namelist() if n.endswith(".csv")]
+            if not csv_names:
+                raise SystemExit("No CSV found inside the SCDB zip — check the download URL.")
+            csv_name = csv_names[0]
             print(f"Parsing {csv_name}...")
 
             with z.open(csv_name) as f:

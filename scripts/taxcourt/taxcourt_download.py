@@ -158,6 +158,8 @@ def main() -> None:
                     break
 
                 op_id = op.get("id")
+                if op_id is None:  # skip rows with no primary key
+                    continue
 
                 cur.execute("SELECT 1 FROM opinions WHERE id = ?", (op_id,))
                 if cur.fetchone():

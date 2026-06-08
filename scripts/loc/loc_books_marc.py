@@ -45,6 +45,17 @@ def create_schema(cur: sqlite3.Cursor) -> None:
     """)
 
 
+def language_from_008(record) -> str:
+    """Return the language code from the 008 control field (positions 35-37).
+
+    008/35-37 is where a single-language record's language lives; field 041 is
+    only present for multilingual/translated works.
+    """
+    field = record.get("008")
+    data = getattr(field, "data", "") or ""
+    return data[35:38].strip() if len(data) >= 38 else ""
+
+
 def parse_marc_record(record) -> tuple:
     """Extract fields from a MARC record."""
     def get_field(tag: str, subfields: list | None = None) -> str:
@@ -69,7 +80,7 @@ def parse_marc_record(record) -> tuple:
     publisher = get_field("260", ["b"]) or get_field("264", ["b"])
     subject   = get_all_fields("650", "a")
     summary   = get_field("520", ["a"])
-    language  = get_field("041", ["a"]) or (record.leader[17] if len(record.leader) > 17 else "")
+    language  = get_field("041", ["a"]) or language_from_008(record)
     item_type = get_field("655", ["a"])
 
     return lccn, title, author, pub_date, publisher, subject, summary, language, item_type

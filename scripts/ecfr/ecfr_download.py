@@ -76,6 +76,37 @@ def get_title_xml(title_num, date):
         return None
     return resp.text
 
+# eCFR DIV elements carry one of these on their TYPE attribute. A SECTION's
+# paragraphs end where the next division begins.
+DIVISION_TYPES = frozenset({
+    "TITLE", "SUBTITLE", "CHAPTER", "SUBCHAPTER",
+    "PART", "SUBPART", "SUBJGRP", "SECTION", "APPENDIX",
+})
+
+
+def section_paragraphs(section_div):
+    """Yield non-empty <P> text under a SECTION, not descending into nested divisions.
+
+    eCFR sections are flat today, so this matches a plain ``iter("P")``; the
+    division-boundary guard keeps paragraphs from bleeding across sections if
+    the schema ever nests them.
+    """
+    paragraphs = []
+
+    def walk(elem):
+        for child in elem:
+            if child.get("TYPE", "") in DIVISION_TYPES:
+                continue  # belongs to a nested division, not this section
+            if child.tag == "P":
+                text = "".join(child.itertext()).strip()
+                if text:
+                    paragraphs.append(text)
+            walk(child)
+
+    walk(section_div)
+    return paragraphs
+
+
 def parse_title_xml(title_num, title_name, xml_text):
     """Parse the eCFR XML and extract sections."""
     try:
@@ -103,13 +134,7 @@ def parse_title_xml(title_num, title_name, xml_text):
             heading = head.text.strip() if head is not None and head.text else ""
             section_num = div.get("N", "")
 
-            # Gather all paragraph text within the section
-            paragraphs = []
-            for p in div.iter("P"):
-                text = "".join(p.itertext()).strip()
-                if text:
-                    paragraphs.append(text)
-            content = "\n".join(paragraphs)
+            content = "\n".join(section_paragraphs(div))
 
             cur.execute("""
                 INSERT OR REPLACE INTO regulations

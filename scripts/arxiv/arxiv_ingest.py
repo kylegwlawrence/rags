@@ -84,8 +84,6 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_papers_submitted   ON papers(submitted_date);
         CREATE INDEX IF NOT EXISTS idx_papers_primary_cat ON papers(primary_category);
-        -- For the API's ?has_html= filter and the downloader's pending scans.
-        CREATE INDEX IF NOT EXISTS idx_papers_download_status ON papers(download_status);
 
         CREATE TABLE IF NOT EXISTS authors (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,6 +108,18 @@ def create_schema(conn: sqlite3.Connection) -> None:
             value TEXT NOT NULL
         );
     """)
+    # Backfill downloader-owned columns on a pre-existing papers table (e.g.
+    # copied from local_wikipedia): CREATE TABLE IF NOT EXISTS is a no-op there,
+    # so these would be missing and the index below would fail.
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(papers)")}
+    for column in ("html_content", "download_status", "downloaded_at"):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE papers ADD COLUMN {column} TEXT")
+    # For the API's ?has_html= filter and the downloader's pending scans.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_papers_download_status "
+        "ON papers(download_status)"
+    )
     conn.commit()
 
 

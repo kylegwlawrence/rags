@@ -162,7 +162,9 @@ def discover_repos(session: requests.Session, delay: float) -> dict[tuple[str, s
 
         count = 0
         for owner, repo in REPO_PATTERN.findall(list_content):
-            repo = repo.replace(".git", "").rstrip(".")
+            if repo.endswith(".git"):  # strip only a trailing suffix, not mid-string
+                repo = repo[:-4]
+            repo = repo.rstrip(".")
             if owner.lower() in NON_OWNER_PATHS:
                 continue
             if repo.lower() in NON_REPO_PATHS:
