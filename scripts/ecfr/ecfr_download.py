@@ -159,10 +159,16 @@ def parse_title_xml(title_num, title_name, xml_text):
 def main():
     setup()
 
-    row = cur.execute("SELECT value FROM ingest_state WHERE key='completed_titles'").fetchone()
-    completed: set[int] = set(json.loads(row[0])) if row else set()
-    if completed:
-        print(f"Resuming — {len(completed)} titles already completed: {sorted(completed)}\n")
+    # Map each fetched title to the eCFR "up_to_date_as_of" date it was fetched
+    # at. A title is re-fetched only when upstream advances past the stored
+    # date, so daily runs pick up amendments but skip unchanged titles. (Legacy
+    # DBs keyed completion by a bare 'completed_titles' set with no date; those
+    # are ignored here, so the first run after this change re-fetches all 50
+    # once and seeds 'title_versions'.)
+    row = cur.execute("SELECT value FROM ingest_state WHERE key='title_versions'").fetchone()
+    versions: dict[str, str] = json.loads(row[0]) if row else {}
+    if versions:
+        print(f"Resuming — {len(versions)} titles already fetched.\n")
 
     print("Fetching list of CFR titles...")
     titles = get_titles()
@@ -178,8 +184,8 @@ def main():
             print(f"Title {title_num}: reserved — skipping")
             continue
 
-        if title_num in completed:
-            print(f"Title {title_num}: already done — skipping")
+        if versions.get(str(title_num)) == date:
+            print(f"Title {title_num}: unchanged (as of {date}) — skipping")
             continue
 
         print(f"Title {title_num}: {title_name} (as of {date})")
@@ -189,14 +195,18 @@ def main():
             print("    Could not fetch — skipping")
             continue
 
+        # Clear this title's existing sections so amendments that remove or
+        # renumber a section don't leave stale rows behind.
+        cur.execute("DELETE FROM regulations WHERE title_num=?", (title_num,))
+
         count = parse_title_xml(title_num, title_name, xml_text)
         total += count
         print(f"    {count} sections inserted (total: {total})")
 
-        completed.add(title_num)
+        versions[str(title_num)] = date
         cur.execute(
-            "INSERT OR REPLACE INTO ingest_state (key, value) VALUES ('completed_titles', ?)",
-            (json.dumps(sorted(completed)),),
+            "INSERT OR REPLACE INTO ingest_state (key, value) VALUES ('title_versions', ?)",
+            (json.dumps(versions),),
         )
         con.commit()
 
