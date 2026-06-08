@@ -6,6 +6,7 @@ Re-runnable: drops `places_fts` and rebuilds from scratch.
 Restart uvicorn after — the API caches the source connection at import time.
 """
 
+import csv
 import sqlite3
 import sys
 from pathlib import Path
@@ -22,7 +23,6 @@ FEATURE_CODES_PATH = REPO_ROOT / "data" / "geonames" / "feature_codes.csv"
 
 def _load_feature_descriptions(path: Path) -> dict[str, str]:
     """Build 'class.code' → description lookup from feature_codes.csv."""
-    import csv
     descs: dict[str, str] = {}
     with open(path, "r", encoding="utf-8") as f:
         for row in csv.DictReader(f):

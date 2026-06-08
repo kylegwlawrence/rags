@@ -3,7 +3,7 @@
 
 Usage::
 
-    python scripts/arxiv_ingest.py [--from YYYY-MM-DD] [--until YYYY-MM-DD]
+    python scripts/arxiv/arxiv_ingest.py [--from YYYY-MM-DD] [--until YYYY-MM-DD]
                                     [--db PATH] [--cache-dir PATH]
                                     [--from-cache] [--reset]
 
@@ -44,8 +44,8 @@ DEFAULT_CACHE_DIR = REPO_ROOT / "data" / "arxiv" / "arxiv_oai_cache"
 BATCH_SIZE = 1000
 
 # Columns written by the OAI harvest path. html_content / download_status /
-# downloaded_at are owned by scripts/arxiv_download.py and intentionally
-# omitted here so a re-harvest of metadata doesn't clobber existing HTML.
+# downloaded_at are owned by the downloader and omitted here so a metadata
+# re-harvest doesn't clobber existing HTML.
 _PAPER_COLS = (
     "oai_datestamp",
     "title",
@@ -84,8 +84,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_papers_submitted   ON papers(submitted_date);
         CREATE INDEX IF NOT EXISTS idx_papers_primary_cat ON papers(primary_category);
-        -- Speeds up the API's ?has_html= filter (download_status IS / IS NOT
-        -- 'downloaded') and the downloader's pending-work scans.
+        -- For the API's ?has_html= filter and the downloader's pending scans.
         CREATE INDEX IF NOT EXISTS idx_papers_download_status ON papers(download_status);
 
         CREATE TABLE IF NOT EXISTS authors (
@@ -187,9 +186,8 @@ def upsert_paper(
         )
         action = "inserted"
     else:
-        # UPDATE deliberately omits the legacy `authors` column so existing
-        # JSON data isn't clobbered with '[]'. The normalized tables stay
-        # current via the paper_authors rebuild below.
+        # Omit the legacy `authors` column so existing JSON isn't clobbered;
+        # the normalized tables stay current via the rebuild below.
         set_clause = ", ".join(f"{c} = ?" for c in _PAPER_COLS)
         conn.execute(
             f"UPDATE papers SET {set_clause} WHERE id = ?",
@@ -197,10 +195,8 @@ def upsert_paper(
         )
         action = "updated"
 
-    # Always rebuild paper_authors on an insert OR update. Old authors rows
-    # in the `authors` table itself are left in place (they may still be
-    # referenced by other papers, or by an earlier version of this paper if
-    # the metadata advances again).
+    # Rebuild paper_authors on insert or update. Rows in `authors` are left
+    # in place — they may still be referenced by other papers.
     conn.execute("DELETE FROM paper_authors WHERE paper_id = ?", (paper_id,))
     for position, author in enumerate(record["authors"]):
         author_id = _get_or_create_author(conn, author)
@@ -416,8 +412,8 @@ def main(argv: list[str] | None = None) -> int:
         _print_stderr("Resetting papers / authors / paper_authors / ingest_state...")
         reset_data(conn)
 
-    # Derive OAI-PMH set spec for server-side filtering: first prefix wins;
-    # fall back to the parent of the first --category value (e.g. cs.LG → cs).
+    # OAI-PMH set for server-side filtering: first prefix wins, else the
+    # parent of the first --category value (e.g. cs.LG → cs).
     set_spec: str | None = None
     if args.category_prefixes:
         set_spec = args.category_prefixes[0]
@@ -453,9 +449,8 @@ def main(argv: list[str] | None = None) -> int:
     _print_stderr(f"Ingesting from {source}...")
     stats = ingest_records(conn, records, progress=_print_stderr)
 
-    # Watermark advances only on network harvests — replaying cache should
-    # not move the "last harvested" pointer, since the cache may predate any
-    # number of incremental edits upstream.
+    # Watermark advances only on network harvests — cache replays may predate
+    # upstream edits, so they must not move the "last harvested" pointer.
     if not args.from_cache:
         cutoff = args.until_date or datetime.now(timezone.utc).date().isoformat()
         set_state(conn, "last_harvested_date", cutoff)

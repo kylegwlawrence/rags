@@ -94,9 +94,12 @@ def process_marc_file(filepath: str, cur: sqlite3.Cursor, con: sqlite3.Connectio
                     (lccn, title, author, publication_date, publisher, subject, summary, language, item_type)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (lccn, title, author, pub_date, publisher, subject, summary, language, item_type))
-                count += cur.rowcount
+                inserted = cur.rowcount
+                count += inserted
 
-                if count % 10000 == 0:
+                # Commit periodically; gate on a real insert so a run of
+                # duplicates can't re-trigger at the same count.
+                if inserted and count % 10000 == 0:
                     con.commit()
                     print(f"  {count} records inserted...")
 

@@ -10,8 +10,7 @@ content hash of heading + content plus CLEANER_VERSION. After this script
 runs, restart uvicorn so the cached connection picks up the new file.
 
 Full corpus is ~509k chunks (~8 days on local Ollama). Use --limit to
-index a subset, or run in the background with --title to scope to one
-CFR title at a time (pass --title via add_extra_args if needed).
+index a subset.
 """
 
 import sys

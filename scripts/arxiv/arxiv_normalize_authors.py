@@ -9,7 +9,7 @@ into ``authors`` / ``paper_authors`` instead; this script populates those
 tables from the legacy JSON column so the rewired ``api/routers/arxiv.py``
 works against existing data without waiting for the full re-harvest.
 
-Once the full re-harvest runs ``scripts/arxiv_ingest.py`` against a fresh
+Once the full re-harvest runs ``scripts/arxiv/arxiv_ingest.py`` against a fresh
 DB, this script becomes obsolete (the new ingest writes structured authors
 directly). The heuristic name split here can't recover proper ``<keyname>``
 / ``<forenames>`` separation from a collapsed string — that requires
@@ -113,7 +113,7 @@ def backfill(
             continue
         conn.execute("DELETE FROM paper_authors WHERE paper_id = ?", (paper_id,))
         if not isinstance(names, list):
-            # Tolerate "null", `{}`, scalars, etc. — treat as no authors.
+            # "null", {}, scalars, etc. — treat as no authors.
             continue
         for position, name in enumerate(names):
             if not isinstance(name, str):
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "No legacy `papers.authors` column found — this DB is already on "
             "the structured-author schema (created by "
-            "`scripts/arxiv_ingest.py`). Nothing to backfill.",
+            "`scripts/arxiv/arxiv_ingest.py`). Nothing to backfill.",
             file=sys.stderr,
         )
         conn.close()

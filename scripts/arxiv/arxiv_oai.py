@@ -10,7 +10,7 @@ record header so the embed pipeline can detect "this paper changed").
 arXiv asks bulk harvesters for >= 3 s between requests and a contact
 ``mailto:`` in the User-Agent. Both are honored; the email is overridable
 via the ``DATASETS_EMAIL`` environment variable (the project-wide contact
-address, shared with ``scripts/arxiv_download.py`` and the other sources).
+address, shared with ``scripts/arxiv/arxiv_download.py`` and the other sources).
 
 Ported from ``local_wikipedia/arxiv/oai.py``. Two intentional deviations:
 
@@ -46,9 +46,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OAI_ENDPOINT = "https://oaipmh.arxiv.org/oai"
-# Required, no fallback. May be None here (e.g. for --from-cache runs that make
-# no network calls); the requirement is enforced in _fetch_with_retry, the only
-# place an actual request — and thus a User-Agent — is built.
+# May be None (e.g. --from-cache runs make no requests); enforced in
+# _fetch_with_retry, the only place a User-Agent is built.
 ARXIV_EMAIL = os.environ.get("DATASETS_EMAIL")
 MIN_REQUEST_INTERVAL = 3.0
 MAX_ATTEMPTS = 3
@@ -140,7 +139,7 @@ def harvest_records(
             token = token_el.text.strip()
         if not token:
             return
-        # Per OAI-PMH spec: when continuing, only verb + resumptionToken are sent.
+        # Spec: continuation requests send only verb + resumptionToken.
         params = {"verb": "ListRecords", "resumptionToken": token}
 
 

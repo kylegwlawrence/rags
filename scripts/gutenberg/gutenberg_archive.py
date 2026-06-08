@@ -1,4 +1,4 @@
-"""Compress the Gutenberg book shards (gutenberg/1 .. gutenberg/9) with zstd.
+"""Compress the Gutenberg book shards (gutenberg/0 .. gutenberg/9) with zstd.
 
 Each shard folder is bundled into its own ``{n}.tar.zst`` archive via
 ``tar`` piped through ``zstd``. Originals are left in place; delete them
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # Shard folders to archive: data/gutenberg/0 .. data/gutenberg/9.
-SHARDS = [str(n) for n in range(0, 10)]
+SHARDS = [str(n) for n in range(10)]
 
 
 def human_size(num_bytes: int) -> str:
@@ -63,13 +63,9 @@ def archive_shard(
     src_bytes = dir_size(source)
     print(f"  archiving {shard}/  ({human_size(src_bytes)}) -> {out_path.name} ...")
 
-    # Run tar and zstd as an explicit pipe rather than `tar -I 'zstd ...'`.
-    # This lets zstd write its live "Read: X MB ==> Y%" counter straight to
-    # the terminal (its stderr is inherited) so each folder shows progress.
-    #
-    # tar -cf - streams the tree to stdout; -C base_dir makes the archive
-    # store the relative path "shard/..." so it extracts cleanly anywhere.
-    # zstd reads that stream and writes the result to out_path via -o.
+    # Explicit pipe (not `tar -I 'zstd ...'`) so zstd's inherited stderr shows
+    # its live progress counter per shard. -C base_dir stores the relative
+    # "shard/..." path so the archive extracts cleanly anywhere.
     tar_proc = subprocess.Popen(
         ["tar", "-cf", "-", "-C", str(base_dir), shard],
         stdout=subprocess.PIPE,

@@ -64,17 +64,17 @@ session.headers.update({"User-Agent": f"ecfr-fetcher mailto:{MAILTO}"})
 def get_titles():
     """Fetch list of all CFR titles and their current dates."""
     url = f"{API_BASE}/versioner/v1/titles.json"
-    r = session.get(url, timeout=60)
-    r.raise_for_status()
-    return r.json().get("titles", [])
+    resp = session.get(url, timeout=60)
+    resp.raise_for_status()
+    return resp.json().get("titles", [])
 
 def get_title_xml(title_num, date):
     """Fetch the full XML for a given title at a given date."""
     url = f"{API_BASE}/versioner/v1/full/{date}/title-{title_num}.xml"
-    r = session.get(url, timeout=300)
-    if r.status_code != 200:
+    resp = session.get(url, timeout=300)
+    if resp.status_code != 200:
         return None
-    return r.text
+    return resp.text
 
 def parse_title_xml(title_num, title_name, xml_text):
     """Parse the eCFR XML and extract sections."""
@@ -136,12 +136,12 @@ titles = get_titles()
 print(f"Found {len(titles)} titles.\n")
 
 total = 0
-for t in titles:
-    title_num = t.get("number")
-    title_name = t.get("name", "")
-    date = t.get("up_to_date_as_of") or t.get("latest_issue_date")
+for title in titles:
+    title_num = title.get("number")
+    title_name = title.get("name", "")
+    date = title.get("up_to_date_as_of") or title.get("latest_issue_date")
 
-    if t.get("reserved"):
+    if title.get("reserved"):
         print(f"Title {title_num}: reserved — skipping")
         continue
 

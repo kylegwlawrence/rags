@@ -234,7 +234,7 @@ def main() -> None:
         time.sleep(DELAY)
 
     con.close()
-    print(f"\nDone.")
+    print("\nDone.")
     print(f"  Treaties: {total_treaties}")
     print(f"  Parties:  {total_parties}")
     print(f"  DB:       {args.db}")

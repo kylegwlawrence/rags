@@ -128,8 +128,8 @@ def find_pdf_url(item_json: dict) -> Optional[str]:
     for res in item_json.get("resources", []) or []:
         if res.get("pdf"):
             return res["pdf"]
-        for page in res.get("files", []) or []:
-            for derivative in page or []:
+        for page_files in res.get("files", []) or []:
+            for derivative in page_files or []:
                 if derivative.get("mimetype") == "application/pdf" and derivative.get("url"):
                     return derivative["url"]
     return None

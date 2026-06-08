@@ -7,7 +7,6 @@ Re-runnable via `INSERT OR REPLACE`. Temp clone is removed on success.
 """
 
 import json
-import os
 import shutil
 import sqlite3
 import subprocess
@@ -16,21 +15,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DB_PATH = REPO_ROOT / "data" / "factbook" / "factbook.db"
-TMP_DIR = "/tmp/factbook_json"
+TMP_DIR = Path("/tmp/factbook_json")
 
 
 def main() -> int:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    # Clone the factbook JSON repo
-    if os.path.exists(TMP_DIR):
+    # Fresh clone each run; a leftover temp dir would make git refuse.
+    if TMP_DIR.exists():
         shutil.rmtree(TMP_DIR)
     subprocess.run(
-        ["git", "clone", "https://github.com/factbook/factbook.json.git", TMP_DIR],
+        ["git", "clone", "https://github.com/factbook/factbook.json.git", str(TMP_DIR)],
         check=True,
     )
 
-    # Setup SQLite
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     cur.execute("""
@@ -43,7 +41,7 @@ def main() -> int:
     """)
     con.commit()
 
-    # Regions in the factbook repo
+    # Per-region subdirectories in the factbook repo.
     regions = [
         "africa", "antarctica", "australia-oceania",
         "central-america-n-caribbean", "central-asia",
@@ -54,7 +52,7 @@ def main() -> int:
 
     total = 0
     for region in regions:
-        region_dir = Path(TMP_DIR) / region
+        region_dir = TMP_DIR / region
         if not region_dir.exists():
             print(f"Skipping {region} — directory not found")
             continue
@@ -67,7 +65,7 @@ def main() -> int:
                     print(f"Skipping {json_file} — invalid JSON")
                     continue
 
-            # Try to extract country name
+            # Prefer the short-form name; fall back to long form, then code.
             try:
                 name = data["Government"]["Country name"]["conventional short form"]["text"]
             except (KeyError, TypeError):
@@ -87,7 +85,6 @@ def main() -> int:
     con.close()
     print(f"\nDone. {total} countries inserted into {DB_PATH}")
 
-    # Clean up
     shutil.rmtree(TMP_DIR)
     print("Cleaned up temp files.")
     return 0

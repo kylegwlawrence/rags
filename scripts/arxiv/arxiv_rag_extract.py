@@ -35,25 +35,21 @@ def iter_docs(arxiv_conn: sqlite3.Connection, limit: int | None = None) -> Itera
     construction inline using the same primitives — keep the two in sync if
     either changes.
     """
+    sql = (
+        "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
+        "FROM papers ORDER BY id"
+    )
     if limit is not None:
-        cursor = arxiv_conn.execute(
-            "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
-            "FROM papers ORDER BY id LIMIT ?",
-            (limit,),
-        )
+        cursor = arxiv_conn.execute(sql + " LIMIT ?", (limit,))
     else:
-        cursor = arxiv_conn.execute(
-            "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
-            "FROM papers ORDER BY id"
-        )
+        cursor = arxiv_conn.execute(sql)
     for row in cursor:
         title = normalize_whitespace(strip_html(row["title"] or ""))
         html_content = row["html_content"]
         text = html_to_markdown(html_content).strip() if html_content else ""
         if not text:
-            # No HTML body, or render produced nothing — fall back to abstract.
-            # Title is already in the embed prefix via format_document; only
-            # use it as a body if there's literally nothing else to embed.
+            # No HTML body or empty render — fall back to abstract. Title is
+            # already in the embed prefix, so only use it as a last resort.
             abstract = normalize_whitespace(strip_html(row["abstract"] or ""))
             text = abstract or title
         # html-body hash so newly-downloaded papers re-embed even when their

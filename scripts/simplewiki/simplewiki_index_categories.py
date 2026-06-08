@@ -42,12 +42,12 @@ CATEGORY_RE = re.compile(r"\[\[\s*Category\s*:\s*([^\]|]+?)\s*(?:\|[^\]]*)?\]\]"
 
 def extract_categories(text: str) -> set[str]:
     """Return the deduplicated, normalized categories referenced in wikitext."""
-    cats = set()
+    categories = set()
     for raw in CATEGORY_RE.findall(text):
         name = normalize_category(raw)
         if name:
-            cats.add(name)
-    return cats
+            categories.add(name)
+    return categories
 
 
 def create_schema(conn: sqlite3.Connection) -> None:
@@ -91,11 +91,11 @@ def build(db_path: Path) -> None:
 
     for page_id, text in read:
         seen_articles += 1
-        cats = extract_categories(text or "")
-        if cats:
+        categories = extract_categories(text or "")
+        if categories:
             with_cats += 1
-            rows.extend((page_id, c) for c in cats)
-            pair_count += len(cats)
+            rows.extend((page_id, category) for category in categories)
+            pair_count += len(categories)
         if len(rows) >= BATCH_SIZE:
             write.executemany("INSERT INTO page_categories VALUES (?, ?)", rows)
             rows.clear()

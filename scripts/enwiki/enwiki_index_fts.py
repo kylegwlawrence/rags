@@ -56,7 +56,6 @@ def main() -> int:
         return 1
 
     cols = ", ".join(COLUMNS)
-    where = WHERE if args.limit is None else f"{WHERE} LIMIT {args.limit}"
 
     print(f"Opening {DB_PATH} ...")
     con = sqlite3.connect(DB_PATH)
@@ -89,23 +88,22 @@ def main() -> int:
         )
         con.commit()
 
-    total = con.execute(
-        f"SELECT COUNT(*) FROM {CONTENT_TABLE} WHERE {where}"
-    ).fetchone()[0]
-    remaining = con.execute(
-        f"SELECT COUNT(*) FROM {CONTENT_TABLE} WHERE {where} AND rowid > ?",
-        [last_rowid],
-    ).fetchone()[0]
-    limit_note = f" (limit {args.limit:,})" if args.limit is not None else ""
-    print(f"Inserting {remaining:,} rows{limit_note} in batches of {BATCH_SIZE:,} (total {total:,}) ...")
-
     rowids = [
         r[0]
         for r in con.execute(
-            f"SELECT rowid FROM {CONTENT_TABLE} WHERE {where} AND rowid > ? ORDER BY rowid",
+            f"SELECT rowid FROM {CONTENT_TABLE} WHERE {WHERE} AND rowid > ? ORDER BY rowid",
             [last_rowid],
         )
     ]
+    if args.limit is not None:
+        rowids = rowids[: args.limit]
+
+    remaining = len(rowids)
+    total = con.execute(
+        f"SELECT COUNT(*) FROM {CONTENT_TABLE} WHERE {WHERE}"
+    ).fetchone()[0]
+    limit_note = f" (limit {args.limit:,})" if args.limit is not None else ""
+    print(f"Inserting {remaining:,} rows{limit_note} in batches of {BATCH_SIZE:,} (total {total:,}) ...")
 
     t0 = time.time()
     already_done = total - remaining

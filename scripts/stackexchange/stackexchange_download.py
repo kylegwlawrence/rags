@@ -83,8 +83,7 @@ def process_posts(
 ) -> int:
     """Parse Posts.xml with iterparse and insert rows. Returns actual insert count."""
     count = 0
-    context = ET.iterparse(posts_xml_path, events=("end",))
-    for _, elem in context:
+    for _, elem in ET.iterparse(posts_xml_path, events=("end",)):
         if elem.tag != "row":
             elem.clear()
             continue
@@ -150,8 +149,7 @@ def main() -> None:
             print(f"  {name}")
         return
 
-    # Normalise --skip entries so both "stackoverflow.com" and
-    # "stackoverflow.com-Posts.7z" are accepted
+    # Accept --skip with or without the .7z suffix
     skip_set = {s.removesuffix(".7z") for s in args.skip}
 
     con = sqlite3.connect(args.db)

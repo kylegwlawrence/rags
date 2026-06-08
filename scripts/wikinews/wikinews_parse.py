@@ -325,7 +325,7 @@ def parse_dump(
 
 
 def _find_latest_dump() -> Path | None:
-    """Return the newest ``*-pages-articles-multistream.xml.bz2`` under DUMPS_DIR, or None."""
+    """Return the newest ``*-pages-articles.xml.bz2`` under DUMPS_DIR, or None."""
     candidates = sorted(
         DUMPS_DIR.glob("enwikinews-*-pages-articles.xml.bz2"),
         key=lambda p: p.stat().st_mtime,

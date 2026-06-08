@@ -41,7 +41,7 @@ YEAR_SCHEMA = """
 
 
 def get_year_range(db_path: str) -> tuple[int, int]:
-    """Return (min_year, max_year) using the date index — fast MIN/MAX optimisation."""
+    """Return (min_year, max_year) over observations.date."""
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     min_d, max_d = con.execute(
         "SELECT MIN(date), MAX(date) FROM observations"
@@ -78,10 +78,10 @@ def split_year(src_path: str, year: int, out_path: str) -> int:
         dst.commit()
         dst.execute("DETACH DATABASE src")
 
-        n: int = dst.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+        obs_count: int = dst.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
     finally:
         dst.close()
-    return n
+    return obs_count
 
 
 def main() -> None:
@@ -123,14 +123,14 @@ def main() -> None:
             continue
 
         print(f"[{i:4d}/{len(years)}] {year}  writing...", end="", flush=True)
-        n = split_year(args.db, year, out_path)
+        obs_count = split_year(args.db, year, out_path)
 
-        if n == 0:
+        if obs_count == 0:
             os.remove(out_path)
             print("  0 obs — removed")
         else:
             size_mb = os.path.getsize(out_path) / 1_048_576
-            print(f"  {n:>12,} obs  {size_mb:7.1f} MB")
+            print(f"  {obs_count:>12,} obs  {size_mb:7.1f} MB")
 
     print("\nDone.")
 

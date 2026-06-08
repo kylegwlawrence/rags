@@ -337,7 +337,7 @@ def main() -> None:
             if i % 500 == 0:
                 print(f"  {i}/{len(series_ids)} series — {total_obs} observations total")
 
-        print(f"\nDone.")
+        print("\nDone.")
         print(f"  Series in DB:                {total_series}")
         print(f"  New observations this run:   {total_obs}")
         print(f"  DB: {args.db}")

@@ -47,13 +47,13 @@ def _client() -> httpx.Client:
 
 
 def fetch_sha1sums() -> dict[str, str]:
-    """Fetch the enwikinews sha1sums manifest, filtered to the multistream files.
+    """Fetch the enwikinews sha1sums manifest, filtered to TARGET_SUFFIXES.
 
     Returns:
-        Map ``{filename: hex_sha1}`` for the article bz2 and its index.
+        Map ``{filename: hex_sha1}`` for the article bz2 dump.
 
     Raises:
-        RuntimeError: If the manifest is missing either target file.
+        RuntimeError: If the manifest is missing a target file.
     """
     url = f"{BASE_URL}/{WIKI}/latest/{WIKI}-latest-sha1sums.txt"
     with _client() as client:
@@ -144,7 +144,7 @@ def download_with_verify(url: str, dest: Path, expected_sha1: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Download both target files into DUMPS_DIR. Exit 0 on success, 1 if any failed."""
+    """Download each target file into DUMPS_DIR. Exit 0 on success, 1 if any failed."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.parse_args(argv)
 

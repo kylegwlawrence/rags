@@ -37,8 +37,8 @@ DEFAULT_DEST = REPO_ROOT / "data" / "justice_canada" / "laws-lois-xml"
 
 REPOSITORY_URL: str = "https://github.com/justicecanada/laws-lois-xml.git"
 
-# Non-cone sparse-checkout pattern building. A leading slash anchors to the
-# repository root; a trailing slash marks a directory.
+# Sparse-checkout path fragments. A leading slash anchors to the repository
+# root; a trailing slash marks a directory.
 _LANG_CODES: dict[str, list[str]] = {"en": ["eng"], "fr": ["fra"], "both": ["eng", "fra"]}
 _TYPE_DIRS: dict[str, list[str]] = {"acts": ["acts/"], "regulations": ["regulations/"], "both": [""]}
 

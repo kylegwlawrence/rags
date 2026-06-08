@@ -348,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     args.db.parent.mkdir(parents=True, exist_ok=True)
     total_pages, inserted = parse_dump(dump, args.db, namespace_filter=ns_filter)
     print(f"Parsed {total_pages:,} pages, inserted {inserted:,} articles into {args.db}")
-    print(f"(Restart uvicorn so api.db.simplewiki() reopens the new file.)")
+    print("(Restart uvicorn so api.db.simplewiki() reopens the new file.)")
     return 0
 
 

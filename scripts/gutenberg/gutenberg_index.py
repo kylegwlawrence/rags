@@ -92,6 +92,12 @@ def main() -> int:
     """)
     con.commit()
 
+    insert_sql = (
+        "INSERT OR REPLACE INTO texts "
+        "(id, path, title, author, language, release_date, size_bytes) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )
+
     t0 = time.time()
     inserted = 0
     missing_meta = 0
@@ -107,23 +113,13 @@ def main() -> int:
             size,
         ))
         if len(batch) >= 1000:
-            cur.executemany(
-                "INSERT OR REPLACE INTO texts "
-                "(id, path, title, author, language, release_date, size_bytes) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                batch,
-            )
+            cur.executemany(insert_sql, batch)
             con.commit()
             inserted += len(batch)
             batch.clear()
             print(f"  indexed {inserted} files...", flush=True)
     if batch:
-        cur.executemany(
-            "INSERT OR REPLACE INTO texts "
-            "(id, path, title, author, language, release_date, size_bytes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            batch,
-        )
+        cur.executemany(insert_sql, batch)
         con.commit()
         inserted += len(batch)
 

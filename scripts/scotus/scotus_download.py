@@ -65,9 +65,9 @@ def main() -> None:
 
             with z.open(csv_name) as f:
                 reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
-                safe_cols = [c.strip() for c in reader.fieldnames]
+                columns = [c.strip() for c in reader.fieldnames]
 
-                col_defs = ", ".join(f'"{c}" TEXT' for c in safe_cols)
+                col_defs = ", ".join(f'"{c}" TEXT' for c in columns)
                 # caseId is the SCDB unique key; without it INSERT OR IGNORE has no effect
                 cur.execute(
                     f'CREATE TABLE IF NOT EXISTS cases ({col_defs}, '
@@ -75,12 +75,13 @@ def main() -> None:
                 )
                 con.commit()
 
-                placeholders = ", ".join("?" for _ in safe_cols)
-                col_list = ", ".join(f'"{c}"' for c in safe_cols)
+                placeholders = ", ".join("?" for _ in columns)
+                col_list = ", ".join(f'"{c}"' for c in columns)
                 insert_sql = f"INSERT OR IGNORE INTO cases ({col_list}) VALUES ({placeholders})"
 
                 for row in reader:
-                    values = [row.get(c.strip(), "") for c in reader.fieldnames]
+                    # DictReader keys are the raw (unstripped) field names.
+                    values = [row.get(raw, "") for raw in reader.fieldnames]
                     cur.execute(insert_sql, values)
                     total += 1
                     if total % 1000 == 0:

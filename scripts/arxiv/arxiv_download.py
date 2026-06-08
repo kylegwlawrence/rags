@@ -3,7 +3,7 @@
 
 Usage::
 
-    python scripts/arxiv_download.py [--db PATH] [--limit N] [--force]
+    python scripts/arxiv/arxiv_download.py [--db PATH] [--limit N] [--force]
 
 Fetches ``https://arxiv.org/html/{id}`` for every paper with NULL or
 ``'retry'`` ``download_status``, newest-first by ``submitted_date``. Stores
@@ -100,15 +100,14 @@ def select_pending(
         params.append(from_date)
 
     if oai_date:
-        # Match the OAI-PMH harvest day exactly. oai_datestamp is stored as a
-        # date string but substr() guards against a stored timestamp form.
+        # substr() guards against a stored timestamp form, not just a date.
         conditions.append("substr(oai_datestamp, 1, 10) = ?")
         params.append(oai_date)
 
     cat_clauses: list[str] = []
 
     if categories:
-        # categories column is space-separated; match each token with LIKE
+        # categories column is space-separated; match each token with LIKE.
         for cat in categories:
             cat_clauses.append(
                 "(categories = ? OR categories LIKE ? OR categories LIKE ? OR categories LIKE ?)"
@@ -116,8 +115,7 @@ def select_pending(
             params += [cat, f"% {cat}", f"{cat} %", f"% {cat} %"]
 
     if category_prefixes:
-        # Match any token that starts with "<prefix>." at the start of the
-        # field or after a space boundary.
+        # Match any token starting with "<prefix>." at field start or after a space.
         for prefix in category_prefixes:
             cat_clauses.append(
                 "(categories LIKE ? OR categories LIKE ?)"
@@ -165,8 +163,7 @@ def download_papers(
         try:
             body = fetch_fn(paper_id)
         except Exception as exc:
-            # Transient — leave download_status unchanged so the next run
-            # retries. Print at error level rather than failing the whole run.
+            # Transient: leave download_status unchanged so the next run retries.
             print(f"  error on {paper_id}: {exc}", file=sys.stderr)
             stats["error"] += 1
             sleep(MIN_REQUEST_INTERVAL)

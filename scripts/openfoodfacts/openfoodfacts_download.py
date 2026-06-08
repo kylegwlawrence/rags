@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""
-Open Food Facts Downloader
-Downloads the full JSONL export and extracts 55 selected fields into SQLite.
-Source: https://world.openfoodfacts.org/data
-Requires: requests
+"""Download the full Open Food Facts JSONL export and extract 55 selected
+fields into data/openfoodfacts/openfoodfacts.db.
+
+Source: https://world.openfoodfacts.org/data. Requires `requests`. The parse
+step is resumable (line counter in `ingest_state`) and idempotent
+(`INSERT OR IGNORE` on the product `code`).
 """
 
 import argparse
@@ -24,7 +25,6 @@ JSONL_URL = "https://static.openfoodfacts.org/data/openfoodfacts-products.jsonl.
 _EMAIL = os.environ.get("DATASETS_EMAIL")
 USER_AGENT = f"openfoodfacts-downloader/1.0 (personal research; {_EMAIL})"
 
-# 55 selected fields
 FIELDS = [
     # Identity
     "code", "product_name", "generic_name", "brands", "brand_owner",
@@ -89,11 +89,15 @@ def download(url: str, dest: Path) -> None:
             r.raise_for_status()
             with open(tmp, "wb") as f:
                 downloaded = 0
+                next_report = 100 << 20  # report every 100 MB
                 for chunk in r.iter_content(chunk_size=1 << 20):
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if downloaded % (100 * 1 << 20) == 0:
+                    # iter_content can yield short chunks, so report on
+                    # crossing the threshold rather than an exact multiple.
+                    if downloaded >= next_report:
                         print(f"  {downloaded // (1 << 20)} MB downloaded...")
+                        next_report += 100 << 20
         tmp.rename(dest)
     except Exception:
         tmp.unlink(missing_ok=True)

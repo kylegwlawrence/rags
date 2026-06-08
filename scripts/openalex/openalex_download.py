@@ -14,8 +14,8 @@ columns (`is_oa`, `oa_status`, `oa_url`, `pdf_url`) so a later fetcher can
 download the actual PDF/HTML for the open-access subset.
 
 Author normalization (the `authors` / `work_authors` tables) is handled by a
-separate one-shot, `scripts/openalex_normalize_authors.py`; FTS over title +
-abstract is built by `scripts/openalex_index_fts.py`. Run both after this.
+separate one-shot, `openalex_normalize_authors.py`; FTS over title + abstract
+is built by `openalex_index_fts.py`. Run both after this.
 """
 
 import argparse
@@ -43,10 +43,8 @@ EMAIL = os.environ.get("DATASETS_EMAIL")
 def fetch_with_retry(url: str, params: dict) -> requests.Response:
     """GET with exponential backoff; raises the last exception after retries.
 
-    Delegates the retry/backoff policy to `rag.retry.with_retry`. A single
-    transient 5xx used to break the cursor loop entirely (losing the page-
-    pagination position); now it costs up to ~6 seconds of backoff before
-    either recovering or surfacing the error.
+    Retries keep a transient 5xx from breaking the cursor loop and losing the
+    pagination position. Backoff policy lives in `rag.retry.with_retry`.
     """
     def _call() -> requests.Response:
         response = requests.get(url, params=params, timeout=60)
@@ -109,11 +107,9 @@ def main() -> int:
             domain TEXT
         )
     """)
-    # Migrate DBs created before later columns existed. CREATE TABLE IF NOT
-    # EXISTS leaves an existing table untouched, so add any missing columns
-    # explicitly (idempotent — skip the ones already present). All but is_oa
-    # are TEXT; the topic-hierarchy columns (topic/subfield/field/domain) come
-    # from each work's primary_topic and stay NULL until a re-run backfills them.
+    # Migrate DBs created before later columns existed — CREATE TABLE IF NOT
+    # EXISTS leaves an existing table untouched. Topic-hierarchy columns stay
+    # NULL until a re-run backfills them from each work's primary_topic.
     existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(works)")}
     for col in ("is_oa", "oa_status", "oa_url", "pdf_url",
                 "topic", "subfield", "field", "domain"):
@@ -147,7 +143,7 @@ def main() -> int:
             break
 
         for work in results:
-            # Reconstruct abstract from inverted index
+            # Reconstruct the abstract from its word -> positions inverted index.
             abstract = ""
             inv_index = work.get("abstract_inverted_index")
             if inv_index:
@@ -158,21 +154,18 @@ def main() -> int:
                 word_positions.sort()
                 abstract = " ".join(w for _, w in word_positions)
 
-            # Authors
             authors = ", ".join(
                 a.get("author", {}).get("display_name", "")
                 for a in work.get("authorships", [])
             )
 
-            # Venue
             primary = work.get("primary_location") or {}
             source = primary.get("source") or {}
             venue = source.get("display_name", "")
 
-            # Open-access location. OpenAlex never serves the body itself, but
-            # it tells us whether a free copy exists and where: `oa_url` is the
-            # best free landing/PDF URL, `pdf_url` (from best_oa_location) is a
-            # direct PDF link when one is known. Both may be absent.
+            # Open-access pointers (the body lives elsewhere): `oa_url` is the
+            # best free landing/PDF URL, `pdf_url` a direct PDF when known.
+            # Both may be absent.
             open_access = work.get("open_access") or {}
             is_oa = 1 if open_access.get("is_oa") else 0
             oa_status = open_access.get("oa_status")
@@ -180,18 +173,16 @@ def main() -> int:
             best_oa = work.get("best_oa_location") or {}
             pdf_url = best_oa.get("pdf_url")
 
-            # Topic hierarchy from primary_topic: topic name plus its
-            # subfield / field / domain (each a nested {id, display_name}).
-            # Any may be absent for works OpenAlex hasn't classified.
+            # Topic hierarchy: topic name plus its subfield / field / domain
+            # (each a nested {id, display_name}). Any may be absent.
             primary_topic = work.get("primary_topic") or {}
             topic = primary_topic.get("display_name")
             subfield = (primary_topic.get("subfield") or {}).get("display_name")
             field = (primary_topic.get("field") or {}).get("display_name")
             domain = (primary_topic.get("domain") or {}).get("display_name")
 
-            # Upsert so a re-run refreshes every column (including the OA and
-            # topic fields) on rows that already exist — `INSERT OR IGNORE`
-            # would silently skip them and leave those columns NULL forever.
+            # Upsert so a re-run refreshes every column on existing rows —
+            # `INSERT OR IGNORE` would skip them and leave new columns NULL.
             cur.execute("""
                 INSERT INTO works (
                     id, title, abstract, year, cited_by_count, doi, authors, venue,

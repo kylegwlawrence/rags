@@ -17,7 +17,7 @@ Sphinx text-builder heading convention (verified across all 513 docs):
 
 A line is treated as an underline only when it sits directly under non-empty
 text and its length matches the heading length (Sphinx pads underlines to
-exactly the heading length; only ±3 chars slop is allowed). This rejects
+exactly the heading length; only up to +3 chars slop is allowed). This rejects
 horizontal-rule transitions like the 70-char `=====...===` separators in
 whatsnew docs, which sit with a blank line above them.
 

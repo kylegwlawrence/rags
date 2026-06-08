@@ -184,8 +184,9 @@ def main() -> None:
                     lat  = float(record["latitude"])  if record["latitude"]  else None
                     lon  = float(record["longitude"]) if record["longitude"] else None
                     pop  = int(record["population"])  if record["population"] else 0
-                    _elev = int(record["elevation"]) if record["elevation"] else None
-                    elev = None if _elev == -9999 else _elev
+                    elev = int(record["elevation"]) if record["elevation"] else None
+                    if elev == -9999:  # GeoNames missing-elevation sentinel
+                        elev = None
                 except ValueError:
                     continue
 

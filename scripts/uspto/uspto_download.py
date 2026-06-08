@@ -8,7 +8,6 @@ import os
 import sqlite3
 import sys
 import zipfile
-from typing import Optional
 
 import requests
 
@@ -34,7 +33,7 @@ def create_schema(cur: sqlite3.Cursor, reset: bool = False) -> None:
     """)
 
 
-def get_last_completed_year(cur: sqlite3.Cursor) -> Optional[int]:
+def get_last_completed_year(cur: sqlite3.Cursor) -> int | None:
     row = cur.execute("SELECT last_completed_year FROM ingest_state WHERE id = 1").fetchone()
     return row[0] if row else None
 
