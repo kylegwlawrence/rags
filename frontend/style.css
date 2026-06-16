@@ -1698,3 +1698,110 @@ select.filter-bar__input {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
+
+/* ===== Mobile ============================================================ */
+
+/* Hamburger (drawer toggle) and the Filters toggle exist only for the mobile
+   layout; hidden by default so desktop is untouched. The media query below
+   reveals them below 768px. */
+.app-hamburger,
+.filter-bar__toggle {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* dvh keeps the layout clear of mobile browser chrome (URL/toolbar). */
+  .layout { height: 100vh; height: 100dvh; }
+  .sidebar { height: 100vh; height: 100dvh; }
+
+  /* Sidebar becomes an off-canvas drawer slid in over the content. */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 30;
+    width: min(80vw, 280px);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow-md);
+  }
+  .sidebar.sidebar--open { transform: translateX(0); }
+
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  /* Hamburger lives at the start of the top bar; styled like theme-toggle. */
+  .app-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 20px;
+    line-height: 1;
+    padding: var(--space-xs);
+    margin: 0;
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  /* Roomier touch targets — every box control keys off this token. */
+  :root { --control-height: 40px; }
+
+  .topbar {
+    padding: var(--space-md);
+    gap: var(--space-sm);
+  }
+  /* Subtitle is the first thing to drop when the bar gets cramped. */
+  .topbar__sep,
+  .topbar__subtitle { display: none; }
+
+  /* Filters collapse behind the toggle; hidden until opened. */
+  .filter-bar { padding: var(--space-md); }
+  .filter-bar__toggle {
+    display: inline-flex;
+    align-items: center;
+    height: var(--control-height);
+    padding: 0 var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-size: 14px;
+    cursor: pointer;
+    width: auto;
+    margin: 0;
+  }
+  .filter-bar__fields { display: none; }
+  .filter-bar__fields--open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-md);
+  }
+  /* Inputs go full-width; 16px font stops iOS from zooming on focus. */
+  .filter-bar__field { width: 100%; }
+  .filter-bar__input {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+    font-size: 16px;
+  }
+  /* Same anti-zoom bump for the semantic-search box. */
+  .input-pill textarea,
+  .input-pill input[type="text"],
+  .input-pill input[type="search"] { font-size: 16px; }
+
+  /* Trim the generous desktop side padding so content uses the full width. */
+  .browse-view .doc-list,
+  .pagination { padding-left: var(--space-md); padding-right: var(--space-md); }
+
+  /* PDF viewer: fit the shorter mobile viewport. */
+  .pdf-frame { height: 70vh; height: 70dvh; }
+}

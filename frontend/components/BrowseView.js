@@ -22,6 +22,8 @@ export default defineComponent({
     const total = ref(0);
     const loading = ref(false);
     const error = ref(null);
+    // Mobile-only: the filter controls collapse behind a "Filters" toggle.
+    const filtersOpen = ref(false);
 
     function initFilters() {
       for (const key of Object.keys(filters)) delete filters[key];
@@ -159,6 +161,7 @@ export default defineComponent({
 
     return {
       filters, filterOptions, offset, results, total, loading, error, LIMIT,
+      filtersOpen,
       applyFilters, onSelectChange, visibleOptions, prevPage, nextPage,
       itemTitle, itemSubtitle, itemMeta, itemId,
     };
@@ -167,7 +170,13 @@ export default defineComponent({
   template: `
     <div class="browse-view">
       <form class="filter-bar" @submit.prevent="applyFilters">
-        <div class="filter-bar__fields">
+        <button
+          type="button"
+          class="filter-bar__toggle"
+          :aria-expanded="filtersOpen ? 'true' : 'false'"
+          @click="filtersOpen = !filtersOpen"
+        >⚙ Filters</button>
+        <div class="filter-bar__fields" :class="{ 'filter-bar__fields--open': filtersOpen }">
         <template v-for="f in source.filters" :key="f.key">
           <div v-if="f.type === 'text' || f.type === 'number'" class="filter-bar__field">
             <label class="filter-bar__label">{{ f.label }}</label>

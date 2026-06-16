@@ -40,6 +40,8 @@ export default defineComponent({
     const activeView = ref(initial.view === 'doc' ? 'browse' : initial.view);
     const selectedDoc = shallowRef(null);
     const theme = ref(document.documentElement.getAttribute('data-theme') || 'light');
+    // Mobile-only: the sidebar is an off-canvas drawer toggled by the hamburger.
+    const sidebarOpen = ref(false);
 
     const activeSource = computed(() => SOURCES[activeSourceKey.value]);
 
@@ -52,8 +54,12 @@ export default defineComponent({
       activeSourceKey.value = key;
       activeView.value = 'browse';
       selectedDoc.value = null;
+      sidebarOpen.value = false;  // close the mobile drawer after picking
       pushNav(key, 'browse');
     }
+
+    function toggleSidebar() { sidebarOpen.value = !sidebarOpen.value; }
+    function closeSidebar() { sidebarOpen.value = false; }
 
     function openDoc(doc, targetPage = null) {
       // targetPage (PDFs only) deep-links the viewer to a page; stashed on the
@@ -154,15 +160,17 @@ export default defineComponent({
     provide('followRedirect', followRedirect);
 
     return {
-      activeSourceKey, activeSource, activeView, selectedDoc, theme,
+      activeSourceKey, activeSource, activeView, selectedDoc, theme, sidebarOpen,
       SOURCE_ORDER, SOURCES,
       selectSource, openDoc, goBack, openChunks, toggleTheme,
+      toggleSidebar, closeSidebar,
     };
   },
 
   template: `
     <div class="layout">
       <SourceNav
+        :class="{ 'sidebar--open': sidebarOpen }"
         :sources="SOURCES"
         :order="SOURCE_ORDER"
         :active="activeSourceKey"
@@ -170,9 +178,16 @@ export default defineComponent({
         @select="selectSource"
         @toggle-theme="toggleTheme"
       />
+      <!-- Mobile-only backdrop behind the open drawer; tap to dismiss. -->
+      <div v-if="sidebarOpen" class="sidebar-backdrop" @click="closeSidebar"></div>
       <div id="main">
         <div class="topbar">
           <div class="topbar__left">
+            <button
+              class="app-hamburger"
+              aria-label="Toggle source list"
+              @click="toggleSidebar"
+            >☰</button>
             <span class="topbar__source">{{ activeSource.label }}</span>
             <span class="topbar__sep">·</span>
             <span class="topbar__subtitle">{{ activeSource.subtitle }}</span>
