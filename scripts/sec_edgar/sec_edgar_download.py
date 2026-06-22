@@ -210,7 +210,12 @@ def main() -> None:
     if resume_year:
         resume = (resume_year, resume_qtr if resume_qtr is not None else 0)
         if resume > prev_of_current:
+            # Stuck in the future (older runs wrongly marked the current/future
+            # quarter done). Roll back to the last fully completed quarter and
+            # persist it so the on-disk state stays truthful.
             resume_year, resume_qtr = prev_of_current
+            set_ingest_state(cur, resume_year, resume_qtr)
+            con.commit()
         print(f"Resuming from after {resume_year} Q{resume_qtr}")
 
     session = requests.Session()
