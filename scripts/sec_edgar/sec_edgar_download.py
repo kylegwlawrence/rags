@@ -135,17 +135,28 @@ def parse_index(text: str) -> list[tuple]:
     return rows
 
 
+def current_year_quarter(today: datetime.date) -> tuple[int, int]:
+    """Return the (year, quarter) that `today` falls in."""
+    return today.year, (today.month - 1) // 3 + 1
+
+
 def quarters_to_process(
     start_year: int,
     end_year: int,
     resume_year: Optional[int],
     resume_qtr: Optional[int],
+    current: tuple[int, int],
 ) -> list[tuple[int, int]]:
-    """Return (year, quarter) pairs to process, skipping already-completed ones."""
+    """Return (year, quarter) pairs to process, skipping already-completed ones.
+
+    Quarters past the current real-world quarter are excluded — their index
+    files don't exist yet, so attempting them just wastes retries every run.
+    """
     all_quarters = [
         (y, q)
         for y in range(start_year, end_year + 1)
         for q in range(1, 5)
+        if (y, q) <= current
     ]
     if resume_year is None:
         return all_quarters
@@ -188,14 +199,26 @@ def main() -> None:
     create_schema(cur)
     con.commit()
 
+    current = current_year_quarter(datetime.date.today())
+    # Last fully completed quarter — the current quarter is never "done"
+    # (its index keeps growing), so cap any recorded resume point here. This
+    # also self-heals a state stuck in the future from older runs that wrongly
+    # marked not-yet-existent quarters complete.
+    prev_of_current = (current[0], current[1] - 1) if current[1] > 1 else (current[0] - 1, 4)
+
     resume_year, resume_qtr = get_ingest_state(cur)
     if resume_year:
+        resume = (resume_year, resume_qtr if resume_qtr is not None else 0)
+        if resume > prev_of_current:
+            resume_year, resume_qtr = prev_of_current
         print(f"Resuming from after {resume_year} Q{resume_qtr}")
 
     session = requests.Session()
     session.headers.update({"User-Agent": f"sec-edgar-fetcher {args.email}"})
 
-    quarters = quarters_to_process(args.start_year, args.end_year, resume_year, resume_qtr)
+    quarters = quarters_to_process(
+        args.start_year, args.end_year, resume_year, resume_qtr, current
+    )
     total = 0
 
     for year, quarter in quarters:
@@ -204,9 +227,11 @@ def main() -> None:
 
         if text is None:
             print("  Not found — skipping")
-            # Mark as completed so we don't retry on resume
-            set_ingest_state(cur, year, quarter)
-            con.commit()
+            # Only record past quarters as done; the current quarter's index
+            # keeps growing, so leave it unmarked to re-fetch next run.
+            if (year, quarter) < current:
+                set_ingest_state(cur, year, quarter)
+                con.commit()
             time.sleep(DELAY)
             continue
 
@@ -222,7 +247,9 @@ def main() -> None:
         else:
             print("  No matching filings")
 
-        set_ingest_state(cur, year, quarter)
+        # Don't mark the current quarter complete — it isn't yet.
+        if (year, quarter) < current:
+            set_ingest_state(cur, year, quarter)
         con.commit()
         time.sleep(DELAY)
 
