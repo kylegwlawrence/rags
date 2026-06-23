@@ -21,7 +21,7 @@ backed by one or more SQLite files in `data/<source>/`):
 | **openalex** | OpenAlex scholarly works | ✓ | ✓ |
 | **gutenberg** | Project Gutenberg texts | — | ✓ |
 | **simplewiki** | Simple English Wikipedia articles | ✓ (title) | ✓ |
-| **enwiki** | Full English Wikipedia (remote, on a Raspberry Pi) | ✓ (title) | — |
+| **enwiki** | Full English Wikipedia (local ~263 GB DB) | ✓ (title+body) | — |
 | **pydocs** | Python standard-library documentation | ✓ | ✓ |
 | **federal_register** | US Federal Register documents (1994–present) | ✓ | ✓ |
 | **github** | Repository READMEs from 15 "awesome" lists | ✓ | ✓ |
@@ -72,26 +72,6 @@ restart uvicorn after any downloader / indexer run. The exception is the
 live-write routes (see below), whose committed rows the cached read-only
 connection sees on its next query without a restart.
 
-## Frontend & deployment
-
-This repo is the **backend only** (API + data + ingest scripts). The frontend
-has been split into its own repo, `datasets_frontend`, which lives and runs on
-**raspberrypi6** — a small FastAPI host that serves the static single-page UI
-under `/ui/` and reverse-proxies every other request to this backend. See that
-repo's README for its layout and systemd deployment.
-
-The deployment splits across two machines on the Tailscale network:
-
-- **pop-os** runs this backend API (`uvicorn api.main:app`, port `8002`) and is
-  where the `scripts/` downloaders/indexers run and the `data/` + `/datasets`
-  files live.
-- **raspberrypi6** runs the `datasets_frontend` host. It binds the Pi's
-  Tailscale IP on port `8002`, so `http://raspberrypi6:8002/` is the single URL
-  users hit; it reaches this backend via `DATASETS_BACKEND_URL` (defaults to the
-  pop-os Tailscale IP).
-
-This backend no longer serves the UI — there is no `/ui` mount.
-
 ## Common response shapes
 
 **List endpoints** (`/papers`, `/works`, `/documents`, …) take `limit`
@@ -116,7 +96,7 @@ also expose `/<source>/doc-chunks?doc_id=…`, which returns every stored chunk
 for one document in insertion order.
 
 **Live-embed routes** (`POST /<source>/.../embed`) embed one document on demand
-into that source's `*_rag.db` — the "Embed" button in the frontend. They now
+into that source's `*_rag.db`. They now
 exist on most sources (arxiv, openalex, gutenberg, simplewiki, ecfr, eurlex,
 enwiki, pdfs, openstax, federal_register, github, sec_edgar). The only other
 write route is `POST /sec_edgar/filings/{accession_number}/download`, which
@@ -217,7 +197,7 @@ always pass at least one filter.
   repeatable), `?min_population=`. Default sort is population-descending.
 - `GET /places/{geonameid}`.
 - `GET /feature_classes` / `GET /feature_codes` (`?feature_class=` repeatable) —
-  lookups that populate the frontend's multi-select dropdowns.
+  lookups for the available feature classes and codes.
 
 ### BillStatus `/billstatus`
 - `GET /bills` — `?q=` (title + summary + subjects), `?congress=`,
@@ -240,8 +220,8 @@ corpus is ~509k chunks ≈ 8 days on local Ollama).
 
 ### OpenStax `/openstax`
 Textbooks as `books` / `chapters` / `sections`. The browsable unit is the
-**section**; `/content` is light Markdown with inline/display LaTeX (rendered
-with KaTeX in the frontend).
+**section**; `/content` is light Markdown with inline/display LaTeX (KaTeX
+syntax).
 - `GET /books` — `?q=`, `?subject=`; `GET /{book_id}`.
 - `GET /sections` — `?q=` (title + objectives + body), `?book_id=`,
   `?subject=`, `?embedded=`, `?sort=`; `GET /sections/{section_id:path}` /
