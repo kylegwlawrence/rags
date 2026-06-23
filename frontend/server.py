@@ -1,21 +1,13 @@
 """Frontend host for the datasets app.
 
-Serves this repo's static single-page frontend (the ``frontend/`` directory)
-under ``/ui/`` and reverse-proxies every other request to the datasets API
-backend running on the pop-os machine over Tailscale.
+Serves this repo's static single-page frontend (``frontend/``) under ``/ui/``
+and reverse-proxies every other request to the datasets API backend on pop-os.
 
-This replaces the previous nginx setup, where nginx served a *separate* copy of
-the frontend (``/var/www/datasets/frontend/``) and proxied the API. Now this
-repo's ``frontend/`` is the canonical frontend and the whole thing runs as one
-systemd service (see ``deploy/datasets-frontend.service``), mirroring the
-slollillama service.
-
-Run from the repo root:
+Run from the repo root::
 
     uvicorn frontend.server:app --host 100.117.77.103 --port 8002
 
-The backend address is configurable via ``DATASETS_BACKEND_URL`` (default points
-at the pop-os Tailscale IP).
+Backend address is overridable via ``DATASETS_BACKEND_URL``.
 """
 
 import os
@@ -28,8 +20,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-# Backend API on pop-os (Tailscale IP for stability), matching the old nginx
-# proxy_pass target. Overridable for testing.
+# Backend API on pop-os (Tailscale IP for stability). Overridable for testing.
 BACKEND_URL = os.environ.get("DATASETS_BACKEND_URL", "http://100.83.81.43:8002")
 
 # Static frontend lives next to this file; resolve absolutely so the service
@@ -53,8 +44,7 @@ _HOP_BY_HOP = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Hold one shared async client open for the lifetime of the service."""
-    # 300 s timeout mirrors the old nginx proxy_read/send_timeout: some backend
-    # calls (RAG embedding, large filings) are slow.
+    # 300 s timeout: some backend calls (RAG embedding, large filings) are slow.
     async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=300.0) as client:
         app.state.client = client
         yield
@@ -74,7 +64,7 @@ async def no_cache_ui_assets(request: Request, call_next):
 
 @app.get("/")
 def root() -> RedirectResponse:
-    """Send the bare host to the UI (mirrors the old nginx `location = /`)."""
+    """Send the bare host to the UI."""
     return RedirectResponse(url="/ui/", status_code=302)
 
 
