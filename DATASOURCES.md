@@ -17,6 +17,7 @@ Counts are measured live from the on-disk DBs.
 | **billstatus** | ✓ (169,862 bills, 2003 through 2026-05) | 362 MB | ~362 MB (complete) | ✓ | ✗ (summaries are short; no RAG by design) |
 | **ceps / eurlex** | ✓ (142,036 EU laws, 1952–2019, from Harvard Dataverse) | 1.6 GB | ~4 GB incl. raw CSV | ✗ | Partial — 6 / 142,036 laws (on-demand only) |
 | **ecfr** | ✓ (50 CFR titles, 227,600 sections) | 867 MB | ~867 MB (complete) | ✓ | Partial — 4 sections (on-demand only; full ~509k chunks ≈ 8 days) |
+| **enwiki** | ✓ (full local copy, ~19M rows) | ~263 GB (local) | ~263 GB (complete) | ✓ (`articles_fts` trigram, prebuilt in the file) | Partial — 9 / ~19M articles (on-demand only; 777 chunks). Old `raspberrypi6` proxy gone (the Pi now runs only the separate frontend). |
 | **factbook** | ✓ (261 / 261 countries) | 16 MB | ~8 MB (complete) | ✗ (list/filter only; no text-search endpoint) | Partial — 24 / 261 countries (897 chunks) |
 | **federal_register** | ✓ (329,851 documents, 1994-01-03 through 2026-05-21) | 446 MB | ~446 MB (complete) | ✗ — `documents_fts` not currently built | Partial — 4 documents (on-demand only) |
 | **github** | ✓ for target (15 awesome-lists; 10,301 fetched, 240 missing) | 188 MB | ~188 MB (complete for target) | ✓ | Partial — 146 / 10,301 repos (2,558 chunks) |
@@ -38,7 +39,6 @@ Counts are measured live from the on-disk DBs.
 |--------|-------|-------------|-------|
 | **geonames** | `geonames.db.zst` | 923 MB (compressed) | ~13M places; decompress to serve. Lookup CSVs (`feature_classes`, `feature_codes`) still present. |
 | **sec_edgar** | `sec_edgar.db.zst` | 637 MB (compressed) | ~2.9M filing metadata rows (1993–2026). `sec_edgar_rag.db` (7 docs, 1,390 chunks) still present. Decompress to serve. |
-| **enwiki** | local 195 GB copy unreadable; served remotely from `raspberrypi6` over Tailscale | 195 GB (local, stale) | API proxies the pi; `enwiki_rag.db` holds 9 on-demand-embedded articles (777 chunks). |
 
 ---
 
