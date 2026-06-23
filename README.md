@@ -74,30 +74,23 @@ connection sees on its next query without a restart.
 
 ## Frontend & deployment
 
-The static single-page frontend lives in `frontend/` (no build step — plain ES
-modules with a vendored Vue, served as-is). It is the **canonical** copy; edit
-it here and it ships.
+This repo is the **backend only** (API + data + ingest scripts). The frontend
+has been split into its own repo, `datasets_frontend`, which lives and runs on
+**raspberrypi6** — a small FastAPI host that serves the static single-page UI
+under `/ui/` and reverse-proxies every other request to this backend. See that
+repo's README for its layout and systemd deployment.
 
 The deployment splits across two machines on the Tailscale network:
 
-- **pop-os** runs the backend API (`uvicorn api.main:app`) described above.
-- **raspberrypi6** runs the frontend host (`frontend/server.py`) — a small
-  FastAPI app that serves `frontend/` under `/ui/` and reverse-proxies every
-  other request to the pop-os backend. It binds the Pi's Tailscale IP on port
-  `8002`, so `http://raspberrypi6:8002/` is the single URL users hit.
+- **pop-os** runs this backend API (`uvicorn api.main:app`, port `8002`) and is
+  where the `scripts/` downloaders/indexers run and the `data/` + `/datasets`
+  files live.
+- **raspberrypi6** runs the `datasets_frontend` host. It binds the Pi's
+  Tailscale IP on port `8002`, so `http://raspberrypi6:8002/` is the single URL
+  users hit; it reaches this backend via `DATASETS_BACKEND_URL` (defaults to the
+  pop-os Tailscale IP).
 
-The frontend host runs as a systemd service (replacing the old nginx setup):
-
-```bash
-sudo cp deploy/datasets-frontend.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now datasets-frontend.service
-```
-
-The backend address is `DATASETS_BACKEND_URL` (defaults to the pop-os Tailscale
-IP). After editing `frontend/server.py`, restart with
-`sudo systemctl restart datasets-frontend`; static asset edits need no restart
-(the host sends `Cache-Control: no-store` on `/ui/*`).
+This backend no longer serves the UI — there is no `/ui` mount.
 
 ## Common response shapes
 

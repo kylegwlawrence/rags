@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 
 # Load .env before any router module reads its env vars at import time
@@ -52,8 +52,6 @@ app.include_router(openstax.router)
 app.include_router(pdfs.router)
 app.include_router(justice_canada.router)
 
-app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
-
 # OpenStax section images, copied to data/openstax/media/{repo}/ by the
 # downloader and referenced from section bodies as Markdown image links.
 # mkdir guards against StaticFiles erroring before the first download.
@@ -61,15 +59,6 @@ _OPENSTAX_MEDIA = Path("data/openstax/media")
 _OPENSTAX_MEDIA.mkdir(parents=True, exist_ok=True)
 app.mount("/openstax/media",
           StaticFiles(directory=str(_OPENSTAX_MEDIA)), name="openstax-media")
-
-
-@app.middleware("http")
-async def no_cache_ui_assets(request: Request, call_next):
-    """Force revalidation on /ui/* so browsers always fetch the latest ES modules."""
-    response = await call_next(request)
-    if request.url.path.startswith("/ui/"):
-        response.headers["Cache-Control"] = "no-store, must-revalidate"
-    return response
 
 
 @app.get("/health")
