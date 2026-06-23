@@ -1,0 +1,26 @@
+# datasets frontend service.
+#
+# Serves this repo's frontend/ under /ui/ and reverse-proxies the rest to the
+# pop-os backend (see frontend/server.py). Replaces the old nginx setup.
+#
+# Install:
+#   sudo cp deploy/datasets-frontend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now datasets-frontend.service
+
+[Unit]
+Description=datasets frontend (FastAPI static UI + reverse proxy to pop-os backend)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kylelawrence
+WorkingDirectory=/home/kylelawrence/datasets
+ExecStart=/home/kylelawrence/datasets/.venv/bin/uvicorn frontend.server:app --host 100.117.77.103 --port 8002
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
