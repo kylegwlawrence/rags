@@ -72,6 +72,33 @@ restart uvicorn after any downloader / indexer run. The exception is the
 live-write routes (see below), whose committed rows the cached read-only
 connection sees on its next query without a restart.
 
+## Frontend & deployment
+
+The static single-page frontend lives in `frontend/` (no build step — plain ES
+modules with a vendored Vue, served as-is). It is the **canonical** copy; edit
+it here and it ships.
+
+The deployment splits across two machines on the Tailscale network:
+
+- **pop-os** runs the backend API (`uvicorn api.main:app`) described above.
+- **raspberrypi6** runs the frontend host (`frontend/server.py`) — a small
+  FastAPI app that serves `frontend/` under `/ui/` and reverse-proxies every
+  other request to the pop-os backend. It binds the Pi's Tailscale IP on port
+  `8002`, so `http://raspberrypi6:8002/` is the single URL users hit.
+
+The frontend host runs as a systemd service (replacing the old nginx setup):
+
+```bash
+sudo cp deploy/datasets-frontend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now datasets-frontend.service
+```
+
+The backend address is `DATASETS_BACKEND_URL` (defaults to the pop-os Tailscale
+IP). After editing `frontend/server.py`, restart with
+`sudo systemctl restart datasets-frontend`; static asset edits need no restart
+(the host sends `Cache-Control: no-store` on `/ui/*`).
+
 ## Common response shapes
 
 **List endpoints** (`/papers`, `/works`, `/documents`, …) take `limit`

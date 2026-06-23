@@ -86,6 +86,12 @@ Port 8002 is fixed (8000/8001 occupied). Tailscale ACLs gate access; no app-leve
 
 **Reload:** after any indexer/downloader run, restart uvicorn — connections are cached at module load. Exceptions (live write paths, no restart needed): the `/embed` routes write via a fresh RW connection (WAL makes committed rows visible to the cached reader immediately); `POST /arxiv/papers/{id}/download` and `POST /sec_edgar/filings/{accession}/download` each do an in-place single-row UPDATE via `db.connect_rw` (same file, no inode swap, so the cached read-only connection sees the row on its next query even though those DBs aren't WAL).
 
+## Frontend & deployment
+
+The static frontend lives in `frontend/` (no build step — plain ES modules + vendored Vue) and is the **canonical** copy; edit in place. Deployment splits across two Tailscale machines: **pop-os** runs the backend API (`uvicorn api.main:app`, port 8002), and **raspberrypi6** runs the frontend host `frontend/server.py` — a small FastAPI app that serves `frontend/` under `/ui/` and reverse-proxies every other path to the pop-os backend (`DATASETS_BACKEND_URL`, default pop-os Tailscale IP). It binds the Pi's Tailscale IP on port 8002, so `http://raspberrypi6:8002/` is the single user-facing URL (`/` → 302 `/ui/`; `/ui/*` sent with `Cache-Control: no-store`).
+
+This **replaces the old nginx setup** (which served a separate `/var/www/datasets/frontend` copy). The frontend host runs as systemd `datasets-frontend.service` (unit checked in at `deploy/datasets-frontend.service`, modeled on the slollillama service). Install: `sudo cp deploy/datasets-frontend.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now datasets-frontend.service`. After editing `frontend/server.py`, `sudo systemctl restart datasets-frontend`; static asset edits need no restart.
+
 ## API routes
 
 All list endpoints: `limit` (default 50, max 200) + `offset` → `{items, total, limit, offset}`. Chunk endpoints: `q` (required), `top_k`, `candidate_k` → `{items, used_dense, top_k, candidate_k}` (RRF, not paginated). Missing FTS table → 503 with script name; bad FTS syntax → 400; Ollama down → sparse-only (`used_dense=false`). `?embedded=` filters by chunk presence; `sort=relevance` needs `q` (else document/date order). Routes below list the path family + query params; deep behavior is under "Script notes".
