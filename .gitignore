@@ -10,3 +10,4 @@ __pycache__/
 manage_enwiki.md
 /dags
 disk_usage_plan.md
+/deploy
