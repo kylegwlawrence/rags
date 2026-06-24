@@ -3,6 +3,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from functools import cache
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -14,7 +15,12 @@ from api._embedded import embedded_clauses
 from api._fts import translate_table_errors
 from api.models import ArxivDownloadResult, EmbedResult, Page, Paper
 from rag import Doc, content_hash
-from rag.arxiv_fetch import fetch_paper_html
+from rag.arxiv_fetch import (
+    body_filename,
+    extract_pdf_text,
+    fetch_paper_html,
+    fetch_paper_pdf,
+)
 from rag.chunker import chunk_markdown
 from rag.cleaner import CLEANER_VERSION, normalize_whitespace, strip_html
 from rag.embed_one import embed_doc
@@ -417,15 +423,61 @@ def get_paper_content(
     paper_id: str,
     conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> Response:
-    """Return the downloaded HTML body for one paper as text/html."""
+    """Return the downloaded body for one paper.
+
+    HTML papers render as text/html; papers that only have a PDF fallback
+    return their extracted text as text/plain.
+    """
     row = conn.execute(
-        f"SELECT {_META_COLS}, html_content FROM papers WHERE id = ?", [paper_id]
+        f"SELECT {_META_COLS}, html_content, pdf_text FROM papers WHERE id = ?",
+        [paper_id],
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
-    if row["html_content"] is None:
-        raise HTTPException(status_code=404, detail="paper has no downloaded HTML")
-    return Response(content=row["html_content"], media_type="text/html; charset=utf-8")
+    if row["html_content"] is not None:
+        return Response(
+            content=row["html_content"], media_type="text/html; charset=utf-8"
+        )
+    if row["pdf_text"]:
+        return Response(
+            content=row["pdf_text"], media_type="text/plain; charset=utf-8"
+        )
+    raise HTTPException(status_code=404, detail="paper has no downloaded body")
+
+
+def _build_doc(row: sqlite3.Row) -> Doc:
+    """Build the RAG Doc for one paper row.
+
+    Body precedence: rendered HTML, else PDF-fallback text, else the abstract
+    (title only as a last resort, since it's already in the embed prefix). The
+    version carries an 8-char hash of whichever body exists so a paper re-embeds
+    when it later gains an HTML or PDF body. Mirrors
+    ``scripts/arxiv/arxiv_rag_extract.iter_docs`` — keep the two in sync.
+    """
+    title = normalize_whitespace(strip_html(row["title"] or ""))
+    html_content = row["html_content"]
+    pdf_text = row["pdf_text"]
+    if html_content:
+        text = html_to_markdown(html_content).strip()
+    elif pdf_text:
+        text = pdf_text.strip()
+    else:
+        text = ""
+    if not text:
+        abstract = normalize_whitespace(strip_html(row["abstract"] or ""))
+        text = abstract or title
+    body = html_content or pdf_text
+    body_marker = content_hash(body)[:8] if body else "no-body"
+    base_version = row["oai_datestamp"] or content_hash(
+        title, row["abstract"] or "", row["updated_date"]
+    )
+    return Doc(
+        doc_id=row["id"],
+        title=title or row["id"],
+        version=f"{base_version}-{body_marker}-{CLEANER_VERSION}",
+        text=text,
+        section=None,
+    )
 
 
 @router.post("/papers/{paper_id:path}/embed", response_model=EmbedResult)
@@ -435,34 +487,19 @@ def embed_paper(
 ) -> EmbedResult:
     """Embed one arxiv paper into arxiv_rag.db on demand (synchronous).
 
-    Renders downloaded HTML or falls back to abstract/title. Replaces any
-    existing chunks; searchable immediately. 503 if Ollama is unreachable.
+    Renders downloaded HTML, else PDF-fallback text, else abstract/title.
+    Replaces any existing chunks; searchable immediately. 503 if Ollama is
+    unreachable.
     """
     row = conn.execute(
-        "SELECT id, title, abstract, html_content, oai_datestamp, updated_date "
-        "FROM papers WHERE id = ?",
+        "SELECT id, title, abstract, html_content, pdf_text, oai_datestamp, "
+        "updated_date FROM papers WHERE id = ?",
         [paper_id],
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
 
-    title = normalize_whitespace(strip_html(row["title"] or ""))
-    html_content = row["html_content"]
-    text = html_to_markdown(html_content).strip() if html_content else ""
-    if not text:
-        abstract = normalize_whitespace(strip_html(row["abstract"] or ""))
-        text = abstract or title
-    html_marker = content_hash(html_content)[:8] if html_content else "no-html"
-    base_version = row["oai_datestamp"] or content_hash(
-        title, row["abstract"] or "", row["updated_date"]
-    )
-    doc = Doc(
-        doc_id=row["id"],
-        title=title or row["id"],
-        version=f"{base_version}-{html_marker}-{CLEANER_VERSION}",
-        text=text,
-        section=None,
-    )
+    doc = _build_doc(row)
 
     rag_conn = db.connect_rag_rw(db.ARXIV_RAG_DB)
     try:
@@ -495,12 +532,15 @@ def download_paper(
     paper_id: str,
     conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> ArxivDownloadResult:
-    """Fetch one paper's LaTeXML HTML and write it to papers.html_content (synchronous).
+    """Fetch one paper's body on demand and write it to the papers row (synchronous).
 
-    Idempotent; status='no_html' (200) if arXiv has no HTML; 502 on fetch failure.
+    Tries the LaTeXML HTML first; on a 404 falls back to the PDF, saving the
+    raw file beside arxiv.db (``<db parent>/bodies/``) and its extracted text to
+    ``papers.pdf_text``. Idempotent; ``status='no_body'`` (200) if arXiv has
+    neither; 502 on fetch failure. ``html_chars`` is the stored body's length.
     """
     row = conn.execute(
-        "SELECT id, html_content FROM papers WHERE id = ?", [paper_id]
+        "SELECT id, html_content, pdf_text FROM papers WHERE id = ?", [paper_id]
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
@@ -509,41 +549,83 @@ def download_paper(
         return ArxivDownloadResult(
             paper_id=paper_id, status="downloaded", html_chars=len(row["html_content"])
         )
+    if row["pdf_text"]:
+        return ArxivDownloadResult(
+            paper_id=paper_id, status="downloaded_pdf", html_chars=len(row["pdf_text"])
+        )
 
+    user_agent = _require_arxiv_user_agent()
     try:
-        body = fetch_paper_html(paper_id, user_agent=_require_arxiv_user_agent())
+        body = fetch_paper_html(paper_id, user_agent=user_agent)
     except httpx.HTTPError as e:
         raise HTTPException(
             status_code=502,
             detail=f"could not fetch paper HTML from arXiv: {e}",
         ) from e
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-    status = "no_html" if body is None else "downloaded"
+    if body is not None:
+        _write_arxiv_body(
+            paper_id,
+            "UPDATE papers SET html_content = ?, download_status = 'downloaded', "
+            "downloaded_at = ? WHERE id = ?",
+            (body,),
+        )
+        return ArxivDownloadResult(
+            paper_id=paper_id, status="downloaded", html_chars=len(body)
+        )
 
+    # No HTML — fall back to the PDF.
+    try:
+        pdf_bytes = fetch_paper_pdf(paper_id, user_agent=user_agent)
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"could not fetch paper PDF from arXiv: {e}",
+        ) from e
+
+    if pdf_bytes is None:
+        _write_arxiv_body(
+            paper_id,
+            "UPDATE papers SET download_status = 'no_body', downloaded_at = ? "
+            "WHERE id = ?",
+            (),
+        )
+        return ArxivDownloadResult(paper_id=paper_id, status="no_body", html_chars=0)
+
+    bodies_dir = Path(db.ARXIV_DB).parent / "bodies"
+    bodies_dir.mkdir(parents=True, exist_ok=True)
+    (bodies_dir / body_filename(paper_id)).write_bytes(pdf_bytes)
+    try:
+        text = extract_pdf_text(pdf_bytes)
+    except Exception:
+        # Keep the saved PDF for debugging; store empty text so the row resolves.
+        text = ""
+    _write_arxiv_body(
+        paper_id,
+        "UPDATE papers SET pdf_text = ?, download_status = 'downloaded_pdf', "
+        "downloaded_at = ? WHERE id = ?",
+        (text,),
+    )
+    return ArxivDownloadResult(
+        paper_id=paper_id, status="downloaded_pdf", html_chars=len(text)
+    )
+
+
+def _write_arxiv_body(
+    paper_id: str, sql: str, leading_params: tuple
+) -> None:
+    """Run one in-place UPDATE on arxiv.db via a fresh RW connection.
+
+    ``sql`` must end with ``downloaded_at = ? WHERE id = ?``; this stamps the
+    timestamp and id after any ``leading_params`` (the body value, if present).
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
     rw = db.connect_rw(db.ARXIV_DB)
     try:
-        if body is None:
-            rw.execute(
-                "UPDATE papers SET download_status = 'no_html', downloaded_at = ? "
-                "WHERE id = ?",
-                (now_iso, paper_id),
-            )
-        else:
-            rw.execute(
-                "UPDATE papers SET html_content = ?, download_status = 'downloaded', "
-                "downloaded_at = ? WHERE id = ?",
-                (body, now_iso, paper_id),
-            )
+        rw.execute(sql, (*leading_params, now_iso, paper_id))
         rw.commit()
     finally:
         rw.close()
-
-    return ArxivDownloadResult(
-        paper_id=paper_id,
-        status=status,
-        html_chars=len(body) if body is not None else 0,
-    )
 
 
 @router.get("/papers/{paper_id:path}", response_model=Paper)

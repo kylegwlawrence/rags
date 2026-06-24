@@ -101,15 +101,27 @@ class TestSelectPending:
 
 
 class TestDownloadPapers:
-    def test_success_writes_html_and_status(self, conn: sqlite3.Connection) -> None:
+    @pytest.fixture
+    def bodies_dir(self, tmp_path: pathlib.Path) -> pathlib.Path:
+        return tmp_path / "bodies"
+
+    def test_success_writes_html_and_status(
+        self, conn: sqlite3.Connection, bodies_dir: pathlib.Path
+    ) -> None:
         arxiv_ingest.upsert_paper(conn, _record("2401.0001"))
         stats = download_papers(
             conn,
             ["2401.0001"],
+            bodies_dir=bodies_dir,
             fetch_fn=lambda _id: "<html>body</html>",
             sleep=_no_sleep,
         )
-        assert stats == {"downloaded": 1, "no_html": 0, "error": 0}
+        assert stats == {
+            "downloaded": 1,
+            "downloaded_pdf": 0,
+            "no_body": 0,
+            "error": 0,
+        }
         row = conn.execute(
             "SELECT html_content, download_status, downloaded_at "
             "FROM papers WHERE id = ?",
@@ -119,24 +131,64 @@ class TestDownloadPapers:
         assert row["download_status"] == "downloaded"
         assert row["downloaded_at"] is not None
 
-    def test_404_writes_no_html_status(self, conn: sqlite3.Connection) -> None:
+    def test_no_html_no_pdf_writes_no_body(
+        self, conn: sqlite3.Connection, bodies_dir: pathlib.Path
+    ) -> None:
         arxiv_ingest.upsert_paper(conn, _record("2401.0001"))
         stats = download_papers(
             conn,
             ["2401.0001"],
+            bodies_dir=bodies_dir,
             fetch_fn=lambda _id: None,
+            pdf_fetch_fn=lambda _id: None,
             sleep=_no_sleep,
         )
-        assert stats == {"downloaded": 0, "no_html": 1, "error": 0}
+        assert stats == {
+            "downloaded": 0,
+            "downloaded_pdf": 0,
+            "no_body": 1,
+            "error": 0,
+        }
         row = conn.execute(
-            "SELECT html_content, download_status FROM papers WHERE id = ?",
+            "SELECT html_content, pdf_text, download_status FROM papers WHERE id = ?",
             ("2401.0001",),
         ).fetchone()
         assert row["html_content"] is None
-        assert row["download_status"] == "no_html"
+        assert row["pdf_text"] is None
+        assert row["download_status"] == "no_body"
 
-    def test_transient_error_leaves_status_unchanged(
-        self, conn: sqlite3.Connection
+    def test_html_404_pdf_fallback_succeeds(
+        self, conn: sqlite3.Connection, bodies_dir: pathlib.Path
+    ) -> None:
+        arxiv_ingest.upsert_paper(conn, _record("2401.0001"))
+        stats = download_papers(
+            conn,
+            ["2401.0001"],
+            bodies_dir=bodies_dir,
+            fetch_fn=lambda _id: None,
+            pdf_fetch_fn=lambda _id: b"%PDF-1.7 fake bytes",
+            extract_fn=lambda _b: "extracted text",
+            sleep=_no_sleep,
+        )
+        assert stats == {
+            "downloaded": 0,
+            "downloaded_pdf": 1,
+            "no_body": 0,
+            "error": 0,
+        }
+        row = conn.execute(
+            "SELECT html_content, pdf_text, download_status FROM papers WHERE id = ?",
+            ("2401.0001",),
+        ).fetchone()
+        assert row["html_content"] is None
+        assert row["pdf_text"] == "extracted text"
+        assert row["download_status"] == "downloaded_pdf"
+        # The raw PDF is kept on disk for debugging.
+        saved = bodies_dir / "2401.0001.pdf"
+        assert saved.read_bytes() == b"%PDF-1.7 fake bytes"
+
+    def test_transient_html_error_leaves_status_unchanged(
+        self, conn: sqlite3.Connection, bodies_dir: pathlib.Path
     ) -> None:
         arxiv_ingest.upsert_paper(conn, _record("2401.0001"))
 
@@ -146,17 +198,52 @@ class TestDownloadPapers:
         stats = download_papers(
             conn,
             ["2401.0001"],
+            bodies_dir=bodies_dir,
             fetch_fn=raises,
             sleep=_no_sleep,
         )
-        assert stats == {"downloaded": 0, "no_html": 0, "error": 1}
+        assert stats == {
+            "downloaded": 0,
+            "downloaded_pdf": 0,
+            "no_body": 0,
+            "error": 1,
+        }
         # download_status stays NULL so the next run will retry.
         row = conn.execute(
             "SELECT download_status FROM papers WHERE id = ?", ("2401.0001",)
         ).fetchone()
         assert row["download_status"] is None
 
-    def test_mixed_results_per_paper(self, conn: sqlite3.Connection) -> None:
+    def test_transient_pdf_error_leaves_status_unchanged(
+        self, conn: sqlite3.Connection, bodies_dir: pathlib.Path
+    ) -> None:
+        arxiv_ingest.upsert_paper(conn, _record("2401.0001"))
+
+        def pdf_raises(_id: str) -> bytes:
+            raise httpx.ConnectError("simulated network outage")
+
+        stats = download_papers(
+            conn,
+            ["2401.0001"],
+            bodies_dir=bodies_dir,
+            fetch_fn=lambda _id: None,
+            pdf_fetch_fn=pdf_raises,
+            sleep=_no_sleep,
+        )
+        assert stats == {
+            "downloaded": 0,
+            "downloaded_pdf": 0,
+            "no_body": 0,
+            "error": 1,
+        }
+        row = conn.execute(
+            "SELECT download_status FROM papers WHERE id = ?", ("2401.0001",)
+        ).fetchone()
+        assert row["download_status"] is None
+
+    def test_mixed_results_per_paper(
+        self, conn: sqlite3.Connection, bodies_dir: pathlib.Path
+    ) -> None:
         for i in range(3):
             arxiv_ingest.upsert_paper(conn, _record(f"2401.000{i}"))
 
@@ -170,13 +257,20 @@ class TestDownloadPapers:
         stats = download_papers(
             conn,
             ["2401.0000", "2401.0001", "2401.0002"],
+            bodies_dir=bodies_dir,
             fetch_fn=fake,
+            pdf_fetch_fn=lambda _id: None,
             sleep=_no_sleep,
         )
-        assert stats == {"downloaded": 1, "no_html": 1, "error": 1}
+        assert stats == {
+            "downloaded": 1,
+            "downloaded_pdf": 0,
+            "no_body": 1,
+            "error": 1,
+        }
 
     def test_progress_callback_fires_every_ten(
-        self, conn: sqlite3.Connection
+        self, conn: sqlite3.Connection, bodies_dir: pathlib.Path
     ) -> None:
         ids = []
         for i in range(25):
@@ -186,6 +280,7 @@ class TestDownloadPapers:
         download_papers(
             conn,
             ids,
+            bodies_dir=bodies_dir,
             fetch_fn=lambda _id: "<html/>",
             sleep=_no_sleep,
             progress=seen.append,

@@ -43,9 +43,9 @@ DEFAULT_DB = REPO_ROOT / "data" / "arxiv" / "arxiv.db"
 DEFAULT_CACHE_DIR = REPO_ROOT / "data" / "arxiv" / "arxiv_oai_cache"
 BATCH_SIZE = 1000
 
-# Columns written by the OAI harvest path. html_content / download_status /
-# downloaded_at are owned by the downloader and omitted here so a metadata
-# re-harvest doesn't clobber existing HTML.
+# Columns written by the OAI harvest path. html_content / pdf_text /
+# download_status / downloaded_at are owned by the downloader and omitted here
+# so a metadata re-harvest doesn't clobber an existing body.
 _PAPER_COLS = (
     "oai_datestamp",
     "title",
@@ -78,6 +78,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             journal_ref      TEXT,
             comments         TEXT,
             html_content     TEXT,
+            pdf_text         TEXT,
             download_status  TEXT,
             downloaded_at    TEXT
         );
@@ -112,7 +113,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
     # copied from local_wikipedia): CREATE TABLE IF NOT EXISTS is a no-op there,
     # so these would be missing and the index below would fail.
     existing = {row[1] for row in conn.execute("PRAGMA table_info(papers)")}
-    for column in ("html_content", "download_status", "downloaded_at"):
+    for column in ("html_content", "pdf_text", "download_status", "downloaded_at"):
         if column not in existing:
             conn.execute(f"ALTER TABLE papers ADD COLUMN {column} TEXT")
     # For the API's ?has_html= filter and the downloader's pending scans.

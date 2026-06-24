@@ -196,9 +196,11 @@ class DownloadResult(BaseModel):
 
 
 class ArxivDownloadResult(BaseModel):
-    """Result of an on-demand arXiv HTML download.
+    """Result of an on-demand arXiv body download.
 
-    `status`: 'downloaded' | 'no_html'. Transient fetch failures raise 502.
+    `status`: 'downloaded' (HTML) | 'downloaded_pdf' (PDF fallback) | 'no_body'
+    (arXiv has neither). Transient fetch failures raise 502. `html_chars` is the
+    stored body's character count (HTML or extracted PDF text).
     """
 
     paper_id: str

@@ -505,13 +505,14 @@ def test_arxiv_papers_503_when_paper_authors_missing(client, tmp_path):
 
 
 def test_arxiv_download_paper(client, tmp_path, monkeypatch):
-    """POST /arxiv/papers/{id}/download fetches HTML on demand and stores it.
+    """POST /arxiv/papers/{id}/download fetches a body on demand and stores it.
 
-    Exercises every outcome against a temp arxiv.db with the arXiv fetch helper
-    faked: missing DATASETS_EMAIL (503), a fresh fetch (downloaded), a 404 from
-    arXiv (no_html, still a 200 so the UI can show a clear note), an
-    already-downloaded paper (idempotent — no re-fetch), and a missing paper
-    (404). Mirrors the dependency-override + temp-DB pattern used above.
+    Exercises every outcome against a temp arxiv.db with the arXiv fetch helpers
+    faked: missing DATASETS_EMAIL (503), a fresh HTML fetch (downloaded), no HTML
+    but a PDF fallback (downloaded_pdf, raw file saved + text stored), neither
+    HTML nor PDF (no_body, still a 200), an already-downloaded paper (idempotent
+    — no re-fetch), and a missing paper (404). Mirrors the dependency-override +
+    temp-DB pattern used above.
     """
     import sqlite3
 
@@ -526,6 +527,7 @@ def test_arxiv_download_paper(client, tmp_path, monkeypatch):
             title TEXT,
             abstract TEXT,
             html_content TEXT,
+            pdf_text TEXT,
             download_status TEXT,
             downloaded_at TEXT
         );
@@ -535,8 +537,9 @@ def test_arxiv_download_paper(client, tmp_path, monkeypatch):
         "INSERT INTO papers (id, title, html_content) VALUES (?, ?, ?)",
         [
             ("2401.0001", "Fresh", None),
-            ("2401.0002", "NoHtml", None),
+            ("2401.0002", "NoBody", None),
             ("2401.0003", "Already", "<html>cached</html>"),
+            ("2401.0004", "PdfOnly", None),
         ],
     )
     c.commit()
@@ -547,15 +550,22 @@ def test_arxiv_download_paper(client, tmp_path, monkeypatch):
     )
     ro_conn.row_factory = sqlite3.Row
 
-    # Fake the arXiv fetch: 2401.0001 has HTML, 2401.0002 has none (404 -> None).
-    # `calls` lets us assert the idempotent path never re-hits arXiv.
+    # Fake the arXiv fetch: 2401.0001 has HTML; 2401.0002 has neither HTML nor
+    # PDF; 2401.0004 has no HTML but a PDF fallback. `calls` lets us assert the
+    # idempotent path never re-hits arXiv.
     calls: list[str] = []
 
     def fake_fetch(arxiv_id, *, user_agent, sleep=None):
         calls.append(arxiv_id)
         return "<html>body</html>" if arxiv_id == "2401.0001" else None
 
+    def fake_fetch_pdf(arxiv_id, *, user_agent, sleep=None):
+        calls.append(f"pdf:{arxiv_id}")
+        return b"%PDF-1.7 fake" if arxiv_id == "2401.0004" else None
+
     monkeypatch.setattr(arxiv_router, "fetch_paper_html", fake_fetch)
+    monkeypatch.setattr(arxiv_router, "fetch_paper_pdf", fake_fetch_pdf)
+    monkeypatch.setattr(arxiv_router, "extract_pdf_text", lambda _b: "PDF TEXT")
     # The route writes via db.connect_rw(db.ARXIV_DB); point it at the temp file.
     monkeypatch.setattr(db, "ARXIV_DB", db_path)
 
@@ -579,14 +589,27 @@ def test_arxiv_download_paper(client, tmp_path, monkeypatch):
             "html_chars": len("<html>body</html>"),
         }
 
-        # No HTML version: 404 from arXiv -> recorded as no_html, 200 response.
+        # No HTML and no PDF: recorded as no_body, 200 response.
         r = client.post("/arxiv/papers/2401.0002/download")
         assert r.status_code == 200, r.text
         assert r.json() == {
             "paper_id": "2401.0002",
-            "status": "no_html",
+            "status": "no_body",
             "html_chars": 0,
         }
+
+        # No HTML but a PDF fallback: stored as downloaded_pdf with text length.
+        r = client.post("/arxiv/papers/2401.0004/download")
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "paper_id": "2401.0004",
+            "status": "downloaded_pdf",
+            "html_chars": len("PDF TEXT"),
+        }
+        # The raw PDF is saved beside arxiv.db for debugging.
+        assert (db_path.parent / "bodies" / "2401.0004.pdf").read_bytes() == (
+            b"%PDF-1.7 fake"
+        )
 
         # Already downloaded: idempotent, must not re-hit arXiv.
         r = client.post("/arxiv/papers/2401.0003/download")
@@ -605,11 +628,14 @@ def test_arxiv_download_paper(client, tmp_path, monkeypatch):
     check = sqlite3.connect(db_path)
     status = dict(check.execute("SELECT id, download_status FROM papers").fetchall())
     html = dict(check.execute("SELECT id, html_content FROM papers").fetchall())
+    pdf = dict(check.execute("SELECT id, pdf_text FROM papers").fetchall())
     check.close()
     assert status["2401.0001"] == "downloaded"
     assert html["2401.0001"] == "<html>body</html>"
-    assert status["2401.0002"] == "no_html"
+    assert status["2401.0002"] == "no_body"
     assert html["2401.0002"] is None
+    assert status["2401.0004"] == "downloaded_pdf"
+    assert pdf["2401.0004"] == "PDF TEXT"
 
 
 # ---------------------------------------------------------------------------

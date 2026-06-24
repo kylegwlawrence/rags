@@ -8,9 +8,15 @@ Usage::
 Fetches ``https://arxiv.org/html/{id}`` for every paper with NULL or
 ``'retry'`` ``download_status``, newest-first by ``submitted_date``. Stores
 the body in ``papers.html_content`` and sets ``download_status='downloaded'``
-on success, ``'no_html'`` on 404 (arxiv has no HTML version for that paper),
-or leaves ``download_status`` unchanged on transient errors so the next run
-retries.
+on success.
+
+When arXiv has no HTML version (404), falls back to the PDF at
+``https://arxiv.org/pdf/{id}``: the raw PDF is saved under ``--bodies-dir``
+(default ``<db parent>/bodies/``, kept for debugging/re-extraction) and its
+extracted plain text goes in ``papers.pdf_text`` with
+``download_status='downloaded_pdf'``. If neither HTML nor PDF exists,
+``download_status='no_body'``. Transient errors leave ``download_status``
+unchanged so the next run retries.
 
 Rate-limited to one request per 3 s per arxiv's polite bulk-fetcher policy.
 User-Agent includes a ``mailto:`` overridable via ``DATASETS_EMAIL``.
@@ -39,7 +45,13 @@ from arxiv_oai import ARXIV_EMAIL  # noqa: E402
 # Fetch logic lives in rag/arxiv_fetch.py so the API's on-demand download
 # route shares it (same split as rag/sec_filing.py). Re-exported here for
 # back-compat with callers/tests that import them from this module.
-from rag.arxiv_fetch import HTML_URL_TEMPLATE, fetch_paper_html  # noqa: E402
+from rag.arxiv_fetch import (  # noqa: E402
+    HTML_URL_TEMPLATE,
+    body_filename,
+    extract_pdf_text,
+    fetch_paper_html,
+    fetch_paper_pdf,
+)
 
 USER_AGENT = f"datasets/0.1 (mailto:{ARXIV_EMAIL})"
 MIN_REQUEST_INTERVAL = 3.0
@@ -56,6 +68,32 @@ def fetch_html(
     200, ``None`` on 404, or raises on persistent 429 / 5xx.
     """
     return fetch_paper_html(arxiv_id, user_agent=USER_AGENT, sleep=sleep)
+
+
+def fetch_pdf(
+    arxiv_id: str,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bytes | None:
+    """Fetch the PDF bytes for ``arxiv_id`` with this script's User-Agent.
+
+    Thin wrapper over ``rag.arxiv_fetch.fetch_paper_pdf``: returns the raw PDF
+    on 200, ``None`` on 404 (or a non-PDF body), or raises on persistent 429 / 5xx.
+    """
+    return fetch_paper_pdf(arxiv_id, user_agent=USER_AGENT, sleep=sleep)
+
+
+def ensure_pdf_text_column(conn: sqlite3.Connection) -> None:
+    """Add ``papers.pdf_text`` if a pre-existing DB lacks it.
+
+    The bulk downloader connects with a plain ``sqlite3.connect`` (it doesn't
+    run ``arxiv_ingest.create_schema``), so on an older DB the ``pdf_text``
+    column may be missing. Adding a nullable column is metadata-only — instant
+    even on the multi-GB monolith — and idempotent.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(papers)")}
+    if "pdf_text" not in cols:
+        conn.execute("ALTER TABLE papers ADD COLUMN pdf_text TEXT")
+        conn.commit()
 
 
 def select_pending(
@@ -139,25 +177,37 @@ def download_papers(
     conn: sqlite3.Connection,
     paper_ids: list[str],
     *,
+    bodies_dir: Path,
     fetch_fn: Callable[[str], str | None] = fetch_html,
+    pdf_fetch_fn: Callable[[str], bytes | None] = fetch_pdf,
+    extract_fn: Callable[[bytes], str] = extract_pdf_text,
     sleep: Callable[[float], None] = time.sleep,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, int]:
-    """Download HTML for each id; update ``papers.html_content`` + ``download_status``.
+    """Download each paper's body; update ``papers`` and save PDFs to ``bodies_dir``.
+
+    Tries the HTML version first; on a 404 (``fetch_fn`` returns ``None``) falls
+    back to the PDF, saving the raw file under ``bodies_dir`` and its extracted
+    text into ``papers.pdf_text``.
 
     Args:
         conn: Open writer connection.
         paper_ids: Ordered list of arxiv ids to process (see ``select_pending``).
-        fetch_fn: Injectable HTTP fetcher. Production passes ``fetch_html``;
+        bodies_dir: Directory the fallback PDFs are written to (created lazily).
+        fetch_fn: Injectable HTML fetcher. Production passes ``fetch_html``;
             tests pass a fake. The fake should return ``str`` (body) on
             success, ``None`` for 404, or raise for transient error.
+        pdf_fetch_fn: Injectable PDF fetcher (``fetch_pdf`` in production):
+            ``bytes`` on success, ``None`` when arXiv has no PDF, or raise.
+        extract_fn: PDF-bytes -> text (``extract_pdf_text`` in production).
         sleep: Inter-request delay. Tests pass a no-op.
         progress: Optional callback for periodic status lines.
 
     Returns:
-        Stats dict with keys ``downloaded``, ``no_html``, ``error``.
+        Stats dict with keys ``downloaded``, ``downloaded_pdf``, ``no_body``,
+        ``error``.
     """
-    stats = {"downloaded": 0, "no_html": 0, "error": 0}
+    stats = {"downloaded": 0, "downloaded_pdf": 0, "no_body": 0, "error": 0}
     total = len(paper_ids)
     for i, paper_id in enumerate(paper_ids, 1):
         try:
@@ -168,29 +218,75 @@ def download_papers(
             stats["error"] += 1
             sleep(MIN_REQUEST_INTERVAL)
             continue
+
         now_iso = datetime.now(timezone.utc).isoformat()
-        if body is None:
-            conn.execute(
-                "UPDATE papers SET download_status = 'no_html', downloaded_at = ? WHERE id = ?",
-                (now_iso, paper_id),
-            )
-            stats["no_html"] += 1
-        else:
+
+        if body is not None:
             conn.execute(
                 "UPDATE papers SET html_content = ?, "
                 "download_status = 'downloaded', downloaded_at = ? WHERE id = ?",
                 (body, now_iso, paper_id),
             )
             stats["downloaded"] += 1
+            conn.commit()
+            sleep(MIN_REQUEST_INTERVAL)
+            _maybe_progress(progress, i, total, stats)
+            continue
+
+        # No HTML — second arXiv hit for the PDF, so stay polite first.
+        sleep(MIN_REQUEST_INTERVAL)
+        try:
+            pdf_bytes = pdf_fetch_fn(paper_id)
+        except Exception as exc:
+            print(f"  pdf error on {paper_id}: {exc}", file=sys.stderr)
+            stats["error"] += 1
+            sleep(MIN_REQUEST_INTERVAL)
+            continue
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if pdf_bytes is None:
+            conn.execute(
+                "UPDATE papers SET download_status = 'no_body', downloaded_at = ? "
+                "WHERE id = ?",
+                (now_iso, paper_id),
+            )
+            stats["no_body"] += 1
+        else:
+            bodies_dir.mkdir(parents=True, exist_ok=True)
+            (bodies_dir / body_filename(paper_id)).write_bytes(pdf_bytes)
+            try:
+                text = extract_fn(pdf_bytes)
+            except Exception as exc:
+                # Keep the saved PDF for debugging; store empty text so the row
+                # still resolves (RAG/content fall back to the abstract).
+                print(f"  pdf parse error on {paper_id}: {exc}", file=sys.stderr)
+                text = ""
+            conn.execute(
+                "UPDATE papers SET pdf_text = ?, "
+                "download_status = 'downloaded_pdf', downloaded_at = ? WHERE id = ?",
+                (text, now_iso, paper_id),
+            )
+            stats["downloaded_pdf"] += 1
         conn.commit()
         sleep(MIN_REQUEST_INTERVAL)
-        if progress is not None and i % 10 == 0:
-            progress(
-                f"  {i}/{total} processed: "
-                f"{stats['downloaded']} downloaded / {stats['no_html']} no_html / "
-                f"{stats['error']} errors"
-            )
+        _maybe_progress(progress, i, total, stats)
     return stats
+
+
+def _maybe_progress(
+    progress: Callable[[str], None] | None,
+    i: int,
+    total: int,
+    stats: dict[str, int],
+) -> None:
+    """Emit a periodic status line every 10 papers, if a callback is set."""
+    if progress is not None and i % 10 == 0:
+        progress(
+            f"  {i}/{total} processed: "
+            f"{stats['downloaded']} downloaded / "
+            f"{stats['downloaded_pdf']} pdf / {stats['no_body']} no_body / "
+            f"{stats['error']} errors"
+        )
 
 
 def _print_stderr(line: str) -> None:
@@ -210,6 +306,16 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="Process at most N papers (testing).",
+    )
+    parser.add_argument(
+        "--bodies-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Directory to save fallback PDFs in (default: a 'bodies' folder "
+            "next to --db, e.g. /datasets/arxiv/bodies when --db points there)."
+        ),
     )
     parser.add_argument(
         "--force",
@@ -270,8 +376,11 @@ def main(argv: list[str] | None = None) -> int:
         _print_stderr(f"missing DB: {args.db}")
         return 1
 
+    bodies_dir = args.bodies_dir or args.db.parent / "bodies"
+
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
+    ensure_pdf_text_column(conn)
 
     paper_ids = select_pending(
         conn,
@@ -283,12 +392,16 @@ def main(argv: list[str] | None = None) -> int:
         category_prefixes=args.category_prefixes,
     )
     _print_stderr(f"Processing {len(paper_ids)} papers...")
+    _print_stderr(f"Fallback PDFs -> {bodies_dir}")
 
-    stats = download_papers(conn, paper_ids, progress=_print_stderr)
+    stats = download_papers(
+        conn, paper_ids, bodies_dir=bodies_dir, progress=_print_stderr
+    )
 
     conn.close()
     _print_stderr(
-        f"Done. downloaded={stats['downloaded']} no_html={stats['no_html']} "
+        f"Done. downloaded={stats['downloaded']} "
+        f"downloaded_pdf={stats['downloaded_pdf']} no_body={stats['no_body']} "
         f"error={stats['error']}"
     )
     _print_stderr("(Restart uvicorn so the cached connection picks up the new file.)")

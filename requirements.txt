@@ -4,6 +4,7 @@ fastapi>=0.110
 httpx>=0.27
 langchain-text-splitters>=0.3
 mwparserfromhell>=0.7
+pdfplumber>=0.11
 pytest>=8.0
 requests>=2.32
 sqlite-vec>=0.1.9
