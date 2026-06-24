@@ -101,6 +101,7 @@ def select_pending(
     limit: int | None,
     *,
     force: bool,
+    retry_no_body: bool = False,
     from_date: str | None = None,
     oai_date: str | None = None,
     categories: list[str] | None = None,
@@ -109,7 +110,10 @@ def select_pending(
     """Return paper IDs that need HTML download, newest-first by ``submitted_date``.
 
     With ``force=True``, returns every paper id (re-download everything,
-    capped by ``limit``). Otherwise returns only papers with NULL
+    capped by ``limit``). With ``retry_no_body=True``, returns only the dead
+    rows — ``download_status IN ('no_html', 'no_body')`` — to re-run them
+    through the HTML→PDF fallback without touching already-downloaded papers
+    (``force`` wins if both are set). Otherwise returns only papers with NULL
     ``download_status`` or ``download_status='retry'``.
 
     ``from_date`` filters to papers with ``submitted_date >= from_date`` (ISO
@@ -128,7 +132,11 @@ def select_pending(
     conditions: list[str] = []
     params: list = []
 
-    if not force:
+    if force:
+        pass  # no status filter — re-download everything
+    elif retry_no_body:
+        conditions.append("download_status IN ('no_html', 'no_body')")
+    else:
         conditions.append(
             "(download_status IS NULL OR download_status = 'retry')"
         )
@@ -323,6 +331,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-download every paper, ignoring existing download_status.",
     )
     parser.add_argument(
+        "--retry-no-body",
+        dest="retry_no_body",
+        action="store_true",
+        help=(
+            "Only re-process papers with no body yet (download_status "
+            "'no_html' or 'no_body') through the HTML→PDF fallback; leaves "
+            "already-downloaded papers untouched. Ignored if --force is set."
+        ),
+    )
+    parser.add_argument(
         "--from-date",
         dest="from_date",
         default=None,
@@ -386,6 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         conn,
         args.limit,
         force=args.force,
+        retry_no_body=args.retry_no_body,
         from_date=args.from_date,
         oai_date=args.oai_date,
         categories=args.categories,

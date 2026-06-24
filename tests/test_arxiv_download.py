@@ -87,6 +87,34 @@ class TestSelectPending:
         ids = select_pending(conn, limit=2, force=False)
         assert len(ids) == 2
 
+    def test_retry_no_body_selects_only_dead_rows(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        # NULL (pending), downloaded, downloaded_pdf, no_html, no_body.
+        statuses = [None, "downloaded", "downloaded_pdf", "no_html", "no_body"]
+        for i, status in enumerate(statuses):
+            arxiv_ingest.upsert_paper(conn, _record(f"2401.000{i}"))
+            if status is not None:
+                conn.execute(
+                    "UPDATE papers SET download_status = ? WHERE id = ?",
+                    (status, f"2401.000{i}"),
+                )
+        conn.commit()
+        ids = set(select_pending(conn, limit=None, force=False, retry_no_body=True))
+        # Only the no_html (2401.0003) and no_body (2401.0004) rows.
+        assert ids == {"2401.0003", "2401.0004"}
+
+    def test_force_overrides_retry_no_body(self, conn: sqlite3.Connection) -> None:
+        arxiv_ingest.upsert_paper(conn, _record("2401.0001"))
+        conn.execute(
+            "UPDATE papers SET download_status = 'downloaded' WHERE id = ?",
+            ("2401.0001",),
+        )
+        conn.commit()
+        # force wins: the downloaded paper is still selected.
+        ids = select_pending(conn, limit=None, force=True, retry_no_body=True)
+        assert ids == ["2401.0001"]
+
     def test_force_includes_already_downloaded(self, conn: sqlite3.Connection) -> None:
         arxiv_ingest.upsert_paper(conn, _record("2401.0001"))
         conn.execute(
