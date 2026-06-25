@@ -9,6 +9,37 @@ Counts are measured live from the on-disk DBs.
 
 ---
 
+## Search routing (RAG-enabled sources)
+
+Simple, one-line descriptions of each semantic-search source — written so a small
+model can pick which RAG server to query. Each entry shows its `/chunks` endpoint
+and the timeframe covered.
+
+This block is generated from `api/sources.py` (also served by `GET /sources`).
+Edit there, then run `python scripts/gen_datasources.py`.
+
+<!-- BEGIN GENERATED SOURCES (scripts/gen_datasources.py) -->
+
+- **arxiv** (`/arxiv/chunks`) — Cutting-edge research papers in science, math, and computer science. Use for questions about new findings, theories, algorithms, or technical methods. *(1991–current)*
+- **openalex** (`/openalex/chunks`) — Finding academic papers and their citations across all fields. Use to discover studies, authors, or how influential research is. *(historical–current)*
+- **openstax** (`/openstax/chunks`) — College textbooks explaining math, science, business, and social science topics. Use for learning or explaining established academic concepts. *(current)*
+- **gutenberg** (`/gutenberg/chunks`) — Classic public-domain books and literature. Use for questions about novels, authors, poems, or older famous texts. *(classic works)*
+- **pydocs** (`/pydocs/chunks`) — Official Python programming documentation. Use for Python syntax, standard library functions, and how to code in Python. *(current)*
+- **simplewiki** (`/simplewiki/chunks`) — General encyclopedia facts in plain, simple language. Use for quick, easy explanations of common topics, people, and places. *(2026 snapshot)*
+- **enwiki** (`/enwiki/chunks`) — Full encyclopedia covering almost any general-knowledge topic in depth. Use for detailed background on people, places, history, and concepts. *(2026 snapshot)*
+- **wikinews** (`/wikinews/chunks`) — News articles about past world events. Use for what happened in specific news stories, politics, or events. *(2004–2026)*
+- **factbook** (`/factbook/chunks`) — Facts and statistics about countries: geography, population, government, and economy. Use for country profiles and comparisons. *(current)*
+- **sec_edgar** (`/sec_edgar/chunks`) — U.S. company financial filings (10-K, 10-Q, 8-K). Use for company finances, business reports, and corporate disclosures. *(1993–current)*
+- **federal_register** (`/federal_register/chunks`) — U.S. government agency rules and official notices. Use for new or proposed federal regulations and agency actions. *(1994–current)*
+- **ecfr** (`/ecfr/chunks`) — The current U.S. federal regulations (rules currently in effect). Use for "what does the law/regulation say right now" questions. *(current)*
+- **eurlex** (`/eurlex/chunks`) — European Union laws and legislation. Use for EU regulations, directives, and legal text. *(1952–2019)*
+- **github_readmes** (`/github/chunks`) — Documentation for open-source software projects. Use to find software tools, libraries, and what they do. *(2026 snapshot)*
+- **pdfs** (`/pdfs/chunks`) — A personal collection of uploaded PDF documents. Use only for the user's own added files. *(personal uploads)*
+
+<!-- END GENERATED SOURCES -->
+
+---
+
 ## Active sources (data downloaded)
 
 | Source | Fully downloaded? | On-disk size | Est. full download | FTS indexed? | Embedded? |

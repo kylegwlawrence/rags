@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 load_dotenv()
 
 from api import db  # noqa: E402
+from api.sources import SOURCES  # noqa: E402
 from api.routers import (  # noqa: E402
     arxiv,
     billstatus,
@@ -59,6 +60,16 @@ _OPENSTAX_MEDIA = Path("data/openstax/media")
 _OPENSTAX_MEDIA.mkdir(parents=True, exist_ok=True)
 app.mount("/openstax/media",
           StaticFiles(directory=str(_OPENSTAX_MEDIA)), name="openstax-media")
+
+
+@app.get("/sources")
+def sources() -> dict:
+    """Catalog of searchable sources for client-side / LLM search routing.
+
+    Each item carries a plain-language description, a static timeframe hint, and
+    the hybrid-search `chunks_endpoint` to query. Defined in `api/sources.py`.
+    """
+    return {"items": SOURCES, "total": len(SOURCES)}
 
 
 @app.get("/health")
