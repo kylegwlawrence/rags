@@ -423,10 +423,12 @@ def get_paper_content(
     paper_id: str,
     conn: sqlite3.Connection = Depends(db.arxiv),
 ) -> Response:
-    """Return the downloaded body for one paper.
+    """Return the readable body for one paper.
 
-    HTML papers render as text/html; papers that only have a PDF fallback
-    return their extracted text as text/plain.
+    Precedence: downloaded HTML (text/html), else PDF-fallback text
+    (text/plain), else the abstract (text/plain). The `X-Body-Source`
+    response header reports which one (`html`/`pdf`/`abstract`) so callers
+    can still tell a real body from the abstract fallback.
     """
     row = conn.execute(
         f"SELECT {_META_COLS}, html_content, pdf_text FROM papers WHERE id = ?",
@@ -436,13 +438,23 @@ def get_paper_content(
         raise HTTPException(status_code=404, detail=f"paper {paper_id!r} not found")
     if row["html_content"] is not None:
         return Response(
-            content=row["html_content"], media_type="text/html; charset=utf-8"
+            content=row["html_content"],
+            media_type="text/html; charset=utf-8",
+            headers={"X-Body-Source": "html"},
         )
     if row["pdf_text"]:
         return Response(
-            content=row["pdf_text"], media_type="text/plain; charset=utf-8"
+            content=row["pdf_text"],
+            media_type="text/plain; charset=utf-8",
+            headers={"X-Body-Source": "pdf"},
         )
-    raise HTTPException(status_code=404, detail="paper has no downloaded body")
+    if row["abstract"]:
+        return Response(
+            content=row["abstract"],
+            media_type="text/plain; charset=utf-8",
+            headers={"X-Body-Source": "abstract"},
+        )
+    raise HTTPException(status_code=404, detail="paper has no body or abstract")
 
 
 def _build_doc(row: sqlite3.Row) -> Doc:
