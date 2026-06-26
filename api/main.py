@@ -56,7 +56,7 @@ app.include_router(justice_canada.router)
 # Optional, decoupled daily-newsletter package (future standalone repo). Guarded
 # so a missing/broken package can never take down the rest of the API.
 try:
-    from newsletter.api import router as newsletter_router  # noqa: E402
+    from cs_ai_newsletter.api import router as newsletter_router  # noqa: E402
 
     app.include_router(newsletter_router)
 except Exception:

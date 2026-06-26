@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from newsletter import compose, source, store, summarize
-from newsletter.config import Config
-from newsletter.llm import OllamaError
+from cs_ai_newsletter import compose, source, store, summarize
+from cs_ai_newsletter.config import Config
+from cs_ai_newsletter.llm import OllamaError
 
 # Where the per-paper map loop emits progress; overridable for tests/quiet runs.
 Logger = Callable[[str], None]

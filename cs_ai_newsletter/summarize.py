@@ -7,9 +7,9 @@ abstract only.
 
 from __future__ import annotations
 
-from newsletter import llm
-from newsletter.config import Config
-from newsletter.source import Paper
+from cs_ai_newsletter import llm
+from cs_ai_newsletter.config import Config
+from cs_ai_newsletter.source import Paper
 
 _SYSTEM = (
     "You are a science writer who explains AI research to curious "

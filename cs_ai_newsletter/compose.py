@@ -7,8 +7,8 @@ Returns GitHub-flavored markdown.
 
 from __future__ import annotations
 
-from newsletter import llm
-from newsletter.config import Config
+from cs_ai_newsletter import llm
+from cs_ai_newsletter.config import Config
 
 _SYSTEM = (
     "You are the editor of a daily AI research newsletter for curious "

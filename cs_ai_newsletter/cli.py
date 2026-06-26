@@ -1,9 +1,9 @@
 """Command-line entry point for the newsletter pipeline.
 
 Usage:
-    python -m newsletter.cli --oai-date 2026-06-25
-    python -m newsletter.cli                       # defaults to yesterday (UTC)
-    python -m newsletter.cli --oai-date 2026-06-25 --limit 5   # fast smoke test
+    python -m cs_ai_newsletter.cli --oai-date 2026-06-25
+    python -m cs_ai_newsletter.cli                       # defaults to yesterday (UTC)
+    python -m cs_ai_newsletter.cli --oai-date 2026-06-25 --limit 5   # fast smoke test
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import argparse
 import sys
 from datetime import datetime, timedelta, timezone
 
-from newsletter import pipeline
-from newsletter.config import Config
+from cs_ai_newsletter import pipeline
+from cs_ai_newsletter.config import Config
 
 
 def _yesterday_utc() -> str:
@@ -22,7 +22,7 @@ def _yesterday_utc() -> str:
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m newsletter.cli",
+        prog="python -m cs_ai_newsletter.cli",
         description="Generate the daily cs.AI arXiv newsletter for a date.",
     )
     parser.add_argument(

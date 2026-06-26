@@ -13,8 +13,8 @@ import sqlite3
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from newsletter import store
-from newsletter.config import Config
+from cs_ai_newsletter import store
+from cs_ai_newsletter.config import Config
 
 router = APIRouter(prefix="/newsletter", tags=["newsletter"])
 
@@ -52,7 +52,7 @@ def _conn() -> sqlite3.Connection:
         raise HTTPException(
             status_code=503,
             detail=("newsletter.db not found — run "
-                    "`python -m newsletter.cli` to generate an issue"),
+                    "`python -m cs_ai_newsletter.cli` to generate an issue"),
         )
     try:
         return store.connect_ro(_CONFIG.newsletter_db)

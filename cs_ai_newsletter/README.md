@@ -31,13 +31,13 @@ From the repo root, with the venv active:
 
 ```bash
 # Yesterday (UTC) — the nightly default:
-python -m newsletter.cli
+python -m cs_ai_newsletter.cli
 
 # A specific announcement date:
-python -m newsletter.cli --oai-date 2026-06-25
+python -m cs_ai_newsletter.cli --oai-date 2026-06-25
 
 # Fast smoke test — summarize only the first 5 papers, then compose:
-python -m newsletter.cli --oai-date 2026-06-25 --limit 5
+python -m cs_ai_newsletter.cli --oai-date 2026-06-25 --limit 5
 ```
 
 The run is **resumable**: a paper already in `paper_summaries` for that date is
